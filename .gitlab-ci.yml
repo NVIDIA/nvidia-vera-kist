@@ -1,0 +1,17 @@
+stages:
+  - build
+
+variables:
+  PREBUILT_SDK_ENV: "/home/kist_ci/yocto_sdk/install/environment-setup-armv7ahf-vfpv4d16-openbmc-linux-gnueabi"
+
+build_itm:
+  image: kist_ci_docker
+  stage: build
+  tags:
+    - test_ci
+  script:
+    - . $PREBUILT_SDK_ENV
+    - cd itm
+    - meson setup out/ && ninja -C out/
+  artifacts:
+    untracked: true
