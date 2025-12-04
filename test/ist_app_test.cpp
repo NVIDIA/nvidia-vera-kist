@@ -1,4 +1,4 @@
-#include <template_app.hpp>
+#include <ist_app.hpp>
 
 #include <gtest/gtest.h>
 

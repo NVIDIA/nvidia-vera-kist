@@ -9,7 +9,7 @@ build_itm:
     stage: build
     script:
         - . $PREBUILT_SDK_ENV
-        - cd itm
-        - meson setup out/ && ninja -C out/
+        - meson setup out
+        - meson compile -C out ist kist_itm
     artifacts:
         untracked: true

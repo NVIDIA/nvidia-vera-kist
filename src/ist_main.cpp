@@ -1,6 +1,6 @@
+#include <ist_app.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/asio/object_server.hpp>
-#include <template_app.hpp>
 
 int main(int, char**)
 {

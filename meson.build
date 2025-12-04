@@ -1,11 +1,12 @@
 project(
-    'template-application',
-    'cpp',
+    'nvidia-vera-kist',
+    ['cpp', 'c'],
     meson_version: '>=1.3.0',
     default_options: [
-        'warning_level=3',
-        'werror=true',
         'cpp_std=c++23',
+        'c_std=gnu18',
+        'werror=true',
+        'warning_level=3',
         'buildtype=debugoptimized',
         # note: This is allowed in certain contexts, but provides binary size
         # improvements for applications that don't require rtti
@@ -21,13 +22,21 @@ if get_option('cpp_std') != 'c++23'
     error('This project requires c++23 support')
 endif
 
-boost = dependency(
+add_global_arguments(['-Wno-gnu-zero-variadic-macro-arguments'], language: 'c')
+
+# Prefer system Boost (for Yocto/OpenBMC and normal distros)
+boost_deps = []
+
+boost_sys = dependency(
     'boost',
     version: '>=1.87.0',
     required: false,
     include_type: 'system',
 )
-if not boost.found()
+if boost_sys.found()
+    boost_deps += boost_sys
+else
+    # Standalone/non-cross build: fall back to Boost subproject via wrap
     cmake = import('cmake')
     opt = cmake.subproject_options()
     opt.add_cmake_defines(
@@ -37,13 +46,16 @@ if not boost.found()
         },
     )
 
-    boost = cmake.subproject('boost', required: true, options: opt)
-    boost_asio = boost.dependency('boost_asio').as_system()
-    boost_callable_traits = boost.dependency('boost_callable_traits').as_system()
-    boost_container = boost.dependency('boost_container').as_system()
-    boost_headers = boost.dependency('boost_headers').as_system()
-    boost = [boost_asio, boost_callable_traits, boost_container, boost_headers]
+    boost_sp = cmake.subproject('boost', required: true, options: opt)
+    boost_deps += [
+        boost_sp.dependency('boost_asio').as_system(),
+        boost_sp.dependency('boost_callable_traits').as_system(),
+        boost_sp.dependency('boost_container').as_system(),
+        boost_sp.dependency('boost_headers').as_system(),
+    ]
 endif
+boost = boost_deps
+
 add_project_arguments(
     '-DBOOST_ASIO_DISABLE_THREADS',
     '-DBOOST_NO_RTTI',
@@ -60,6 +72,8 @@ if not sdbusplus.found()
 endif
 add_project_arguments('-DSDBUSPLUS_DISABLE_BOOST_COROUTINES', language: 'cpp')
 
+subdir('itm')
+
 cxx = meson.get_compiler('cpp')
 
 systemd_system_unit_dir = systemd.get_variable(pkgconfig: 'systemdsystemunitdir')
@@ -68,26 +82,27 @@ systemd_unit_configuration = configuration_data()
 systemd_unit_configuration.set('INSTALL_PREFIX', get_option('prefix'))
 
 configure_file(
-    input: 'xyz.openbmc_project.templateapp.service',
-    output: 'xyz.openbmc_project.templateapp.service',
+    input: 'com.nvidia.vera.ist.service',
+    output: 'com.nvidia.vera.ist.service',
     configuration: systemd_unit_configuration,
     install_dir: systemd_system_unit_dir,
     install: true,
 )
 
-template_app_a = static_library(
-    'template_app_a',
-    'src/template_app.cpp',
+ist_app_a = static_library(
+    'ist_app_a',
+    'src/ist_app.cpp',
     include_directories: 'include',
 )
 
 executable(
-    'template-app',
-    'src/template_app_main.cpp',
+    'ist',
+    'src/ist_main.cpp',
+    'src/ist_app.cpp',
     dependencies: [boost, sdbusplus],
     include_directories: 'include',
     install: true,
-    link_with: [template_app_a],
+    link_with: [ist_app_a],
 )
 
 if get_option('tests').enabled()
@@ -122,13 +137,14 @@ if get_option('tests').enabled()
             )
         endif
     endif
-    template_app_test = executable(
-        'template-app-test',
-        'test/template_app_test.cpp',
+
+    ist_app_test = executable(
+        'ist-app-test',
+        ['test/ist_app_test.cpp', 'src/ist_app.cpp'],
         dependencies: [boost, sdbusplus, gmock_dep, gtest_dep],
         include_directories: ['include'],
-        link_with: [template_app_a],
+        link_with: [ist_app_a],
     )
 
-    test('test_template_app', template_app_test)
+    test('ist_app_test', ist_app_test)
 endif
