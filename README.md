@@ -11,7 +11,7 @@ a basic application on DBus Static analysis with openbmc-build-scripts
 ## Usage
 
 To use this application, take template-app_git.bb, and put it into an
-appropriate meta layer (generally meta-<machine name>), and rename to your
+appropriate meta layer (generally meta-\<machine name\>), and rename to your
 application name in the form of
 
 my-app-name_git.bb

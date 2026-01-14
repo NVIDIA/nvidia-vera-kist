@@ -5,7 +5,8 @@ project(
     default_options: [
         'warning_level=3',
         'werror=true',
-        'cpp_std=c++20',
+        'cpp_std=c++23',
+        'buildtype=debugoptimized',
         # note: This is allowed in certain contexts, but provides binary size
         # improvements for applications that don't require rtti
         'cpp_rtti=false',
@@ -16,8 +17,8 @@ project(
 )
 
 # Validate the c++ Standard
-if get_option('cpp_std') != 'c++20'
-    error('This project requires c++20 support')
+if get_option('cpp_std') != 'c++23'
+    error('This project requires c++23 support')
 endif
 
 boost = dependency(
@@ -47,7 +48,7 @@ add_project_arguments(
     '-DBOOST_ASIO_DISABLE_THREADS',
     '-DBOOST_NO_RTTI',
     '-DBOOST_NO_TYPEID',
-    language : 'cpp'
+    language: 'cpp',
 )
 
 systemd = dependency('systemd')
@@ -57,25 +58,22 @@ if not sdbusplus.found()
     sdbusplus = sdbusplus_proj.get_variable('sdbusplus_dep')
     sdbusplus = sdbusplus.as_system('system')
 endif
-add_project_arguments(
-    '-DSDBUSPLUS_DISABLE_BOOST_COROUTINES',
-    language : 'cpp'
-)
+add_project_arguments('-DSDBUSPLUS_DISABLE_BOOST_COROUTINES', language: 'cpp')
 
 cxx = meson.get_compiler('cpp')
 
-systemd_system_unit_dir = systemd.get_variable(
-    pkgconfig: 'systemdsystemunitdir'
-)
+systemd_system_unit_dir = systemd.get_variable(pkgconfig: 'systemdsystemunitdir')
 
 systemd_unit_configuration = configuration_data()
 systemd_unit_configuration.set('INSTALL_PREFIX', get_option('prefix'))
 
-configure_file(input: 'xyz.openbmc_project.templateapp.service',
-               output: 'xyz.openbmc_project.templateapp.service',
-               configuration: systemd_unit_configuration,
-               install_dir: systemd_system_unit_dir,
-               install: true)
+configure_file(
+    input: 'xyz.openbmc_project.templateapp.service',
+    output: 'xyz.openbmc_project.templateapp.service',
+    configuration: systemd_unit_configuration,
+    install_dir: systemd_system_unit_dir,
+    install: true,
+)
 
 template_app_a = static_library(
     'template_app_a',
@@ -86,20 +84,26 @@ template_app_a = static_library(
 executable(
     'template-app',
     'src/template_app_main.cpp',
-    dependencies: [
-      boost,
-      sdbusplus,
-    ],
+    dependencies: [boost, sdbusplus],
     include_directories: 'include',
     install: true,
-    link_with: [
-        template_app_a,
-    ],
+    link_with: [template_app_a],
 )
 
 if get_option('tests').enabled()
-    gtest_dep = dependency('gtest', main: true, disabler: true, required: false, include_type: 'system')
-    gmock_dep = dependency('gmock', disabler: true, required: false, include_type: 'system')
+    gtest_dep = dependency(
+        'gtest',
+        main: true,
+        disabler: true,
+        required: false,
+        include_type: 'system',
+    )
+    gmock_dep = dependency(
+        'gmock',
+        disabler: true,
+        required: false,
+        include_type: 'system',
+    )
     if not gtest_dep.found() or not gmock_dep.found()
         gtest_proj = import('cmake').subproject('gtest', required: false)
         if gtest_proj.found()
@@ -108,32 +112,23 @@ if get_option('tests').enabled()
                     dependency('threads'),
                     gtest_proj.dependency('gtest'),
                     gtest_proj.dependency('gtest_main'),
-                ]
+                ],
             )
             gmock_dep = gtest_proj.dependency('gmock')
         else
             assert(
                 not get_option('tests').enabled(),
-                'Googletest is required if tests are enabled'
+                'Googletest is required if tests are enabled',
             )
         endif
     endif
     template_app_test = executable(
-      'template-app-test',
-      'test/template_app_test.cpp',
-      dependencies: [
-          boost,
-          sdbusplus,
-          gmock_dep,
-          gtest_dep,
-      ],
-      include_directories: [
-          'include',
-      ],
-      link_with: [
-          template_app_a,
-      ],
-  )
+        'template-app-test',
+        'test/template_app_test.cpp',
+        dependencies: [boost, sdbusplus, gmock_dep, gtest_dep],
+        include_directories: ['include'],
+        link_with: [template_app_a],
+    )
 
-  test('test_template_app', template_app_test)
+    test('test_template_app', template_app_test)
 endif
