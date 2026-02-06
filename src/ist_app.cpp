@@ -2,19 +2,19 @@
 #include <cstdint>
 #include <string>
 
-int changeIntegerValue(const int& requestedValue, int& currentValue)
+int change_integer_value(const int& requested_value, int& current_value)
 {
-    if (requestedValue >= 50)
+    if (requested_value >= 50)
     {
         return -EINVAL;
     }
-    currentValue = requestedValue;
+    current_value = requested_value;
     return 1;
 }
 
-std::string unlockDoor(const std::string& keyVal)
+std::string unlock_door(const std::string& key_val)
 {
-    if (keyVal != "open sesame")
+    if (key_val != "open sesame")
     {
         return "DoorLocked";
     }

@@ -3,6 +3,6 @@
 #include <cstdint>
 #include <string>
 
-int changeIntegerValue(const int& requestedValue, int& currentValue);
+int change_integer_value(const int& requestedValue, int& currentValue);
 
-std::string unlockDoor(const std::string& requestedVal);
+std::string unlock_door(const std::string& requestedVal);

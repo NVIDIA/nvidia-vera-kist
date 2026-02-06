@@ -13,9 +13,9 @@ int main(int, char**)
         server.add_interface("/xyz/openbmc_project/template_app",
                              "xyz.openbmc_project.template");
 
-    iface->register_property("IntegerValue", 23, changeIntegerValue);
+    iface->register_property("IntegerValue", 23, change_integer_value);
 
-    iface->register_method("UnlockDoor", unlockDoor);
+    iface->register_method("UnlockDoor", unlock_door);
     conn->request_name("xyz.openbmc_project.TemplateApp");
 
     io.run();
