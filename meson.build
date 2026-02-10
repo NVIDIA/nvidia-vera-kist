@@ -72,7 +72,9 @@ if not sdbusplus.found()
 endif
 add_project_arguments('-DSDBUSPLUS_DISABLE_BOOST_COROUTINES', language: 'cpp')
 
-subdir('itm')
+if get_option('build_itm')
+    subdir('itm')
+endif
 
 cxx = meson.get_compiler('cpp')
 

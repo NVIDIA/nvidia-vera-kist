@@ -1,1 +1,2 @@
 option('tests', type: 'feature', value: 'enabled', description: 'Build tests.')
+option('build_itm', type: 'boolean', value: true, description: 'Build kist_itm')
