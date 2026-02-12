@@ -30,6 +30,7 @@ boost_deps = []
 boost_sys = dependency(
     'boost',
     version: '>=1.87.0',
+    modules: ['process'],
     required: false,
     include_type: 'system',
 )
@@ -39,9 +40,10 @@ else
     # Standalone/non-cross build: fall back to Boost subproject via wrap
     cmake = import('cmake')
     opt = cmake.subproject_options()
+    opt.set_override_option('werror', 'false')
     opt.add_cmake_defines(
         {
-            'BOOST_INCLUDE_LIBRARIES': 'asio;callable_traits;container;headers',
+            'BOOST_INCLUDE_LIBRARIES': 'asio;callable_traits;container;headers;process',
             'BUILD_SHARED_LIBS': 'OFF',
         },
     )
@@ -52,6 +54,7 @@ else
         boost_sp.dependency('boost_callable_traits').as_system(),
         boost_sp.dependency('boost_container').as_system(),
         boost_sp.dependency('boost_headers').as_system(),
+        boost_sp.dependency('boost_process').as_system(),
     ]
 endif
 boost = boost_deps
@@ -94,17 +97,31 @@ if get_option('build_ist')
         install: true,
     )
 
+    nlohmann_json_dep = dependency(
+        'nlohmann_json',
+        required: false,
+        include_type: 'system',
+    )
+    if not nlohmann_json_dep.found()
+        nlohmann_json_proj = subproject('nlohmann_json', required: true)
+        nlohmann_json_dep = nlohmann_json_proj.get_variable('nlohmann_json_dep')
+    endif
+
     ist_app_a = static_library(
         'ist_app_a',
         'src/ist_app.cpp',
+        'src/hook_runner.cpp',
+        'src/host_power_monitor.cpp',
+        'src/itm_runner.cpp',
+        'src/dbus_state_publisher.cpp',
+        dependencies: [boost, sdbusplus, nlohmann_json_dep],
         include_directories: 'include',
     )
 
     executable(
         'ist',
         'src/ist_main.cpp',
-        'src/ist_app.cpp',
-        dependencies: [boost, sdbusplus],
+        dependencies: [boost, sdbusplus, nlohmann_json_dep],
         include_directories: 'include',
         install: true,
         link_with: [ist_app_a],
@@ -145,12 +162,18 @@ if get_option('build_ist')
 
         ist_app_test = executable(
             'ist-app-test',
-            ['test/ist_app_test.cpp', 'src/ist_app.cpp'],
-            dependencies: [boost, sdbusplus, gmock_dep, gtest_dep],
+            'test/ist_app_test.cpp',
+            dependencies: [
+                boost,
+                sdbusplus,
+                nlohmann_json_dep,
+                gmock_dep,
+                gtest_dep,
+            ],
             include_directories: ['include'],
             link_with: [ist_app_a],
         )
 
-        test('ist_app_test', ist_app_test)
+        test('ist_app_test', ist_app_test, protocol: 'gtest')
     endif
 endif

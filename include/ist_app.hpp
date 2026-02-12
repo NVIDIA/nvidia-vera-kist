@@ -1,8 +1,260 @@
 #pragma once
 
+#include <sdbusplus/asio/object_server.hpp>
+
 #include <cstdint>
+#include <filesystem>
+#include <functional>
+#include <memory>
+#include <optional>
 #include <string>
+#include <unordered_map>
+#include <variant>
 
-int change_integer_value(const int& requestedValue, int& currentValue);
+// ----------------
+// Type aliases
+// ----------------
 
-std::string unlock_door(const std::string& requestedVal);
+using IstParamVariant = std::variant<std::string, bool, int>;
+using ParamMap = std::unordered_map<std::string, IstParamVariant>;
+
+// ----------------
+// Configuration
+// ----------------
+
+/**
+ * Platform configuration for the IST service.
+ * These options come from a platform_cfg file.
+ *
+ * hookDir: The directory containing the hooks for the IST service.
+ * hooks: A map of hook names to their paths.
+ * storage: A map of storage names to their paths.
+ */
+struct IstPlatformConfig
+{
+    std::filesystem::path hookDir;
+    std::filesystem::path itmBinaryPath{"/bin/kist_itm"};
+    std::unordered_map<std::string, std::filesystem::path> hooks;
+    std::unordered_map<std::string, std::filesystem::path> storage;
+};
+
+/**
+ * Test configuration for the IST service.
+ * These options come in via dbus.
+ *
+ * customTestList: A list of custom test names to run.
+ * customSocketList: A list of custom socket names to run.
+ * swTimeoutSec: The timeout in seconds for the IST run.
+ * continueOnFail: Whether to continue on fail.
+ * saveResOnFail: Whether to save results on fail.
+ * saveResOnPass: Whether to save results on pass.
+ * autoRebootOnComplete: Whether to auto reboot on complete.
+ */
+struct IstTestConfig
+{
+    std::optional<std::string> customTestList;
+    std::optional<std::string> customSocketList;
+    std::optional<int32_t> swTimeoutSec;
+    std::optional<std::string> continueOnFail;
+    std::optional<std::string> saveResOnFail;
+    std::optional<std::string> saveResOnPass;
+    bool autoRebootOnComplete{false};
+};
+
+// ----------------
+// State enums
+// ----------------
+
+/**
+ * The stages of the IST service.
+ *
+ * idle: The service is idle.
+ * collateralVerification: The service is performing collateral verification.
+ * pendingIstBoot: The service is waiting for the IST boot.
+ * pendingPowerCycle: The service is waiting for the power cycle.
+ * runningIst: The service is running the IST.
+ * cleanup: The service is cleaning up after the IST.
+ */
+enum class IstStage
+{
+    idle,
+    collateralVerification,
+    pendingIstBoot,
+    pendingPowerCycle,
+    runningIst,
+    cleanup,
+};
+
+inline std::string istStageToString(IstStage s)
+{
+    switch (s)
+    {
+        case IstStage::idle:
+            return "Idle";
+        case IstStage::collateralVerification:
+            return "CollateralVerification";
+        case IstStage::pendingIstBoot:
+            return "PendingISTBoot";
+        case IstStage::pendingPowerCycle:
+            return "PendingPowerCycle";
+        case IstStage::runningIst:
+            return "RunningIST";
+        case IstStage::cleanup:
+            return "Cleanup";
+    }
+    return "Unknown";
+}
+
+/**
+ * The status of the IST run.
+ *
+ * inProgress: The test is in progress.
+ * completed: The test has completed.
+ * failed: The test has failed.
+ * aborted: The test has been aborted.
+ */
+enum class IstStatus
+{
+    inProgress,
+    completed,
+    failed,
+    aborted,
+};
+
+inline std::string istStatusToString(IstStatus s)
+{
+    switch (s)
+    {
+        case IstStatus::inProgress:
+            return "InProgress";
+        case IstStatus::completed:
+            return "Completed";
+        case IstStatus::failed:
+            return "Failed";
+        case IstStatus::aborted:
+            return "Aborted";
+    }
+    return "Unknown";
+}
+
+/**
+ * The state of the IST run.
+ *
+ * progress: The progress of the run.
+ * status: The status of the run.
+ * stage: The stage of the run.
+ */
+struct IstState
+{
+    uint8_t progress{0};
+    IstStatus status{IstStatus::completed};
+    IstStage stage{IstStage::idle};
+};
+
+// ----------------
+// Interfaces
+// ----------------
+
+class HookRunner
+{
+  public:
+    virtual ~HookRunner() = default;
+    virtual void
+        asyncRun(const std::string& cmd, std::string what,
+                 std::move_only_function<void(bool ok) const> done) = 0;
+};
+
+class HostPowerMonitor
+{
+  public:
+    virtual ~HostPowerMonitor() = default;
+    virtual void asyncWaitForPowerCycle(
+        std::move_only_function<void(bool ok) const> done) = 0;
+};
+
+class ItmRunner
+{
+  public:
+    virtual ~ItmRunner() = default;
+    virtual void
+        asyncRun(const IstTestConfig& cfg, const IstPlatformConfig& platformCfg,
+                 std::move_only_function<void(bool ok) const> done,
+                 std::move_only_function<void(uint8_t) const> onProgress) = 0;
+};
+
+class StatePublisher
+{
+  public:
+    virtual ~StatePublisher() = default;
+    virtual void publish(const IstState& state) = 0;
+    virtual void publishProgress(uint8_t progress) = 0;
+    virtual void createProgress() = 0;
+    virtual void removeProgress() = 0;
+};
+
+// ----------------
+// Factory functions
+// ----------------
+
+std::unique_ptr<HookRunner> makeHookRunner(boost::asio::io_context& io);
+std::unique_ptr<HostPowerMonitor>
+    makeHostPowerMonitor(boost::asio::io_context& io,
+                         std::shared_ptr<sdbusplus::asio::connection> conn);
+std::unique_ptr<ItmRunner> makeItmRunner(boost::asio::io_context& io);
+std::unique_ptr<StatePublisher>
+    makeDbusStatePublisher(sdbusplus::asio::object_server& server);
+
+// ----------------
+// IstService
+//
+// Lifetime: the IstService instance MUST outlive io_context::run().
+// Async callbacks capture raw `this` because the service is expected to
+// live for the entire process lifetime (stack-allocated in main, destroyed
+// after io.run() returns).  Do not destroy the service while the event
+// loop is running.
+// ----------------
+
+class IstService
+{
+  public:
+    IstService(std::unique_ptr<StatePublisher> publisher,
+               std::unique_ptr<HookRunner> hookRunner,
+               std::unique_ptr<HostPowerMonitor> powerMonitor,
+               std::unique_ptr<ItmRunner> itmRunner);
+
+    bool initialize(const std::string& platformCfgPath);
+    void printIstPlatformConfig() const;
+    const IstState& state() const
+    {
+        return state_;
+    }
+    void startIST(const ParamMap& testParams);
+
+  private:
+    bool parsePlatformConfig(IstPlatformConfig& out, const std::string& path);
+    bool getISTParams(const ParamMap& testParams);
+    bool collateralVerification(const ParamMap& testParams);
+
+    void updateDbusState();
+    void transitionTo(IstStage stage);
+    void transitionTo(IstStage stage, IstStatus status);
+
+    void onIstBootAssertDone(bool ok);
+    void onPowerCycleDone(bool ok);
+    void runIstCleanup(bool itmOk);
+    void onDeassertDone(bool itmOk, bool okDeassert);
+    void onResetDone(bool itmOk, bool okReset);
+
+    std::string lookupHook(const std::string& name) const;
+
+    std::unique_ptr<StatePublisher> publisher_;
+
+    IstPlatformConfig platformCfg_;
+    IstTestConfig test_;
+    IstState state_;
+    bool initialized_{false};
+
+    std::unique_ptr<HookRunner> hookRunner_;
+    std::unique_ptr<HostPowerMonitor> powerMonitor_;
+    std::unique_ptr<ItmRunner> itmRunner_;
+};

@@ -1,22 +1,39 @@
 #include <ist_app.hpp>
 #include <sdbusplus/asio/connection.hpp>
-#include <sdbusplus/asio/object_server.hpp>
+
+#include <iostream>
 
 int main(int, char**)
 {
     boost::asio::io_context io;
-    auto conn = std::make_shared<sdbusplus::asio::connection>(io);
+    std::shared_ptr<sdbusplus::asio::connection> conn =
+        std::make_shared<sdbusplus::asio::connection>(io);
+    sdbusplus::asio::object_server server(conn);
 
-    auto server = sdbusplus::asio::object_server(conn);
+    IstService service(makeDbusStatePublisher(server), makeHookRunner(io),
+                       makeHostPowerMonitor(io, conn), makeItmRunner(io));
 
-    std::shared_ptr<sdbusplus::asio::dbus_interface> iface =
-        server.add_interface("/xyz/openbmc_project/template_app",
-                             "xyz.openbmc_project.template");
+    if (!service.initialize("/etc/ist/platform_cfg.json"))
+    {
+        std::cerr << "IST: failed to initialize, exiting\n";
+        return 1;
+    }
 
-    iface->register_property("IntegerValue", 23, change_integer_value);
+    // D-Bus control interface
+    std::shared_ptr<sdbusplus::asio::dbus_interface> control_iface =
+        server.add_interface("/com/nvidia/vera/ist",
+                             "xyz.openbmc_project.ist.Control");
+    control_iface->register_method(
+        "StartIST",
+        [&service](const ParamMap& params) { service.startIST(params); });
+    control_iface->initialize();
 
-    iface->register_method("UnlockDoor", unlock_door);
-    conn->request_name("xyz.openbmc_project.TemplateApp");
+    // Software version interface
+    std::shared_ptr<sdbusplus::asio::dbus_interface> sw_iface =
+        server.add_interface("/xyz/openbmc_project/software/ist",
+                             "xyz.openbmc_project.Software.Version");
+    sw_iface->initialize();
 
+    conn->request_name("com.nvidia.vera.ist");
     io.run();
 }
