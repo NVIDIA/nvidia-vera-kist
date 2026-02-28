@@ -158,7 +158,7 @@ class IstServiceTest : public ::testing::Test
     {
         auto publisher = std::make_unique<NiceMock<MockStatePublisher>>();
         auto hook_runner = std::make_unique<NiceMock<MockHookRunner>>();
-        auto power_monitor = std::make_unique<NiceMock<MockHostPowerMonitor>>();
+        auto power_monitor = std::make_shared<NiceMock<MockHostPowerMonitor>>();
         auto itm_runner = std::make_unique<NiceMock<MockItmRunner>>();
 
         publisher_ = publisher.get();
@@ -166,9 +166,9 @@ class IstServiceTest : public ::testing::Test
         powerMonitor_ = power_monitor.get();
         itmRunner_ = itm_runner.get();
 
-        service_ = std::make_unique<IstService>(
-            std::move(publisher), std::move(hook_runner),
-            std::move(power_monitor), std::move(itm_runner));
+        service_ =
+            IstService::create(std::move(publisher), std::move(hook_runner),
+                               std::move(power_monitor), std::move(itm_runner));
     }
 
     void write_config(const std::string& content)
@@ -183,7 +183,7 @@ class IstServiceTest : public ::testing::Test
         fs::remove_all(tmpDir_);
     }
 
-    std::unique_ptr<IstService> service_;
+    std::shared_ptr<IstService> service_;
 
     MockStatePublisher* publisher_ = nullptr;
     MockHookRunner* hookRunner_ = nullptr;

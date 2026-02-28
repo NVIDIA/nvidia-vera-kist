@@ -10,10 +10,11 @@ int main(int, char**)
         std::make_shared<sdbusplus::asio::connection>(io);
     sdbusplus::asio::object_server server(conn);
 
-    IstService service(makeDbusStatePublisher(server), makeHookRunner(io),
-                       makeHostPowerMonitor(io, conn), makeItmRunner(io));
+    auto service =
+        IstService::create(makeDbusStatePublisher(server), makeHookRunner(io),
+                           makeHostPowerMonitor(io, conn), makeItmRunner(io));
 
-    if (!service.initialize("/etc/ist/platform_cfg.json"))
+    if (!service->initialize("/etc/ist/platform_cfg.json"))
     {
         std::cerr << "IST: failed to initialize, exiting\n";
         return 1;
@@ -25,7 +26,7 @@ int main(int, char**)
                              "xyz.openbmc_project.ist.Control");
     control_iface->register_method(
         "StartIST",
-        [&service](const ParamMap& params) { service.startIST(params); });
+        [service](const ParamMap& params) { service->startIST(params); });
     control_iface->initialize();
 
     // Software version interface

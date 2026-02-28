@@ -9,7 +9,9 @@
 #include <unordered_map>
 #include <variant>
 
-class HostPowerMonitorImpl final : public HostPowerMonitor
+class HostPowerMonitorImpl final :
+    public HostPowerMonitor,
+    public std::enable_shared_from_this<HostPowerMonitorImpl>
 {
   public:
     HostPowerMonitorImpl(boost::asio::io_context& io,
@@ -43,27 +45,45 @@ void HostPowerMonitorImpl::asyncWaitForPowerCycle(
         sdbusplus::bus::match::rules::propertiesChanged(
             "/xyz/openbmc_project/state/host0",
             "xyz.openbmc_project.State.Host"),
-        [this](sdbusplus::message_t& msg) { on_properties_changed(msg); });
+        [weak = weak_from_this()](sdbusplus::message_t& msg) {
+            auto self = weak.lock();
+            if (!self)
+            {
+                return;
+            }
+            self->on_properties_changed(msg);
+        });
 
     // Read the current host state in case it is already off
     read_current_state();
 
     timer_.expires_after(std::chrono::minutes(10));
-    timer_.async_wait([this](const boost::system::error_code& ec) {
-        if (ec) // Timer cancelled — power cycle detected before timeout
-        {
-            return;
-        }
-        std::cerr << "Failed to receive power cycle in 10 minutes\n";
-        finish(false);
-    });
+    timer_.async_wait(
+        [weak = weak_from_this()](const boost::system::error_code& ec) {
+            if (ec)
+            {
+                return;
+            }
+            auto self = weak.lock();
+            if (!self)
+            {
+                return;
+            }
+            std::cerr << "Failed to receive power cycle in 10 minutes\n";
+            self->finish(false);
+        });
 }
 
 void HostPowerMonitorImpl::read_current_state()
 {
     conn_->async_method_call(
-        [this](const boost::system::error_code& ec,
-               const std::variant<std::string>& value) {
+        [weak = weak_from_this()](const boost::system::error_code& ec,
+                                  const std::variant<std::string>& value) {
+            auto self = weak.lock();
+            if (!self)
+            {
+                return;
+            }
             if (ec)
             {
                 std::cerr << "Failed to read CurrentHostState: " << ec.message()
@@ -73,7 +93,7 @@ void HostPowerMonitorImpl::read_current_state()
             const std::string* state = std::get_if<std::string>(&value);
             if (state)
             {
-                on_state_changed(*state);
+                self->on_state_changed(*state);
             }
         },
         "xyz.openbmc_project.State.Host", "/xyz/openbmc_project/state/host0",
@@ -128,9 +148,9 @@ void HostPowerMonitorImpl::finish(bool ok)
     cb(ok);
 }
 
-std::unique_ptr<HostPowerMonitor>
+std::shared_ptr<HostPowerMonitor>
     makeHostPowerMonitor(boost::asio::io_context& io,
                          std::shared_ptr<sdbusplus::asio::connection> conn)
 {
-    return std::make_unique<HostPowerMonitorImpl>(io, std::move(conn));
+    return std::make_shared<HostPowerMonitorImpl>(io, std::move(conn));
 }

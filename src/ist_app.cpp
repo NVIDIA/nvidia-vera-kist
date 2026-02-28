@@ -67,9 +67,20 @@ static bool is_path_within(const fs::path& child, const fs::path& parent)
 // IstService impl
 // ----------------
 
+std::shared_ptr<IstService>
+    IstService::create(std::unique_ptr<StatePublisher> publisher,
+                       std::unique_ptr<HookRunner> hook_runner,
+                       std::shared_ptr<HostPowerMonitor> power_monitor,
+                       std::unique_ptr<ItmRunner> itm_runner)
+{
+    return std::shared_ptr<IstService>(
+        new IstService(std::move(publisher), std::move(hook_runner),
+                       std::move(power_monitor), std::move(itm_runner)));
+}
+
 IstService::IstService(std::unique_ptr<StatePublisher> publisher,
                        std::unique_ptr<HookRunner> hook_runner,
-                       std::unique_ptr<HostPowerMonitor> power_monitor,
+                       std::shared_ptr<HostPowerMonitor> power_monitor,
                        std::unique_ptr<ItmRunner> itm_runner) :
     publisher_(std::move(publisher)), hookRunner_(std::move(hook_runner)),
     powerMonitor_(std::move(power_monitor)), itmRunner_(std::move(itm_runner))
@@ -413,7 +424,9 @@ void IstService::onIstBootAssertDone(bool ok)
     transitionTo(IstStage::pendingPowerCycle);
 
     powerMonitor_->asyncWaitForPowerCycle(
-        [this](bool ok_power) { onPowerCycleDone(ok_power); });
+        [self = shared_from_this()](bool ok_power) {
+            self->onPowerCycleDone(ok_power);
+        });
 }
 
 void IstService::onPowerCycleDone(bool ok)
@@ -428,10 +441,13 @@ void IstService::onPowerCycleDone(bool ok)
     transitionTo(IstStage::runningIst);
 
     itmRunner_->asyncRun(
-        test_, platformCfg_, [this](bool itm_ok) { runIstCleanup(itm_ok); },
-        [this](uint8_t progress) {
-            state_.progress = progress;
-            publisher_->publishProgress(progress);
+        test_, platformCfg_,
+        [self = shared_from_this()](bool itm_ok) {
+            self->runIstCleanup(itm_ok);
+        },
+        [self = shared_from_this()](uint8_t progress) {
+            self->state_.progress = progress;
+            self->publisher_->publishProgress(progress);
         });
 }
 
@@ -447,10 +463,11 @@ void IstService::runIstCleanup(bool itm_ok)
         return;
     }
 
-    hookRunner_->asyncRun(hook_cmd, "istBootDeassert hook",
-                          [this, itm_ok](bool ok_deassert) {
-                              onDeassertDone(itm_ok, ok_deassert);
-                          });
+    hookRunner_->asyncRun(
+        hook_cmd, "istBootDeassert hook",
+        [self = shared_from_this(), itm_ok](bool ok_deassert) {
+            self->onDeassertDone(itm_ok, ok_deassert);
+        });
 }
 
 void IstService::onDeassertDone(bool itm_ok, bool ok_deassert)
@@ -473,7 +490,9 @@ void IstService::onDeassertDone(bool itm_ok, bool ok_deassert)
         }
         hookRunner_->asyncRun(
             reset_cmd, "resetSystem hook",
-            [this, itm_ok](bool ok_reset) { onResetDone(itm_ok, ok_reset); });
+            [self = shared_from_this(), itm_ok](bool ok_reset) {
+                self->onResetDone(itm_ok, ok_reset);
+            });
     }
     else
     {
@@ -529,5 +548,7 @@ void IstService::startIST(const ParamMap& test_params)
     transitionTo(IstStage::pendingIstBoot);
 
     hookRunner_->asyncRun(hook_cmd, "istBootAssert hook",
-                          [this](bool ok) { onIstBootAssertDone(ok); });
+                          [self = shared_from_this()](bool ok) {
+                              self->onIstBootAssertDone(ok);
+                          });
 }

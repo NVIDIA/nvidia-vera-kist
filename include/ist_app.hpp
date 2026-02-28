@@ -197,7 +197,7 @@ class StatePublisher
 // ----------------
 
 std::unique_ptr<HookRunner> makeHookRunner(boost::asio::io_context& io);
-std::unique_ptr<HostPowerMonitor>
+std::shared_ptr<HostPowerMonitor>
     makeHostPowerMonitor(boost::asio::io_context& io,
                          std::shared_ptr<sdbusplus::asio::connection> conn);
 std::unique_ptr<ItmRunner> makeItmRunner(boost::asio::io_context& io);
@@ -207,19 +207,17 @@ std::unique_ptr<StatePublisher>
 // ----------------
 // IstService
 //
-// Lifetime: the IstService instance MUST outlive io_context::run().
-// Async callbacks capture raw `this` because the service is expected to
-// live for the entire process lifetime (stack-allocated in main, destroyed
-// after io.run() returns).  Do not destroy the service while the event
-// loop is running.
+// Must be created via IstService::create() so that async callbacks can
+// safely capture shared_from_this().
 // ----------------
 
-class IstService
+class IstService : public std::enable_shared_from_this<IstService>
 {
   public:
-    IstService(std::unique_ptr<StatePublisher> publisher,
+    static std::shared_ptr<IstService>
+        create(std::unique_ptr<StatePublisher> publisher,
                std::unique_ptr<HookRunner> hookRunner,
-               std::unique_ptr<HostPowerMonitor> powerMonitor,
+               std::shared_ptr<HostPowerMonitor> powerMonitor,
                std::unique_ptr<ItmRunner> itmRunner);
 
     bool initialize(const std::string& platformCfgPath);
@@ -231,6 +229,10 @@ class IstService
     void startIST(const ParamMap& testParams);
 
   private:
+    IstService(std::unique_ptr<StatePublisher> publisher,
+               std::unique_ptr<HookRunner> hookRunner,
+               std::shared_ptr<HostPowerMonitor> powerMonitor,
+               std::unique_ptr<ItmRunner> itmRunner);
     bool parsePlatformConfig(IstPlatformConfig& out, const std::string& path);
     bool getISTParams(const ParamMap& testParams);
     bool collateralVerification(const ParamMap& testParams);
@@ -255,6 +257,6 @@ class IstService
     bool initialized_{false};
 
     std::unique_ptr<HookRunner> hookRunner_;
-    std::unique_ptr<HostPowerMonitor> powerMonitor_;
+    std::shared_ptr<HostPowerMonitor> powerMonitor_;
     std::unique_ptr<ItmRunner> itmRunner_;
 };
