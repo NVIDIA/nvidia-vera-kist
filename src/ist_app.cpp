@@ -21,20 +21,13 @@ static constexpr int32_t max_sw_timeout_sec = 7200;
 // Static helpers
 // ---------------------
 
-static void copy_json_strings(const json& obj,
-                              std::unordered_map<std::string, fs::path>& dst)
+static fs::path json_path(const json& obj, const char* key)
 {
-    if (!obj.is_object())
+    if (obj.contains(key) && obj[key].is_string())
     {
-        return; // Non-object value (e.g. wrong type in JSON); skip silently
+        return obj[key].get<std::string>();
     }
-    for (const auto& [key, val] : obj.items())
-    {
-        if (val.is_string())
-        {
-            dst[key] = val.get<std::string>();
-        }
-    }
+    return {};
 }
 
 // Returns true if child path is under parent after resolving symlinks.
@@ -112,19 +105,6 @@ void IstService::transitionTo(IstStage stage, IstStatus status)
     }
 }
 
-std::string IstService::lookupHook(const std::string& name) const
-{
-    std::unordered_map<std::string, fs::path>::const_iterator it =
-        platformCfg_.hooks.find(name);
-    if (it == platformCfg_.hooks.end())
-    {
-        std::cerr << "Hook '" << name << "' not found in platform config"
-                  << '\n';
-        return {};
-    }
-    return it->second;
-}
-
 // ----------------
 // Platform config
 // ----------------
@@ -170,16 +150,33 @@ bool IstService::parsePlatformConfig(IstPlatformConfig& out,
         out.itmBinaryPath = d["itmBinaryPath"].get<std::string>();
     }
 
-    copy_json_strings(d.value("hookPaths", json::object()), out.hooks);
-    copy_json_strings(d.value("storageConfig", json::object()), out.storage);
+    json hp = d.value("hookPaths", json::object());
+    out.hooks.istBootAssert = json_path(hp, "istBootAssert");
+    out.hooks.istBootDeassert = json_path(hp, "istBootDeassert");
+    out.hooks.resetSystem = json_path(hp, "resetSystem");
+    out.hooks.errorCheck = json_path(hp, "errorCheck");
 
-    // Validate all hook paths are within hookDirectory
-    for (const auto& [name, hookPath] : out.hooks)
+    json sc = d.value("storageConfig", json::object());
+    out.storage.vectorMountPath = json_path(sc, "vectorMountPath");
+    out.storage.resultStoragePath = json_path(sc, "resultStoragePath");
+
+    // Validate hook paths: reject explicitly-set-but-empty values,
+    // and ensure non-empty paths are within hookDirectory.
+    for (const auto& [name, hookPath] :
+         {std::pair<const char*, const fs::path&>{"istBootAssert",
+                                                  out.hooks.istBootAssert},
+          {"istBootDeassert", out.hooks.istBootDeassert},
+          {"resetSystem", out.hooks.resetSystem},
+          {"errorCheck", out.hooks.errorCheck}})
     {
         if (hookPath.empty())
         {
-            std::cerr << "Hook '" << name << "' has empty path\n";
-            return false;
+            if (hp.contains(name))
+            {
+                std::cerr << "Hook '" << name << "' has empty path\n";
+                return false;
+            }
+            continue;
         }
         if (!is_path_within(hookPath, out.hookDir))
         {
@@ -196,16 +193,17 @@ void IstService::printIstPlatformConfig() const
 {
     std::cout << "istHookPath:    " << platformCfg_.hookDir << '\n';
     std::cout << "hooks:\n";
-    for (const auto& [key, val] : platformCfg_.hooks)
-    {
-        std::cout << "  " << key << " = " << val << '\n';
-    }
-
+    std::cout << "  istBootAssert = " << platformCfg_.hooks.istBootAssert
+              << '\n';
+    std::cout << "  istBootDeassert = " << platformCfg_.hooks.istBootDeassert
+              << '\n';
+    std::cout << "  resetSystem = " << platformCfg_.hooks.resetSystem << '\n';
+    std::cout << "  errorCheck = " << platformCfg_.hooks.errorCheck << '\n';
     std::cout << "storage:\n";
-    for (const auto& [key, val] : platformCfg_.storage)
-    {
-        std::cout << "  " << key << " = " << val << '\n';
-    }
+    std::cout << "  vectorMountPath = " << platformCfg_.storage.vectorMountPath
+              << '\n';
+    std::cout << "  resultStoragePath = "
+              << platformCfg_.storage.resultStoragePath << '\n';
 }
 
 bool IstService::initialize(const std::string& path)
@@ -224,7 +222,7 @@ bool IstService::initialize(const std::string& path)
     printIstPlatformConfig();
 
     // Deassert IST boot on startup as a safety measure (e.g. after crash)
-    std::string hook_cmd = lookupHook("istBootDeassert");
+    const fs::path& hook_cmd = platformCfg_.hooks.istBootDeassert;
     if (!hook_cmd.empty())
     {
         hookRunner_->asyncRun(hook_cmd, "istBootDeassert on startup",
@@ -370,17 +368,16 @@ bool IstService::collateralVerification(const ParamMap& test_params)
         return false;
     }
 
-    std::unordered_map<std::string, fs::path>::iterator it =
-        platformCfg_.storage.find("vectorMountPath");
-    if (it == platformCfg_.storage.end())
+    if (platformCfg_.storage.vectorMountPath.empty())
     {
-        std::cerr << "Failed to find vectorMountPath in platform config!\n";
+        std::cerr << "vectorMountPath not configured in platform config!\n";
         return false;
     }
     std::error_code fs_ec;
-    if (!fs::exists(it->second, fs_ec) || fs_ec)
+    if (!fs::exists(platformCfg_.storage.vectorMountPath, fs_ec) || fs_ec)
     {
-        std::cerr << "Vector storage path '" << it->second
+        std::cerr << "Vector storage path '"
+                  << platformCfg_.storage.vectorMountPath
                   << "' does not exist or is inaccessible";
         if (fs_ec)
         {
@@ -390,13 +387,12 @@ bool IstService::collateralVerification(const ParamMap& test_params)
         return false;
     }
 
-    it = platformCfg_.storage.find("resultStoragePath");
-    if (it == platformCfg_.storage.end())
+    if (platformCfg_.storage.resultStoragePath.empty())
     {
-        std::cerr << "Failed to find resultStoragePath in platform config!\n";
+        std::cerr << "resultStoragePath not configured in platform config!\n";
         return false;
     }
-    fs::create_directories(it->second, fs_ec);
+    fs::create_directories(platformCfg_.storage.resultStoragePath, fs_ec);
     if (fs_ec)
     {
         std::cerr << "Failed to create results directory: " << fs_ec.message()
@@ -455,7 +451,7 @@ void IstService::runIstCleanup(bool itm_ok)
 {
     transitionTo(IstStage::cleanup);
 
-    std::string hook_cmd = lookupHook("istBootDeassert");
+    const fs::path& hook_cmd = platformCfg_.hooks.istBootDeassert;
     if (hook_cmd.empty())
     {
         std::cerr << "istBootDeassert hook not found, failing cleanup\n";
@@ -481,7 +477,7 @@ void IstService::onDeassertDone(bool itm_ok, bool ok_deassert)
 
     if (test_.autoRebootOnComplete)
     {
-        std::string reset_cmd = lookupHook("resetSystem");
+        const fs::path& reset_cmd = platformCfg_.hooks.resetSystem;
         if (reset_cmd.empty())
         {
             std::cerr << "resetSystem hook not found, failing cleanup\n";
@@ -537,7 +533,7 @@ void IstService::startIST(const ParamMap& test_params)
             EINVAL, "Collateral verification failed");
     }
 
-    std::string hook_cmd = lookupHook("istBootAssert");
+    const fs::path& hook_cmd = platformCfg_.hooks.istBootAssert;
     if (hook_cmd.empty())
     {
         transitionTo(IstStage::idle, IstStatus::failed);

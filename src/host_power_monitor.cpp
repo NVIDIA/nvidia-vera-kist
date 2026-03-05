@@ -2,12 +2,15 @@
 #include <ist_app.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/bus/match.hpp>
+#include <sdbusplus/exception.hpp>
 
+#include <algorithm>
 #include <iostream>
 #include <memory>
 #include <string>
-#include <unordered_map>
+#include <utility>
 #include <variant>
+#include <vector>
 
 class HostPowerMonitorImpl final :
     public HostPowerMonitor,
@@ -104,18 +107,19 @@ void HostPowerMonitorImpl::read_current_state()
 void HostPowerMonitorImpl::on_properties_changed(sdbusplus::message_t& msg)
 {
     std::string iface;
-    std::unordered_map<std::string, std::variant<std::string>> props;
+    std::vector<std::pair<std::string, std::variant<std::string>>> props;
     try
     {
         msg.read(iface, props);
     }
-    catch (const std::exception& e)
+    catch (const sdbusplus::exception_t& e)
     {
         std::cerr << "Failed to read PropertiesChanged signal: " << e.what()
                   << '\n';
         return;
     }
-    auto it = props.find("CurrentHostState");
+    auto it = std::ranges::find_if(
+        props, [](const auto& p) { return p.first == "CurrentHostState"; });
     if (it != props.end())
     {
         on_state_changed(std::get<std::string>(it->second));

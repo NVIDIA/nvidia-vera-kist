@@ -22,20 +22,26 @@ using ParamMap = std::unordered_map<std::string, IstParamVariant>;
 // Configuration
 // ----------------
 
-/**
- * Platform configuration for the IST service.
- * These options come from a platform_cfg file.
- *
- * hookDir: The directory containing the hooks for the IST service.
- * hooks: A map of hook names to their paths.
- * storage: A map of storage names to their paths.
- */
+struct HookPaths
+{
+    std::filesystem::path istBootAssert;
+    std::filesystem::path istBootDeassert;
+    std::filesystem::path resetSystem;
+    std::filesystem::path errorCheck;
+};
+
+struct StoragePaths
+{
+    std::filesystem::path vectorMountPath;
+    std::filesystem::path resultStoragePath;
+};
+
 struct IstPlatformConfig
 {
     std::filesystem::path hookDir;
     std::filesystem::path itmBinaryPath{"/bin/kist_itm"};
-    std::unordered_map<std::string, std::filesystem::path> hooks;
-    std::unordered_map<std::string, std::filesystem::path> storage;
+    HookPaths hooks;
+    StoragePaths storage;
 };
 
 /**
@@ -246,8 +252,6 @@ class IstService : public std::enable_shared_from_this<IstService>
     void runIstCleanup(bool itmOk);
     void onDeassertDone(bool itmOk, bool okDeassert);
     void onResetDone(bool itmOk, bool okReset);
-
-    std::string lookupHook(const std::string& name) const;
 
     std::unique_ptr<StatePublisher> publisher_;
 

@@ -103,8 +103,12 @@ TEST(IstPlatformConfigTest, DefaultValues)
 {
     IstPlatformConfig cfg;
     EXPECT_TRUE(cfg.hookDir.empty());
-    EXPECT_TRUE(cfg.hooks.empty());
-    EXPECT_TRUE(cfg.storage.empty());
+    EXPECT_TRUE(cfg.hooks.istBootAssert.empty());
+    EXPECT_TRUE(cfg.hooks.istBootDeassert.empty());
+    EXPECT_TRUE(cfg.hooks.resetSystem.empty());
+    EXPECT_TRUE(cfg.hooks.errorCheck.empty());
+    EXPECT_TRUE(cfg.storage.vectorMountPath.empty());
+    EXPECT_TRUE(cfg.storage.resultStoragePath.empty());
 }
 
 // ----------------

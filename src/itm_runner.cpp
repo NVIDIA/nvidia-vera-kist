@@ -243,19 +243,15 @@ static std::vector<std::string>
     std::vector<std::string> args;
     args.emplace_back(platform_cfg.itmBinaryPath);
 
-    // Required paths from platform config
-    std::unordered_map<std::string, fs::path>::const_iterator it =
-        platform_cfg.storage.find("vectorMountPath");
-    if (it != platform_cfg.storage.end())
+    if (!platform_cfg.storage.vectorMountPath.empty())
     {
         args.emplace_back("--ist_package_path");
-        args.emplace_back(it->second);
+        args.emplace_back(platform_cfg.storage.vectorMountPath);
     }
-    it = platform_cfg.storage.find("resultStoragePath");
-    if (it != platform_cfg.storage.end())
+    if (!platform_cfg.storage.resultStoragePath.empty())
     {
         args.emplace_back("--ist_results_path");
-        args.emplace_back(it->second);
+        args.emplace_back(platform_cfg.storage.resultStoragePath);
     }
     if (!platform_cfg.hookDir.empty())
     {
@@ -298,15 +294,14 @@ void ItmRunnerImpl::asyncRun(
     std::move_only_function<void(bool) const> done,
     std::move_only_function<void(uint8_t) const> on_progress)
 {
-    std::unordered_map<std::string, fs::path>::const_iterator storage_it =
-        platform_cfg.storage.find("resultStoragePath");
-    if (storage_it == platform_cfg.storage.end())
+    if (platform_cfg.storage.resultStoragePath.empty())
     {
         std::cerr << "resultStoragePath not found in platform config\n";
         done(false);
         return;
     }
-    fs::path progress_path = storage_it->second / "progress.txt";
+    fs::path progress_path =
+        platform_cfg.storage.resultStoragePath / "progress.txt";
 
     // Remove stale progress file from a previous run so the poller
     // doesn't read old data and immediately report 100%.
