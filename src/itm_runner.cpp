@@ -277,17 +277,17 @@ static std::vector<std::string>
     if (cfg.continueOnFail)
     {
         args.emplace_back("--ist_continueonfail");
-        args.emplace_back(*cfg.continueOnFail);
+        args.emplace_back(*cfg.continueOnFail ? "yes" : "no");
     }
     if (cfg.saveResOnPass)
     {
         args.emplace_back("--ist_save_res_on_pass");
-        args.emplace_back(*cfg.saveResOnPass);
+        args.emplace_back(*cfg.saveResOnPass ? "enable" : "disable");
     }
     if (cfg.saveResOnFail)
     {
         args.emplace_back("--ist_save_res_on_fail");
-        args.emplace_back(*cfg.saveResOnFail);
+        args.emplace_back(*cfg.saveResOnFail ? "enable" : "disable");
     }
 
     return args;

@@ -55,9 +55,9 @@ struct IstTestConfig
     std::optional<std::string> customTestList;
     std::optional<std::string> customSocketList;
     std::optional<int32_t> swTimeoutSec;
-    std::optional<std::string> continueOnFail;
-    std::optional<std::string> saveResOnFail;
-    std::optional<std::string> saveResOnPass;
+    std::optional<bool> continueOnFail;
+    std::optional<bool> saveResOnFail;
+    std::optional<bool> saveResOnPass;
     bool autoRebootOnComplete{false};
 };
 

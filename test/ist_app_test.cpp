@@ -655,9 +655,9 @@ TEST_F(IstServiceTest, StartIstPassesTestParams)
     ParamMap params;
     params["customTestList"] = std::string("test1,test2");
     params["customSocketList"] = std::string("0,1");
-    params["istContinueOnFail"] = std::string("yes");
-    params["istSaveResOnPass"] = std::string("enable");
-    params["istSaveResOnFail"] = std::string("disable");
+    params["istContinueOnFail"] = true;
+    params["istSaveResOnPass"] = true;
+    params["istSaveResOnFail"] = false;
     params["istSwTimeoutSec"] = 600;
     params["autoRebootOnComplete"] = false;
     service_->startIST(params);
@@ -667,11 +667,11 @@ TEST_F(IstServiceTest, StartIstPassesTestParams)
     ASSERT_TRUE(captured_cfg.customSocketList.has_value());
     EXPECT_EQ(*captured_cfg.customSocketList, "0,1");
     ASSERT_TRUE(captured_cfg.continueOnFail.has_value());
-    EXPECT_EQ(*captured_cfg.continueOnFail, "yes");
+    EXPECT_TRUE(*captured_cfg.continueOnFail);
     ASSERT_TRUE(captured_cfg.saveResOnPass.has_value());
-    EXPECT_EQ(*captured_cfg.saveResOnPass, "enable");
+    EXPECT_TRUE(*captured_cfg.saveResOnPass);
     ASSERT_TRUE(captured_cfg.saveResOnFail.has_value());
-    EXPECT_EQ(*captured_cfg.saveResOnFail, "disable");
+    EXPECT_FALSE(*captured_cfg.saveResOnFail);
     ASSERT_TRUE(captured_cfg.swTimeoutSec.has_value());
     EXPECT_EQ(*captured_cfg.swTimeoutSec, 600);
     EXPECT_FALSE(captured_cfg.autoRebootOnComplete);

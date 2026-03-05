@@ -303,40 +303,40 @@ bool IstService::getISTParams(const ParamMap& test_params)
         }
         else if (key == "istContinueOnFail")
         {
-            if (const std::string* s = std::get_if<std::string>(&val))
+            if (const bool* b = std::get_if<bool>(&val))
             {
-                test_.continueOnFail = *s;
+                test_.continueOnFail = *b;
             }
             else
             {
                 std::cerr << "Parameter 'istContinueOnFail' has wrong type "
-                             "(expected string)\n";
+                             "(expected bool)\n";
                 return false;
             }
         }
         else if (key == "istSaveResOnPass")
         {
-            if (const std::string* s = std::get_if<std::string>(&val))
+            if (const bool* b = std::get_if<bool>(&val))
             {
-                test_.saveResOnPass = *s;
+                test_.saveResOnPass = *b;
             }
             else
             {
                 std::cerr << "Parameter 'istSaveResOnPass' has wrong type "
-                             "(expected string)\n";
+                             "(expected bool)\n";
                 return false;
             }
         }
         else if (key == "istSaveResOnFail")
         {
-            if (const std::string* s = std::get_if<std::string>(&val))
+            if (const bool* b = std::get_if<bool>(&val))
             {
-                test_.saveResOnFail = *s;
+                test_.saveResOnFail = *b;
             }
             else
             {
                 std::cerr << "Parameter 'istSaveResOnFail' has wrong type "
-                             "(expected string)\n";
+                             "(expected bool)\n";
                 return false;
             }
         }
