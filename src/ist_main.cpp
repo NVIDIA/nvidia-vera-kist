@@ -71,12 +71,6 @@ int main(int, char**)
         });
     control_iface->initialize();
 
-    // Software version interface
-    std::shared_ptr<sdbusplus::asio::dbus_interface> sw_iface =
-        server.add_interface("/xyz/openbmc_project/software/ist",
-                             "xyz.openbmc_project.Software.Version");
-    sw_iface->initialize();
-
     conn->request_name("com.nvidia.vera.ist");
     io.run();
 }
