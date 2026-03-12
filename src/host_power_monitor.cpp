@@ -122,7 +122,11 @@ void HostPowerMonitorImpl::on_properties_changed(sdbusplus::message_t& msg)
         props, [](const auto& p) { return p.first == "CurrentHostState"; });
     if (it != props.end())
     {
-        on_state_changed(std::get<std::string>(it->second));
+        const std::string* state = std::get_if<std::string>(&it->second);
+        if (state != nullptr)
+        {
+            on_state_changed(*state);
+        }
     }
 }
 

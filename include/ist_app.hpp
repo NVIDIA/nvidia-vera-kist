@@ -107,8 +107,9 @@ inline std::string istStageToString(IstStage s)
             return "RunningIST";
         case IstStage::cleanup:
             return "Cleanup";
+        default:
+            return "Unknown";
     }
-    return "Unknown";
 }
 
 /**
