@@ -102,6 +102,7 @@ TEST(IstTestConfigTest, DefaultValues)
 TEST(IstPlatformConfigTest, DefaultValues)
 {
     IstPlatformConfig cfg;
+    EXPECT_TRUE(cfg.softwareInventoryId.empty());
     EXPECT_TRUE(cfg.hookDir.empty());
     EXPECT_TRUE(cfg.hooks.istBootAssert.empty());
     EXPECT_TRUE(cfg.hooks.istBootDeassert.empty());
@@ -152,7 +153,8 @@ class IstServiceTest : public ::testing::Test
                      (tmpDir_ / "vectors").string() + R"(",
                 "resultStoragePath": ")" +
                      (tmpDir_ / "results").string() + R"("
-            }
+            },
+            "softwareInventoryId": "IST_Vectors"
         })");
 
         create_service();
@@ -173,6 +175,16 @@ class IstServiceTest : public ::testing::Test
         service_ =
             IstService::create(std::move(publisher), std::move(hook_runner),
                                std::move(power_monitor), std::move(itm_runner));
+    }
+
+    bool init_from_file(const std::string& path)
+    {
+        IstPlatformConfig cfg;
+        if (!parsePlatformConfig(cfg, path))
+        {
+            return false;
+        }
+        return service_->initialize(std::move(cfg));
     }
 
     void write_config(const std::string& content)
@@ -206,30 +218,228 @@ class IstServiceTest : public ::testing::Test
 
 TEST_F(IstServiceTest, InitializeValidConfig)
 {
-    EXPECT_TRUE(service_->initialize(configPath_));
+    EXPECT_TRUE(init_from_file(configPath_));
 }
 
 TEST_F(IstServiceTest, InitializeInvalidPath)
 {
-    EXPECT_FALSE(service_->initialize("/nonexistent/path.json"));
+    EXPECT_FALSE(init_from_file("/nonexistent/path.json"));
 }
 
 TEST_F(IstServiceTest, InitializeMalformedJson)
 {
     write_config("not valid json {{{");
-    EXPECT_FALSE(service_->initialize(configPath_));
+    EXPECT_FALSE(init_from_file(configPath_));
 }
 
 TEST_F(IstServiceTest, InitializeMissingHookDirectory)
 {
     write_config(R"({ "storageConfig": {} })");
-    EXPECT_FALSE(service_->initialize(configPath_));
+    EXPECT_FALSE(init_from_file(configPath_));
 }
 
 TEST_F(IstServiceTest, InitializeRejectsDoubleInit)
 {
-    EXPECT_TRUE(service_->initialize(configPath_));
-    EXPECT_FALSE(service_->initialize(configPath_));
+    EXPECT_TRUE(init_from_file(configPath_));
+    EXPECT_FALSE(init_from_file(configPath_));
+}
+
+TEST_F(IstServiceTest, SoftwareInventoryIdMissingFails)
+{
+    write_config(R"({
+        "hookDirectory": ")" +
+                 (tmpDir_ / "hooks").string() + R"(",
+        "hookPaths": {
+            "istBootAssert": ")" +
+                 (tmpDir_ / "hooks/assert.sh").string() + R"(",
+            "istBootDeassert": ")" +
+                 (tmpDir_ / "hooks/deassert.sh").string() + R"(",
+            "resetSystem": ")" +
+                 (tmpDir_ / "hooks/reset.sh").string() + R"("
+        },
+        "storageConfig": {
+            "vectorMountPath": ")" +
+                 (tmpDir_ / "vectors").string() + R"(",
+            "resultStoragePath": ")" +
+                 (tmpDir_ / "results").string() + R"("
+        }
+    })");
+    EXPECT_FALSE(init_from_file(configPath_));
+}
+
+TEST_F(IstServiceTest, SoftwareInventoryIdCustomValue)
+{
+    write_config(R"({
+        "hookDirectory": ")" +
+                 (tmpDir_ / "hooks").string() + R"(",
+        "hookPaths": {
+            "istBootAssert": ")" +
+                 (tmpDir_ / "hooks/assert.sh").string() + R"(",
+            "istBootDeassert": ")" +
+                 (tmpDir_ / "hooks/deassert.sh").string() + R"(",
+            "resetSystem": ")" +
+                 (tmpDir_ / "hooks/reset.sh").string() + R"("
+        },
+        "storageConfig": {
+            "vectorMountPath": ")" +
+                 (tmpDir_ / "vectors").string() + R"(",
+            "resultStoragePath": ")" +
+                 (tmpDir_ / "results").string() + R"("
+        },
+        "softwareInventoryId": "Custom_Vectors"
+    })");
+    EXPECT_TRUE(init_from_file(configPath_));
+    EXPECT_EQ(service_->softwareInventoryId(), "Custom_Vectors");
+}
+
+TEST_F(IstServiceTest, SoftwareInventoryIdRejectsInvalidChars)
+{
+    write_config(R"({
+        "hookDirectory": ")" +
+                 (tmpDir_ / "hooks").string() + R"(",
+        "hookPaths": {
+            "istBootAssert": ")" +
+                 (tmpDir_ / "hooks/assert.sh").string() + R"(",
+            "istBootDeassert": ")" +
+                 (tmpDir_ / "hooks/deassert.sh").string() + R"(",
+            "resetSystem": ")" +
+                 (tmpDir_ / "hooks/reset.sh").string() + R"("
+        },
+        "storageConfig": {
+            "vectorMountPath": ")" +
+                 (tmpDir_ / "vectors").string() + R"(",
+            "resultStoragePath": ")" +
+                 (tmpDir_ / "results").string() + R"("
+        },
+        "softwareInventoryId": "bad/path"
+    })");
+    EXPECT_FALSE(init_from_file(configPath_));
+}
+
+TEST_F(IstServiceTest, SoftwareInventoryIdRejectsDash)
+{
+    write_config(R"({
+        "hookDirectory": ")" +
+                 (tmpDir_ / "hooks").string() + R"(",
+        "hookPaths": {
+            "istBootAssert": ")" +
+                 (tmpDir_ / "hooks/assert.sh").string() + R"(",
+            "istBootDeassert": ")" +
+                 (tmpDir_ / "hooks/deassert.sh").string() + R"(",
+            "resetSystem": ")" +
+                 (tmpDir_ / "hooks/reset.sh").string() + R"("
+        },
+        "storageConfig": {
+            "vectorMountPath": ")" +
+                 (tmpDir_ / "vectors").string() + R"(",
+            "resultStoragePath": ")" +
+                 (tmpDir_ / "results").string() + R"("
+        },
+        "softwareInventoryId": "bad-id"
+    })");
+    EXPECT_FALSE(init_from_file(configPath_));
+}
+
+TEST_F(IstServiceTest, SoftwareInventoryIdRejectsSpace)
+{
+    write_config(R"({
+        "hookDirectory": ")" +
+                 (tmpDir_ / "hooks").string() + R"(",
+        "hookPaths": {
+            "istBootAssert": ")" +
+                 (tmpDir_ / "hooks/assert.sh").string() + R"(",
+            "istBootDeassert": ")" +
+                 (tmpDir_ / "hooks/deassert.sh").string() + R"(",
+            "resetSystem": ")" +
+                 (tmpDir_ / "hooks/reset.sh").string() + R"("
+        },
+        "storageConfig": {
+            "vectorMountPath": ")" +
+                 (tmpDir_ / "vectors").string() + R"(",
+            "resultStoragePath": ")" +
+                 (tmpDir_ / "results").string() + R"("
+        },
+        "softwareInventoryId": "bad id"
+    })");
+    EXPECT_FALSE(init_from_file(configPath_));
+}
+
+TEST_F(IstServiceTest, SoftwareInventoryIdRejectsDot)
+{
+    write_config(R"({
+        "hookDirectory": ")" +
+                 (tmpDir_ / "hooks").string() + R"(",
+        "hookPaths": {
+            "istBootAssert": ")" +
+                 (tmpDir_ / "hooks/assert.sh").string() + R"(",
+            "istBootDeassert": ")" +
+                 (tmpDir_ / "hooks/deassert.sh").string() + R"(",
+            "resetSystem": ")" +
+                 (tmpDir_ / "hooks/reset.sh").string() + R"("
+        },
+        "storageConfig": {
+            "vectorMountPath": ")" +
+                 (tmpDir_ / "vectors").string() + R"(",
+            "resultStoragePath": ")" +
+                 (tmpDir_ / "results").string() + R"("
+        },
+        "softwareInventoryId": "bad.id"
+    })");
+    EXPECT_FALSE(init_from_file(configPath_));
+}
+
+TEST_F(IstServiceTest, SoftwareInventoryIdRejectsEmpty)
+{
+    write_config(R"({
+        "hookDirectory": ")" +
+                 (tmpDir_ / "hooks").string() + R"(",
+        "hookPaths": {
+            "istBootAssert": ")" +
+                 (tmpDir_ / "hooks/assert.sh").string() + R"(",
+            "istBootDeassert": ")" +
+                 (tmpDir_ / "hooks/deassert.sh").string() + R"(",
+            "resetSystem": ")" +
+                 (tmpDir_ / "hooks/reset.sh").string() + R"("
+        },
+        "storageConfig": {
+            "vectorMountPath": ")" +
+                 (tmpDir_ / "vectors").string() + R"(",
+            "resultStoragePath": ")" +
+                 (tmpDir_ / "results").string() + R"("
+        },
+        "softwareInventoryId": ""
+    })");
+    EXPECT_FALSE(init_from_file(configPath_));
+}
+
+TEST_F(IstServiceTest, SoftwareInventoryIdAcceptsUnderscoresAndDigits)
+{
+    write_config(R"({
+        "hookDirectory": ")" +
+                 (tmpDir_ / "hooks").string() + R"(",
+        "hookPaths": {
+            "istBootAssert": ")" +
+                 (tmpDir_ / "hooks/assert.sh").string() + R"(",
+            "istBootDeassert": ")" +
+                 (tmpDir_ / "hooks/deassert.sh").string() + R"(",
+            "resetSystem": ")" +
+                 (tmpDir_ / "hooks/reset.sh").string() + R"("
+        },
+        "storageConfig": {
+            "vectorMountPath": ")" +
+                 (tmpDir_ / "vectors").string() + R"(",
+            "resultStoragePath": ")" +
+                 (tmpDir_ / "results").string() + R"("
+        },
+        "softwareInventoryId": "___123___"
+    })");
+    EXPECT_TRUE(init_from_file(configPath_));
+    EXPECT_EQ(service_->softwareInventoryId(), "___123___");
+}
+
+TEST_F(IstServiceTest, StartUpdateBeforeInitializeThrows)
+{
+    EXPECT_THROW(service_->startUpdate(), sdbusplus::exception::SdBusError);
 }
 
 TEST_F(IstServiceTest, InitializeRejectsHookOutsideHookDir)
@@ -240,9 +450,10 @@ TEST_F(IstServiceTest, InitializeRejectsHookOutsideHookDir)
         "hookPaths": {
             "istBootAssert": "/etc/shadow"
         },
-        "storageConfig": {}
+        "storageConfig": {},
+        "softwareInventoryId": "IST_Vectors"
     })");
-    EXPECT_FALSE(service_->initialize(configPath_));
+    EXPECT_FALSE(init_from_file(configPath_));
 }
 
 // ----------------
@@ -251,7 +462,7 @@ TEST_F(IstServiceTest, InitializeRejectsHookOutsideHookDir)
 
 TEST_F(IstServiceTest, StartIstRejectsWhenInProgress)
 {
-    service_->initialize(configPath_);
+    init_from_file(configPath_);
 
     // First call should succeed
     ParamMap params;
@@ -268,7 +479,7 @@ TEST_F(IstServiceTest, StartIstAbortsOnMissingVectorStorage)
     // Remove the vectors directory so collateral verification fails
     fs::remove_all(tmpDir_ / "vectors");
 
-    service_->initialize(configPath_);
+    init_from_file(configPath_);
 
     ParamMap params;
     EXPECT_THROW(service_->startIST(params), sdbusplus::exception::SdBusError);
@@ -278,7 +489,7 @@ TEST_F(IstServiceTest, StartIstAbortsOnMissingVectorStorage)
 
 TEST_F(IstServiceTest, StartIstAbortsOnUnknownParam)
 {
-    service_->initialize(configPath_);
+    init_from_file(configPath_);
 
     ParamMap params;
     params["unknownParam"] = std::string("value");
@@ -288,7 +499,7 @@ TEST_F(IstServiceTest, StartIstAbortsOnUnknownParam)
 
 TEST_F(IstServiceTest, StartIstAbortsOnOversizedParam)
 {
-    service_->initialize(configPath_);
+    init_from_file(configPath_);
 
     ParamMap params;
     params["customTestList"] = std::string(5000, 'A'); // exceeds 4096 limit
@@ -298,7 +509,7 @@ TEST_F(IstServiceTest, StartIstAbortsOnOversizedParam)
 
 TEST_F(IstServiceTest, StartIstCallsAssertHook)
 {
-    service_->initialize(configPath_);
+    init_from_file(configPath_);
 
     // Expect the istBootAssert hook to be called
     std::move_only_function<void(bool) const> assert_done;
@@ -321,7 +532,7 @@ TEST_F(IstServiceTest, StartIstCallsAssertHook)
 
 TEST_F(IstServiceTest, AssertHookFailureTransitionsToFailed)
 {
-    service_->initialize(configPath_);
+    init_from_file(configPath_);
 
     std::move_only_function<void(bool) const> assert_done;
     EXPECT_CALL(
@@ -343,7 +554,7 @@ TEST_F(IstServiceTest, AssertHookFailureTransitionsToFailed)
 
 TEST_F(IstServiceTest, AssertHookSuccessWaitsForPowerCycle)
 {
-    service_->initialize(configPath_);
+    init_from_file(configPath_);
 
     std::move_only_function<void(bool) const> assert_done;
     EXPECT_CALL(
@@ -369,7 +580,7 @@ TEST_F(IstServiceTest, AssertHookSuccessWaitsForPowerCycle)
 
 TEST_F(IstServiceTest, PowerCycleFailureRunsDeassertThenFails)
 {
-    service_->initialize(configPath_);
+    init_from_file(configPath_);
 
     std::move_only_function<void(bool) const> assert_done;
     EXPECT_CALL(
@@ -409,7 +620,7 @@ TEST_F(IstServiceTest, PowerCycleFailureRunsDeassertThenFails)
 
 TEST_F(IstServiceTest, PowerCycleSuccessStartsItm)
 {
-    service_->initialize(configPath_);
+    init_from_file(configPath_);
 
     std::move_only_function<void(bool) const> assert_done;
     EXPECT_CALL(
@@ -440,7 +651,7 @@ TEST_F(IstServiceTest, PowerCycleSuccessStartsItm)
 
 TEST_F(IstServiceTest, ItmSuccessCompletesWithCleanup)
 {
-    service_->initialize(configPath_);
+    init_from_file(configPath_);
 
     // Chain: assert hook → power cycle → ITM → deassert hook
     std::move_only_function<void(bool) const> assert_done;
@@ -485,7 +696,7 @@ TEST_F(IstServiceTest, ItmSuccessCompletesWithCleanup)
 
 TEST_F(IstServiceTest, ItmFailureResultsInFailedStatus)
 {
-    service_->initialize(configPath_);
+    init_from_file(configPath_);
 
     std::move_only_function<void(bool) const> assert_done;
     EXPECT_CALL(
@@ -529,7 +740,7 @@ TEST_F(IstServiceTest, ItmFailureResultsInFailedStatus)
 
 TEST_F(IstServiceTest, CleanupDeassertFailureStaysInFailed)
 {
-    service_->initialize(configPath_);
+    init_from_file(configPath_);
 
     std::move_only_function<void(bool) const> assert_done;
     EXPECT_CALL(
@@ -572,7 +783,7 @@ TEST_F(IstServiceTest, CleanupDeassertFailureStaysInFailed)
 
 TEST_F(IstServiceTest, AutoRebootCallsResetHook)
 {
-    service_->initialize(configPath_);
+    init_from_file(configPath_);
 
     std::move_only_function<void(bool) const> assert_done;
     EXPECT_CALL(
@@ -627,7 +838,7 @@ TEST_F(IstServiceTest, AutoRebootCallsResetHook)
 
 TEST_F(IstServiceTest, StartIstPassesTestParams)
 {
-    service_->initialize(configPath_);
+    init_from_file(configPath_);
 
     IstTestConfig captured_cfg;
     EXPECT_CALL(
@@ -683,7 +894,7 @@ TEST_F(IstServiceTest, StartIstPassesTestParams)
 
 TEST_F(IstServiceTest, SwTimeoutClampedToRange)
 {
-    service_->initialize(configPath_);
+    init_from_file(configPath_);
 
     IstTestConfig captured_cfg;
     EXPECT_CALL(
@@ -724,7 +935,7 @@ TEST_F(IstServiceTest, InitializeRejectsNonexistentHookDir)
         "hookPaths": {},
         "storageConfig": {}
     })");
-    EXPECT_FALSE(service_->initialize(configPath_));
+    EXPECT_FALSE(init_from_file(configPath_));
 }
 
 TEST_F(IstServiceTest, InitializeRejectsEmptyHookPath)
@@ -735,9 +946,10 @@ TEST_F(IstServiceTest, InitializeRejectsEmptyHookPath)
         "hookPaths": {
             "istBootAssert": ""
         },
-        "storageConfig": {}
+        "storageConfig": {},
+        "softwareInventoryId": "IST_Vectors"
     })");
-    EXPECT_FALSE(service_->initialize(configPath_));
+    EXPECT_FALSE(init_from_file(configPath_));
 }
 
 TEST_F(IstServiceTest, StartIstThrowsWhenAssertHookMissing)
@@ -755,9 +967,10 @@ TEST_F(IstServiceTest, StartIstThrowsWhenAssertHookMissing)
                  (tmpDir_ / "vectors").string() + R"(",
             "resultStoragePath": ")" +
                  (tmpDir_ / "results").string() + R"("
-        }
+        },
+        "softwareInventoryId": "IST_Vectors"
     })");
-    service_->initialize(configPath_);
+    init_from_file(configPath_);
 
     ParamMap params;
     EXPECT_THROW(service_->startIST(params), sdbusplus::exception::SdBusError);
@@ -767,7 +980,7 @@ TEST_F(IstServiceTest, StartIstThrowsWhenAssertHookMissing)
 
 TEST_F(IstServiceTest, SwTimeoutClampedToMax)
 {
-    service_->initialize(configPath_);
+    init_from_file(configPath_);
 
     IstTestConfig captured_cfg;
     EXPECT_CALL(
@@ -815,9 +1028,10 @@ TEST_F(IstServiceTest, CleanupFailsWhenDeassertHookMissing)
                  (tmpDir_ / "vectors").string() + R"(",
             "resultStoragePath": ")" +
                  (tmpDir_ / "results").string() + R"("
-        }
+        },
+        "softwareInventoryId": "IST_Vectors"
     })");
-    service_->initialize(configPath_);
+    init_from_file(configPath_);
 
     std::move_only_function<void(bool) const> assert_done;
     EXPECT_CALL(
@@ -850,7 +1064,7 @@ TEST_F(IstServiceTest, CleanupFailsWhenDeassertHookMissing)
 
 TEST_F(IstServiceTest, AutoRebootResetFailureTransitionsToFailed)
 {
-    service_->initialize(configPath_);
+    init_from_file(configPath_);
 
     std::move_only_function<void(bool) const> assert_done;
     EXPECT_CALL(
@@ -902,7 +1116,7 @@ TEST_F(IstServiceTest, AutoRebootResetFailureTransitionsToFailed)
 
 TEST_F(IstServiceTest, AutoRebootWithItmFailureStillFailed)
 {
-    service_->initialize(configPath_);
+    init_from_file(configPath_);
 
     std::move_only_function<void(bool) const> assert_done;
     EXPECT_CALL(
@@ -970,9 +1184,10 @@ TEST_F(IstServiceTest, AutoRebootFailsWhenResetHookMissing)
                  (tmpDir_ / "vectors").string() + R"(",
             "resultStoragePath": ")" +
                  (tmpDir_ / "results").string() + R"("
-        }
+        },
+        "softwareInventoryId": "IST_Vectors"
     })");
-    service_->initialize(configPath_);
+    init_from_file(configPath_);
 
     std::move_only_function<void(bool) const> assert_done;
     EXPECT_CALL(
@@ -1028,9 +1243,10 @@ TEST_F(IstServiceTest, StartIstAbortsOnMissingResultStorageConfig)
         "storageConfig": {
             "vectorMountPath": ")" +
                  (tmpDir_ / "vectors").string() + R"("
-        }
+        },
+        "softwareInventoryId": "IST_Vectors"
     })");
-    service_->initialize(configPath_);
+    init_from_file(configPath_);
 
     ParamMap params;
     EXPECT_THROW(service_->startIST(params), sdbusplus::exception::SdBusError);
@@ -1039,7 +1255,7 @@ TEST_F(IstServiceTest, StartIstAbortsOnMissingResultStorageConfig)
 
 TEST_F(IstServiceTest, SecondRunAfterCompletionWorks)
 {
-    service_->initialize(configPath_);
+    init_from_file(configPath_);
 
     // --- First run: full success ---
     std::move_only_function<void(bool) const> assert_done1;
@@ -1128,7 +1344,7 @@ TEST_F(IstServiceTest, SecondRunAfterCompletionWorks)
 
 TEST_F(IstServiceTest, ProgressInterfaceCreatedOnStartAndRemovedOnComplete)
 {
-    service_->initialize(configPath_);
+    init_from_file(configPath_);
 
     ::testing::InSequence seq;
 
@@ -1164,7 +1380,7 @@ TEST_F(IstServiceTest, ProgressInterfaceCreatedOnStartAndRemovedOnComplete)
 TEST_F(IstServiceTest, ProgressInterfaceRemovedOnAbort)
 {
     fs::remove_all(tmpDir_ / "vectors");
-    service_->initialize(configPath_);
+    init_from_file(configPath_);
 
     EXPECT_CALL(*publisher_, createProgress()).Times(1);
     EXPECT_CALL(*publisher_, removeProgress()).Times(1);
@@ -1176,7 +1392,7 @@ TEST_F(IstServiceTest, ProgressInterfaceRemovedOnAbort)
 
 TEST_F(IstServiceTest, ProgressInterfaceRemovedOnFailure)
 {
-    service_->initialize(configPath_);
+    init_from_file(configPath_);
 
     EXPECT_CALL(*publisher_, createProgress()).Times(1);
 
@@ -1199,7 +1415,7 @@ TEST_F(IstServiceTest, ProgressInterfaceRemovedOnFailure)
 
 TEST_F(IstServiceTest, ProgressCallbackUpdatesStateAndPublishes)
 {
-    service_->initialize(configPath_);
+    init_from_file(configPath_);
 
     DoneCb assert_done;
     EXPECT_CALL(
@@ -1241,7 +1457,7 @@ TEST_F(IstServiceTest, ProgressCallbackUpdatesStateAndPublishes)
 
 TEST_F(IstServiceTest, ParamTypeMismatchRejected)
 {
-    service_->initialize(configPath_);
+    init_from_file(configPath_);
 
     ParamMap params;
     params["istSwTimeoutSec"] = std::string("not_a_number");
@@ -1251,7 +1467,7 @@ TEST_F(IstServiceTest, ParamTypeMismatchRejected)
 
 TEST_F(IstServiceTest, SecondRunAfterFailureWorks)
 {
-    service_->initialize(configPath_);
+    init_from_file(configPath_);
 
     // --- First run: fails at assert hook ---
     DoneCb assert_done1;

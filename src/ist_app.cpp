@@ -109,8 +109,7 @@ void IstService::transitionTo(IstStage stage, IstStatus status)
 // Platform config
 // ----------------
 
-bool IstService::parsePlatformConfig(IstPlatformConfig& out,
-                                     const std::string& path)
+bool parsePlatformConfig(IstPlatformConfig& out, const std::string& path)
 {
     std::ifstream f(path);
     if (!f)
@@ -149,6 +148,23 @@ bool IstService::parsePlatformConfig(IstPlatformConfig& out,
     {
         out.itmBinaryPath = d["itmBinaryPath"].get<std::string>();
     }
+
+    if (!d.contains("softwareInventoryId") ||
+        !d["softwareInventoryId"].is_string())
+    {
+        std::cerr << "softwareInventoryId is missing or not a string\n";
+        return false;
+    }
+    std::string id = d["softwareInventoryId"].get<std::string>();
+    if (id.empty() || std::any_of(id.begin(), id.end(), [](char c) {
+            return std::isalnum(static_cast<unsigned char>(c)) == 0 && c != '_';
+        }))
+    {
+        std::cerr << "softwareInventoryId contains invalid characters: " << id
+                  << "\n";
+        return false;
+    }
+    out.softwareInventoryId = std::move(id);
 
     json hp = d.value("hookPaths", json::object());
     out.hooks.istBootAssert = json_path(hp, "istBootAssert");
@@ -206,7 +222,7 @@ void IstService::printIstPlatformConfig() const
               << platformCfg_.storage.resultStoragePath << '\n';
 }
 
-bool IstService::initialize(const std::string& path)
+bool IstService::initialize(IstPlatformConfig cfg)
 {
     if (initialized_)
     {
@@ -214,11 +230,7 @@ bool IstService::initialize(const std::string& path)
         return false;
     }
 
-    if (!parsePlatformConfig(platformCfg_, path))
-    {
-        return false; // parsePlatformConfig already logged the error
-    }
-
+    platformCfg_ = std::move(cfg);
     printIstPlatformConfig();
 
     // Deassert IST boot on startup as a safety measure (e.g. after crash)
@@ -508,6 +520,20 @@ void IstService::onResetDone(bool itm_ok, bool ok_reset)
         transitionTo(IstStage::idle,
                      itm_ok ? IstStatus::completed : IstStatus::failed);
     }
+}
+
+// TODO: Implement image transfer flow (pipe creation, async read loop,
+// transfer timeout, PLDM processing, and mount).
+sdbusplus::message::unix_fd IstService::startUpdate()
+{
+    if (!initialized_)
+    {
+        std::cerr << "startUpdate called before initialize\n";
+        throw sdbusplus::exception::SdBusError(EINVAL, "Not initialized");
+    }
+    std::cerr << "startUpdate: not yet implemented\n";
+    throw sdbusplus::exception::SdBusError(ENOTSUP,
+                                           "Update not yet implemented");
 }
 
 // ----------------

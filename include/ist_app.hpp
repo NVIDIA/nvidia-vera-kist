@@ -38,6 +38,7 @@ struct StoragePaths
 
 struct IstPlatformConfig
 {
+    std::string softwareInventoryId;
     std::filesystem::path hookDir;
     std::filesystem::path itmBinaryPath{"/bin/kist_itm"};
     HookPaths hooks;
@@ -209,7 +210,8 @@ std::shared_ptr<HostPowerMonitor>
                          std::shared_ptr<sdbusplus::asio::connection> conn);
 std::unique_ptr<ItmRunner> makeItmRunner(boost::asio::io_context& io);
 std::unique_ptr<StatePublisher>
-    makeDbusStatePublisher(sdbusplus::asio::object_server& server);
+    makeDbusStatePublisher(sdbusplus::asio::object_server& server,
+                           const std::string& swPath);
 
 // ----------------
 // IstService
@@ -217,6 +219,8 @@ std::unique_ptr<StatePublisher>
 // Must be created via IstService::create() so that async callbacks can
 // safely capture shared_from_this().
 // ----------------
+
+bool parsePlatformConfig(IstPlatformConfig& out, const std::string& path);
 
 class IstService : public std::enable_shared_from_this<IstService>
 {
@@ -227,20 +231,24 @@ class IstService : public std::enable_shared_from_this<IstService>
                std::shared_ptr<HostPowerMonitor> powerMonitor,
                std::unique_ptr<ItmRunner> itmRunner);
 
-    bool initialize(const std::string& platformCfgPath);
+    bool initialize(IstPlatformConfig cfg);
     void printIstPlatformConfig() const;
     const IstState& state() const
     {
         return state_;
     }
+    const std::string& softwareInventoryId() const
+    {
+        return platformCfg_.softwareInventoryId;
+    }
     void startIST(const ParamMap& testParams);
+    sdbusplus::message::unix_fd startUpdate();
 
   private:
     IstService(std::unique_ptr<StatePublisher> publisher,
                std::unique_ptr<HookRunner> hookRunner,
                std::shared_ptr<HostPowerMonitor> powerMonitor,
                std::unique_ptr<ItmRunner> itmRunner);
-    bool parsePlatformConfig(IstPlatformConfig& out, const std::string& path);
     bool getISTParams(const ParamMap& testParams);
     bool collateralVerification(const ParamMap& testParams);
 

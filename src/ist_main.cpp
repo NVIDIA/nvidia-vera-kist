@@ -1,7 +1,12 @@
 #include <ist_app.hpp>
 #include <sdbusplus/asio/connection.hpp>
+#include <sdbusplus/message/types.hpp>
 
 #include <iostream>
+
+static constexpr const char* config_path = "/etc/ist/platform_cfg.json";
+static constexpr const char* sw_path_prefix =
+    "/xyz/openbmc_project/inventory_software/";
 
 static void start_ist_from_dbus(const std::shared_ptr<IstService>& service,
                                 int32_t sw_timeout_sec, bool continue_on_fail,
@@ -44,11 +49,20 @@ int main(int, char**)
         std::make_shared<sdbusplus::asio::connection>(io);
     sdbusplus::asio::object_server server(conn);
 
-    auto service =
-        IstService::create(makeDbusStatePublisher(server), makeHookRunner(io),
-                           makeHostPowerMonitor(io, conn), makeItmRunner(io));
+    IstPlatformConfig platform_cfg;
+    if (!parsePlatformConfig(platform_cfg, config_path))
+    {
+        std::cerr << "IST: failed to parse platform config, exiting\n";
+        return 1;
+    }
 
-    if (!service->initialize("/etc/ist/platform_cfg.json"))
+    std::string sw_path = sw_path_prefix + platform_cfg.softwareInventoryId;
+
+    std::shared_ptr<IstService> service = IstService::create(
+        makeDbusStatePublisher(server, sw_path), makeHookRunner(io),
+        makeHostPowerMonitor(io, conn), makeItmRunner(io));
+
+    if (!service->initialize(std::move(platform_cfg)))
     {
         std::cerr << "IST: failed to initialize, exiting\n";
         return 1;
@@ -70,6 +84,13 @@ int main(int, char**)
                                 save_result_on_pass, save_result_on_fail);
         });
     control_iface->initialize();
+
+    // Software update interface
+    std::shared_ptr<sdbusplus::asio::dbus_interface> update_iface =
+        server.add_interface(sw_path, "xyz.openbmc_project.Software.Update");
+    update_iface->register_method(
+        "StartUpdate", [service]() { return service->startUpdate(); });
+    update_iface->initialize();
 
     conn->request_name("com.nvidia.vera.ist");
     io.run();

@@ -9,14 +9,19 @@
 class DbusStatePublisher final : public StatePublisher
 {
   public:
-    explicit DbusStatePublisher(sdbusplus::asio::object_server& server) :
-        server_(server)
+    DbusStatePublisher(sdbusplus::asio::object_server& server,
+                       const std::string& sw_path) : server_(server)
     {
         stateIface_ = server_.add_interface("/com/nvidia/vera/ist",
                                             "com.nvidia.vera.ist.State");
         stateIface_->register_property("Stage",
                                        istStageToString(IstStage::idle));
         stateIface_->initialize();
+
+        swVersionIface_ = server_.add_interface(
+            sw_path, "xyz.openbmc_project.Software.Version");
+        swVersionIface_->register_property("Version", std::string("Unknown"));
+        swVersionIface_->initialize();
     }
 
     void publish(const IstState& state) override
@@ -97,10 +102,12 @@ class DbusStatePublisher final : public StatePublisher
     sdbusplus::asio::object_server& server_;
     std::shared_ptr<sdbusplus::asio::dbus_interface> progIface_;
     std::shared_ptr<sdbusplus::asio::dbus_interface> stateIface_;
+    std::shared_ptr<sdbusplus::asio::dbus_interface> swVersionIface_;
 };
 
 std::unique_ptr<StatePublisher>
-    makeDbusStatePublisher(sdbusplus::asio::object_server& server)
+    makeDbusStatePublisher(sdbusplus::asio::object_server& server,
+                           const std::string& sw_path)
 {
-    return std::make_unique<DbusStatePublisher>(server);
+    return std::make_unique<DbusStatePublisher>(server, sw_path);
 }
