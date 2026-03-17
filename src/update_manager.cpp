@@ -13,17 +13,27 @@
 
 #include <array>
 #include <cerrno>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace fs = std::filesystem;
 
 static constexpr std::string_view k_image_file_name = "CPU-IST.img";
 static constexpr std::string_view k_golden_res_file_name = "GOLDEN_RES.sqfs";
 static constexpr size_t k_transfer_buf_size = 65536;
+
+static constexpr std::string_view k_activation_activating =
+    "xyz.openbmc_project.Software.Activation.Activations.Activating";
+static constexpr std::string_view k_activation_active =
+    "xyz.openbmc_project.Software.Activation.Activations.Active";
+static constexpr std::string_view k_activation_failed =
+    "xyz.openbmc_project.Software.Activation.Activations.Failed";
 
 // Image file names managed by this service; used to identify orphaned
 // loop devices that need cleanup before a new image is written.
@@ -81,6 +91,164 @@ class UniqueFd
   private:
     int fd_;
 };
+
+// ----------------------------------------------------------------
+// PLDM package helpers
+// ----------------------------------------------------------------
+
+static uint16_t read_u16_le(const uint8_t* p)
+{
+    return static_cast<uint16_t>(p[0] | (p[1] << 8));
+}
+
+static uint32_t read_u32_le(const uint8_t* p)
+{
+    return static_cast<uint32_t>(p[0]) | (static_cast<uint32_t>(p[1]) << 8) |
+           (static_cast<uint32_t>(p[2]) << 16) |
+           (static_cast<uint32_t>(p[3]) << 24);
+}
+
+static uint32_t crc32_update(uint32_t crc, const uint8_t* data, size_t len)
+{
+    for (size_t i = 0; i < len; i++)
+    {
+        crc ^= data[i];
+        for (int j = 0; j < 8; j++)
+        {
+            crc = (crc >> 1) ^ (0xEDB88320 & -(crc & 1));
+        }
+    }
+    return crc;
+}
+
+static uint32_t compute_crc32(const uint8_t* data, size_t len)
+{
+    return ~crc32_update(0xFFFFFFFF, data, len);
+}
+
+struct PldmComponentInfo
+{
+    uint32_t offset;
+    uint32_t size;
+    uint32_t payloadCrc;
+};
+
+static constexpr size_t k_pldm_min_header_size = 36;
+
+static bool parse_pldm_header(const std::vector<uint8_t>& hdr, size_t file_size,
+                              PldmComponentInfo& comp)
+{
+    if (hdr.size() < k_pldm_min_header_size)
+    {
+        std::cerr << "PLDM header too small\n";
+        return false;
+    }
+
+    uint8_t revision = hdr[16];
+    uint16_t header_size = read_u16_le(&hdr[17]);
+
+    // Per DSP0267 v1.3.0 Table 8: revision 0x04 is the first format
+    // that includes PackagePayloadChecksum.
+    if (revision < 4)
+    {
+        std::cerr << "PLDM revision 0x" << std::hex
+                  << static_cast<unsigned>(revision) << std::dec
+                  << " does not include payload checksum; rejecting\n";
+        return false;
+    }
+
+    // The header_size < min check overlaps with the trailer check below,
+    // but gives a clearer error when the header size itself is nonsense.
+    if (hdr.size() < header_size || header_size < k_pldm_min_header_size)
+    {
+        std::cerr << "PLDM header size invalid: " << header_size << '\n';
+        return false;
+    }
+
+    // Revision >= 4 trailer: [header CRC (4)] [payload CRC (4)]
+    constexpr size_t trailer_size = 8;
+    if (header_size < k_pldm_min_header_size + trailer_size)
+    {
+        std::cerr << "PLDM header too small for trailer\n";
+        return false;
+    }
+
+    size_t crc_offset = header_size - trailer_size;
+    uint32_t stored_crc = read_u32_le(&hdr[crc_offset]);
+    uint32_t computed_crc = compute_crc32(hdr.data(), crc_offset);
+    if (stored_crc != computed_crc)
+    {
+        std::cerr << "PLDM header CRC mismatch: stored 0x" << std::hex
+                  << stored_crc << " computed 0x" << computed_crc << std::dec
+                  << '\n';
+        return false;
+    }
+
+    comp.payloadCrc = read_u32_le(&hdr[header_size - 4]);
+
+    std::cerr << "PLDM revision 0x" << std::hex
+              << static_cast<unsigned>(revision) << std::dec << ", header size "
+              << header_size << '\n';
+
+    comp.offset = header_size;
+    comp.size = static_cast<uint32_t>(file_size - header_size);
+    return true;
+}
+
+static std::optional<PldmComponentInfo>
+    process_pldm_package(const fs::path& file_path)
+{
+    std::ifstream file(file_path, std::ios::binary | std::ios::ate);
+    if (!file)
+    {
+        std::cerr << "Cannot open PLDM package: " << file_path << '\n';
+        return std::nullopt;
+    }
+
+    size_t file_size = static_cast<size_t>(file.tellg());
+    if (file_size < k_pldm_min_header_size)
+    {
+        std::cerr << "File too small to be a PLDM package\n";
+        return std::nullopt;
+    }
+
+    // Read the first 19 bytes to extract the header size field at offset 17.
+    file.seekg(0);
+    std::array<uint8_t, 19> prefix{};
+    file.read(reinterpret_cast<char*>(prefix.data()), prefix.size());
+    if (!file)
+    {
+        std::cerr << "Failed to read PLDM header prefix\n";
+        return std::nullopt;
+    }
+
+    uint16_t header_size = read_u16_le(&prefix[17]);
+    if (header_size < k_pldm_min_header_size || header_size > file_size)
+    {
+        std::cerr << "Invalid PLDM header size: " << header_size << '\n';
+        return std::nullopt;
+    }
+
+    std::vector<uint8_t> header(header_size);
+    file.seekg(0);
+    file.read(reinterpret_cast<char*>(header.data()), header_size);
+    if (!file)
+    {
+        std::cerr << "Failed to read full PLDM header\n";
+        return std::nullopt;
+    }
+    file.close();
+
+    PldmComponentInfo comp{};
+    if (!parse_pldm_header(header, file_size, comp))
+    {
+        return std::nullopt;
+    }
+
+    std::cerr << "PLDM header verified (CRC OK). Component at offset "
+              << comp.offset << ", size " << comp.size << '\n';
+    return comp;
+}
 
 // ----------------------------------------------------------------
 // Loop-device / mount teardown helpers
@@ -317,6 +485,179 @@ class TransferSession : public std::enable_shared_from_this<TransferSession>
 };
 
 // ----------------------------------------------------------------
+// PldmStripper — async in-place PLDM header removal
+//
+// Opens the image file O_RDWR, copies payload bytes forward using
+// pread/pwrite in 64 KiB chunks (each posted to the io_context),
+// verifies the payload CRC (revision >= 4), and ftruncates the file.
+// On destruction, removes the image file unless committed.
+// ----------------------------------------------------------------
+
+class PldmStripper : public std::enable_shared_from_this<PldmStripper>
+{
+  public:
+    PldmStripper(boost::asio::io_context& io, fs::path image_path,
+                 PldmComponentInfo comp,
+                 std::move_only_function<void(bool ok) const> on_complete,
+                 std::move_only_function<void(uint8_t pct) const> on_progress) :
+        io_(io), imagePath_(std::move(image_path)), comp_(comp),
+        onComplete_(std::move(on_complete)),
+        onProgress_(std::move(on_progress)),
+        fd_(::open(imagePath_.c_str(), O_RDWR | O_CLOEXEC))
+    {
+        if (fd_.get() < 0)
+        {
+            throw std::system_error(errno, std::generic_category(),
+                                    "Failed to open " + imagePath_.string());
+        }
+    }
+
+    ~PldmStripper()
+    {
+        if (!committed_)
+        {
+            std::error_code ec;
+            fs::remove(imagePath_, ec);
+        }
+    }
+
+    PldmStripper(const PldmStripper&) = delete;
+    PldmStripper& operator=(const PldmStripper&) = delete;
+
+    void start()
+    {
+        remaining_ = comp_.size;
+        readPos_ = comp_.offset;
+        writePos_ = 0;
+        crcState_ = 0xFFFFFFFF;
+        strip_next_chunk();
+    }
+
+  private:
+    // post() defers execution via the io_context event loop, not recursion.
+    // NOLINTNEXTLINE(misc-no-recursion)
+    void strip_next_chunk()
+    {
+        if (remaining_ == 0)
+        {
+            uint32_t computed = ~crcState_;
+            if (computed != comp_.payloadCrc)
+            {
+                std::cerr << "PLDM payload CRC mismatch: stored 0x" << std::hex
+                          << comp_.payloadCrc << " computed 0x" << computed
+                          << std::dec << '\n';
+                finish(false);
+                return;
+            }
+            std::cerr << "PLDM payload CRC verified OK\n";
+
+            if (::ftruncate(fd_.get(), static_cast<off_t>(comp_.size)) != 0)
+            {
+                std::cerr << "ftruncate failed: " << errno << '\n';
+                finish(false);
+                return;
+            }
+
+            std::cerr << "PLDM header stripped, image ready (" << comp_.size
+                      << " bytes)\n";
+            committed_ = true;
+            finish(true);
+            return;
+        }
+
+        size_t to_read =
+            std::min(static_cast<size_t>(remaining_), k_transfer_buf_size);
+        ssize_t nread = ::pread(fd_.get(), buf_.data(), to_read, readPos_);
+        if (nread < 0)
+        {
+            std::cerr << "pread failed during PLDM stripping: " << errno
+                      << '\n';
+            finish(false);
+            return;
+        }
+        if (nread == 0)
+        {
+            std::cerr << "Unexpected EOF during PLDM stripping"
+                         " (file truncated?)\n";
+            finish(false);
+            return;
+        }
+
+        crcState_ = crc32_update(crcState_,
+                                 reinterpret_cast<const uint8_t*>(buf_.data()),
+                                 static_cast<size_t>(nread));
+
+        ssize_t nwritten = ::pwrite(fd_.get(), buf_.data(),
+                                    static_cast<size_t>(nread), writePos_);
+        if (nwritten != nread)
+        {
+            std::cerr << "pwrite failed during PLDM stripping: " << errno
+                      << '\n';
+            finish(false);
+            return;
+        }
+
+        readPos_ += nread;
+        writePos_ += nread;
+        remaining_ -= static_cast<uint32_t>(nread);
+
+        uint8_t pct =
+            (comp_.size == 0)
+                ? 100
+                : static_cast<uint8_t>(100ULL * (comp_.size - remaining_) /
+                                       comp_.size);
+        if (pct >= lastPct_ + 20)
+        {
+            lastPct_ = pct;
+            if (onProgress_)
+            {
+                onProgress_(pct);
+            }
+        }
+
+        boost::asio::post(
+            io_,
+            [weak = weak_from_this()]() // NOLINT(misc-no-recursion)
+                                        // deferred, not recursive
+            {
+                if (auto self = weak.lock())
+                {
+                    self->strip_next_chunk();
+                }
+            });
+    }
+
+    void finish(bool ok)
+    {
+        if (finished_)
+        {
+            return;
+        }
+        finished_ = true;
+        auto cb = std::move(onComplete_);
+        if (cb)
+        {
+            cb(ok);
+        }
+    }
+
+    boost::asio::io_context& io_;
+    fs::path imagePath_;
+    PldmComponentInfo comp_;
+    std::move_only_function<void(bool ok) const> onComplete_;
+    std::move_only_function<void(uint8_t pct) const> onProgress_;
+    UniqueFd fd_;
+    std::array<char, k_transfer_buf_size> buf_{};
+    uint32_t remaining_{0};
+    off_t readPos_{0};
+    off_t writePos_{0};
+    uint32_t crcState_{0xFFFFFFFF};
+    uint8_t lastPct_{0};
+    bool finished_{false};
+    bool committed_{false};
+};
+
+// ----------------------------------------------------------------
 // IstService::startUpdate
 // ----------------------------------------------------------------
 
@@ -335,6 +676,10 @@ sdbusplus::message::unix_fd IstService::startUpdate()
     {
         throw sdbusplus::exception::SdBusError(EBUSY,
                                                "Transfer already in progress");
+    }
+    if (activeStripper_)
+    {
+        throw sdbusplus::exception::SdBusError(EBUSY, "PLDM strip in progress");
     }
     if (platformCfg_.storage.vectorStoragePath.empty())
     {
@@ -385,23 +730,87 @@ sdbusplus::message::unix_fd IstService::startUpdate()
     auto session = std::make_shared<TransferSession>(
         io_, std::move(read_fd), image_path,
         platformCfg_.transferInactivityTimeout,
-        [weak = weak_from_this()](bool ok) {
+        [weak = weak_from_this(), image_path](bool ok) {
             if (auto self = weak.lock())
             {
-                self->activeTransfer_.reset();
-                if (ok)
-                {
-                    std::cout << "Image transfer succeeded\n";
-                }
-                else
-                {
-                    std::cerr << "Image transfer failed\n";
-                }
+                self->onTransferComplete(ok, image_path);
             }
         });
+
+    publisher_->publishActivation(k_activation_activating);
+    publisher_->createActivationProgress();
+    publisher_->publishActivationProgress(0);
 
     activeTransfer_ = session;
     session->start();
 
     return {write_fd.release()};
+}
+
+void IstService::onTransferComplete(bool ok, const fs::path& image_path)
+{
+    activeTransfer_.reset();
+    if (!ok)
+    {
+        std::cerr << "Image transfer failed\n";
+        publisher_->publishActivation(k_activation_failed);
+        publisher_->removeActivationProgress();
+        return;
+    }
+
+    std::cout << "Image transfer succeeded, processing PLDM package\n";
+    std::optional<PldmComponentInfo> comp = process_pldm_package(image_path);
+    if (!comp)
+    {
+        std::cerr << "PLDM processing failed, removing image\n";
+        std::error_code ec;
+        fs::remove(image_path, ec);
+        publisher_->publishActivation(k_activation_failed);
+        publisher_->removeActivationProgress();
+        return;
+    }
+
+    try
+    {
+        auto stripper = std::make_shared<PldmStripper>(
+            io_, image_path, *comp,
+            [weak = weak_from_this()](bool strip_ok) {
+                if (auto self = weak.lock())
+                {
+                    self->onStripComplete(strip_ok);
+                }
+            },
+            [weak = weak_from_this()](uint8_t pct) {
+                if (auto self = weak.lock())
+                {
+                    self->publisher_->publishActivationProgress(pct);
+                }
+            });
+        activeStripper_ = stripper;
+        stripper->start();
+    }
+    catch (const std::system_error& e)
+    {
+        std::cerr << "Failed to start PLDM strip: " << e.what() << '\n';
+        std::error_code ec;
+        fs::remove(image_path, ec);
+        publisher_->publishActivation(k_activation_failed);
+        publisher_->removeActivationProgress();
+    }
+}
+
+void IstService::onStripComplete(bool ok)
+{
+    activeStripper_.reset();
+    if (!ok)
+    {
+        std::cerr << "PLDM strip failed\n";
+        publisher_->publishActivation(k_activation_failed);
+        publisher_->removeActivationProgress();
+        return;
+    }
+
+    std::cout << "PLDM strip succeeded\n";
+    publisher_->publishActivation(k_activation_active);
+    publisher_->removeActivationProgress();
 }

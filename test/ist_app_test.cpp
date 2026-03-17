@@ -3,8 +3,11 @@
 #include <ist_app.hpp>
 #include <sdbusplus/exception.hpp>
 
+#include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <vector>
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -55,6 +58,11 @@ class MockStatePublisher : public StatePublisher
     MOCK_METHOD(void, publishProgress, (uint8_t progress), (override));
     MOCK_METHOD(void, createProgress, (), (override));
     MOCK_METHOD(void, removeProgress, (), (override));
+    MOCK_METHOD(void, publishActivation, (std::string_view state), (override));
+    MOCK_METHOD(void, createActivationProgress, (), (override));
+    MOCK_METHOD(void, publishActivationProgress, (uint8_t progress),
+                (override));
+    MOCK_METHOD(void, removeActivationProgress, (), (override));
 };
 
 // ----------------
@@ -1566,6 +1574,68 @@ TEST_F(IstServiceTest, StartIstBeforeInitializeThrows)
 }
 
 // ----------------
+// PLDM test helpers
+// ----------------
+
+namespace
+{
+
+uint32_t test_crc32(const uint8_t* data, size_t len)
+{
+    uint32_t crc = 0xFFFFFFFF;
+    for (size_t i = 0; i < len; i++)
+    {
+        crc ^= data[i];
+        for (int j = 0; j < 8; j++)
+        {
+            crc = (crc >> 1) ^ (0xEDB88320 & -(crc & 1));
+        }
+    }
+    return ~crc;
+}
+
+void write_u16_le(uint8_t* p, uint16_t v)
+{
+    p[0] = static_cast<uint8_t>(v & 0xFF);
+    p[1] = static_cast<uint8_t>((v >> 8) & 0xFF);
+}
+
+void write_u32_le(uint8_t* p, uint32_t v)
+{
+    p[0] = static_cast<uint8_t>(v & 0xFF);
+    p[1] = static_cast<uint8_t>((v >> 8) & 0xFF);
+    p[2] = static_cast<uint8_t>((v >> 16) & 0xFF);
+    p[3] = static_cast<uint8_t>((v >> 24) & 0xFF);
+}
+
+// Build a minimal PLDM firmware package (revision 4) wrapping `payload`.
+// Header size field at offset 17 (2 bytes LE), revision at offset 16.
+// Trailer: [header CRC (4)][payload CRC (4)].
+std::vector<uint8_t> build_pldm_package(const std::vector<uint8_t>& payload)
+{
+    constexpr uint16_t header_size = 44;
+    constexpr uint8_t revision = 4;
+
+    std::vector<uint8_t> hdr(header_size, 0);
+    hdr[16] = revision;
+    write_u16_le(&hdr[17], header_size);
+
+    uint32_t payload_crc = test_crc32(payload.data(), payload.size());
+    write_u32_le(&hdr[header_size - 4], payload_crc);
+
+    uint32_t header_crc = test_crc32(hdr.data(), header_size - 8);
+    write_u32_le(&hdr[header_size - 8], header_crc);
+
+    std::vector<uint8_t> package;
+    package.reserve(hdr.size() + payload.size());
+    package.insert(package.end(), hdr.begin(), hdr.end());
+    package.insert(package.end(), payload.begin(), payload.end());
+    return package;
+}
+
+} // namespace
+
+// ----------------
 // StartUpdate / image transfer tests
 // ----------------
 
@@ -1583,9 +1653,11 @@ TEST_F(IstServiceTest, StartUpdateTransfersData)
     init_from_file(configPath_);
     int fd = static_cast<int>(service_->startUpdate());
 
-    const std::string payload = "hello image data";
-    ASSERT_EQ(::write(fd, payload.data(), payload.size()),
-              static_cast<ssize_t>(payload.size()));
+    const std::string raw_payload = "hello image data";
+    std::vector<uint8_t> payload(raw_payload.begin(), raw_payload.end());
+    auto pldm_pkg = build_pldm_package(payload);
+    ASSERT_EQ(::write(fd, pldm_pkg.data(), pldm_pkg.size()),
+              static_cast<ssize_t>(pldm_pkg.size()));
     ::close(fd);
 
     io_.run();
@@ -1596,7 +1668,7 @@ TEST_F(IstServiceTest, StartUpdateTransfersData)
     std::ifstream img(image_path, std::ios::binary);
     std::string content((std::istreambuf_iterator<char>(img)),
                         std::istreambuf_iterator<char>());
-    EXPECT_EQ(content, payload);
+    EXPECT_EQ(content, raw_payload);
 }
 
 TEST_F(IstServiceTest, StartUpdateRejectsConcurrentTransfer)
@@ -1661,10 +1733,13 @@ TEST_F(IstServiceTest, StartUpdateAllowsNewTransferAfterCompletion)
 {
     init_from_file(configPath_);
 
+    const std::string raw1 = "first transfer";
+    std::vector<uint8_t> payload1(raw1.begin(), raw1.end());
+    auto pkg1 = build_pldm_package(payload1);
+
     int fd1 = static_cast<int>(service_->startUpdate());
-    const std::string data1 = "first transfer";
-    ASSERT_EQ(::write(fd1, data1.data(), data1.size()),
-              static_cast<ssize_t>(data1.size()));
+    ASSERT_EQ(::write(fd1, pkg1.data(), pkg1.size()),
+              static_cast<ssize_t>(pkg1.size()));
     ::close(fd1);
     io_.run();
 
@@ -1673,17 +1748,20 @@ TEST_F(IstServiceTest, StartUpdateAllowsNewTransferAfterCompletion)
 
     io_.restart();
 
+    const std::string raw2 = "second transfer";
+    std::vector<uint8_t> payload2(raw2.begin(), raw2.end());
+    auto pkg2 = build_pldm_package(payload2);
+
     int fd2 = static_cast<int>(service_->startUpdate());
-    const std::string data2 = "second transfer";
-    ASSERT_EQ(::write(fd2, data2.data(), data2.size()),
-              static_cast<ssize_t>(data2.size()));
+    ASSERT_EQ(::write(fd2, pkg2.data(), pkg2.size()),
+              static_cast<ssize_t>(pkg2.size()));
     ::close(fd2);
     io_.run();
 
     std::ifstream img(image_path, std::ios::binary);
     std::string content((std::istreambuf_iterator<char>(img)),
                         std::istreambuf_iterator<char>());
-    EXPECT_EQ(content, data2);
+    EXPECT_EQ(content, raw2);
 }
 
 TEST_F(IstServiceTest, StartUpdateRejectsEmptyStoragePath)
@@ -1710,4 +1788,158 @@ TEST_F(IstServiceTest, StartUpdateRejectsEmptyStoragePath)
     init_from_file(configPath_);
 
     EXPECT_THROW(service_->startUpdate(), sdbusplus::exception::SdBusError);
+}
+
+// ----------------
+// PLDM header validation / strip tests
+// ----------------
+
+TEST_F(IstServiceTest, StartUpdatePldmStripSucceeds)
+{
+    init_from_file(configPath_);
+
+    const std::string raw_payload = "This is the ext4 image payload content!";
+    std::vector<uint8_t> payload(raw_payload.begin(), raw_payload.end());
+    auto pldm_pkg = build_pldm_package(payload);
+
+    int fd = static_cast<int>(service_->startUpdate());
+    ASSERT_EQ(::write(fd, pldm_pkg.data(), pldm_pkg.size()),
+              static_cast<ssize_t>(pldm_pkg.size()));
+    ::close(fd);
+    io_.run();
+
+    fs::path image_path = tmpDir_ / "storage" / "CPU-IST.img";
+    ASSERT_TRUE(fs::exists(image_path));
+    EXPECT_EQ(fs::file_size(image_path), payload.size());
+
+    std::ifstream img(image_path, std::ios::binary);
+    std::string content((std::istreambuf_iterator<char>(img)),
+                        std::istreambuf_iterator<char>());
+    EXPECT_EQ(content, raw_payload);
+}
+
+TEST_F(IstServiceTest, StartUpdatePldmBadHeaderCrc)
+{
+    init_from_file(configPath_);
+
+    const std::string raw_payload = "payload data";
+    std::vector<uint8_t> payload(raw_payload.begin(), raw_payload.end());
+    auto pldm_pkg = build_pldm_package(payload);
+
+    // Corrupt a byte in the header (not the CRC field itself, but the data).
+    pldm_pkg[10] ^= 0xFF;
+
+    int fd = static_cast<int>(service_->startUpdate());
+    ASSERT_EQ(::write(fd, pldm_pkg.data(), pldm_pkg.size()),
+              static_cast<ssize_t>(pldm_pkg.size()));
+    ::close(fd);
+    io_.run();
+
+    fs::path image_path = tmpDir_ / "storage" / "CPU-IST.img";
+    EXPECT_FALSE(fs::exists(image_path));
+}
+
+TEST_F(IstServiceTest, StartUpdatePldmBadPayloadCrc)
+{
+    init_from_file(configPath_);
+
+    const std::string raw_payload = "payload data for crc test";
+    std::vector<uint8_t> payload(raw_payload.begin(), raw_payload.end());
+    auto pldm_pkg = build_pldm_package(payload);
+
+    // Corrupt a payload byte (after the header) to invalidate payload CRC.
+    pldm_pkg[pldm_pkg.size() - 1] ^= 0xFF;
+
+    int fd = static_cast<int>(service_->startUpdate());
+    ASSERT_EQ(::write(fd, pldm_pkg.data(), pldm_pkg.size()),
+              static_cast<ssize_t>(pldm_pkg.size()));
+    ::close(fd);
+    io_.run();
+
+    fs::path image_path = tmpDir_ / "storage" / "CPU-IST.img";
+    EXPECT_FALSE(fs::exists(image_path));
+}
+
+TEST_F(IstServiceTest, StartUpdatePldmFileTooSmall)
+{
+    init_from_file(configPath_);
+
+    // Send fewer than 36 bytes — too small for a PLDM header.
+    const std::string tiny = "too small";
+    int fd = static_cast<int>(service_->startUpdate());
+    ASSERT_EQ(::write(fd, tiny.data(), tiny.size()),
+              static_cast<ssize_t>(tiny.size()));
+    ::close(fd);
+    io_.run();
+
+    fs::path image_path = tmpDir_ / "storage" / "CPU-IST.img";
+    EXPECT_FALSE(fs::exists(image_path));
+}
+
+TEST_F(IstServiceTest, StartUpdatePldmRejectsOldRevision)
+{
+    init_from_file(configPath_);
+
+    // Build a header with revision 3 (no payload checksum).
+    // Use a 40-byte header: 36 base + 4 header CRC (no payload CRC).
+    constexpr uint16_t header_size = 40;
+    std::vector<uint8_t> hdr(header_size, 0);
+    hdr[16] = 3;
+    write_u16_le(&hdr[17], header_size);
+    uint32_t header_crc = test_crc32(hdr.data(), header_size - 4);
+    write_u32_le(&hdr[header_size - 4], header_crc);
+
+    const std::string raw = "payload";
+    hdr.insert(hdr.end(), raw.begin(), raw.end());
+
+    int fd = static_cast<int>(service_->startUpdate());
+    ASSERT_EQ(::write(fd, hdr.data(), hdr.size()),
+              static_cast<ssize_t>(hdr.size()));
+    ::close(fd);
+    io_.run();
+
+    fs::path image_path = tmpDir_ / "storage" / "CPU-IST.img";
+    EXPECT_FALSE(fs::exists(image_path));
+}
+
+TEST_F(IstServiceTest, StartUpdatePldmZeroLengthPayload)
+{
+    init_from_file(configPath_);
+
+    std::vector<uint8_t> payload; // empty
+    auto pldm_pkg = build_pldm_package(payload);
+
+    int fd = static_cast<int>(service_->startUpdate());
+    ASSERT_EQ(::write(fd, pldm_pkg.data(), pldm_pkg.size()),
+              static_cast<ssize_t>(pldm_pkg.size()));
+    ::close(fd);
+    io_.run();
+
+    fs::path image_path = tmpDir_ / "storage" / "CPU-IST.img";
+    ASSERT_TRUE(fs::exists(image_path));
+    EXPECT_EQ(fs::file_size(image_path), 0u);
+}
+
+TEST_F(IstServiceTest, StartUpdatePldmStripMultiChunk)
+{
+    init_from_file(configPath_);
+
+    // Payload larger than one 64 KiB strip chunk to exercise the async loop.
+    std::vector<uint8_t> payload(200000, 0xAB);
+    auto pldm_pkg = build_pldm_package(payload);
+
+    int fd = static_cast<int>(service_->startUpdate());
+    ASSERT_EQ(::write(fd, pldm_pkg.data(), pldm_pkg.size()),
+              static_cast<ssize_t>(pldm_pkg.size()));
+    ::close(fd);
+    io_.run();
+
+    fs::path image_path = tmpDir_ / "storage" / "CPU-IST.img";
+    ASSERT_TRUE(fs::exists(image_path));
+    EXPECT_EQ(fs::file_size(image_path), payload.size());
+
+    std::ifstream img(image_path, std::ios::binary);
+    std::vector<uint8_t> content((std::istreambuf_iterator<char>(img)),
+                                 std::istreambuf_iterator<char>());
+    EXPECT_EQ(content, payload);
 }

@@ -201,6 +201,10 @@ class StatePublisher
     virtual void publishProgress(uint8_t progress) = 0;
     virtual void createProgress() = 0;
     virtual void removeProgress() = 0;
+    virtual void publishActivation(std::string_view state) = 0;
+    virtual void createActivationProgress() = 0;
+    virtual void publishActivationProgress(uint8_t progress) = 0;
+    virtual void removeActivationProgress() = 0;
 };
 
 // ----------------
@@ -226,6 +230,7 @@ std::unique_ptr<StatePublisher>
 bool parsePlatformConfig(IstPlatformConfig& out, const std::string& path);
 
 class TransferSession;
+class PldmStripper;
 
 class IstService : public std::enable_shared_from_this<IstService>
 {
@@ -269,6 +274,9 @@ class IstService : public std::enable_shared_from_this<IstService>
     void onDeassertDone(bool itmOk, bool okDeassert);
     void onResetDone(bool itmOk, bool okReset);
 
+    void onTransferComplete(bool ok, const std::filesystem::path& imagePath);
+    void onStripComplete(bool ok);
+
     boost::asio::io_context& io_;
     std::unique_ptr<StatePublisher> publisher_;
 
@@ -281,4 +289,5 @@ class IstService : public std::enable_shared_from_this<IstService>
     std::shared_ptr<HostPowerMonitor> powerMonitor_;
     std::unique_ptr<ItmRunner> itmRunner_;
     std::shared_ptr<TransferSession> activeTransfer_;
+    std::shared_ptr<PldmStripper> activeStripper_;
 };

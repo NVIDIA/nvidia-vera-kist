@@ -10,7 +10,8 @@ class DbusStatePublisher final : public StatePublisher
 {
   public:
     DbusStatePublisher(sdbusplus::asio::object_server& server,
-                       const std::string& sw_path) : server_(server)
+                       const std::string& sw_path) :
+        server_(server), swPath_(sw_path)
     {
         stateIface_ = server_.add_interface("/com/nvidia/vera/ist",
                                             "com.nvidia.vera.ist.State");
@@ -22,6 +23,12 @@ class DbusStatePublisher final : public StatePublisher
             sw_path, "xyz.openbmc_project.Software.Version");
         swVersionIface_->register_property("Version", std::string("Unknown"));
         swVersionIface_->initialize();
+
+        activationIface_ = server_.add_interface(
+            sw_path, "xyz.openbmc_project.Software.Activation");
+        activationIface_->register_property("Activation",
+                                            std::string(k_activation_active));
+        activationIface_->initialize();
     }
 
     void publish(const IstState& state) override
@@ -72,6 +79,43 @@ class DbusStatePublisher final : public StatePublisher
         }
     }
 
+    void publishActivation(std::string_view state) override
+    {
+        if (activationIface_)
+        {
+            activationIface_->set_property("Activation", std::string(state));
+        }
+    }
+
+    void createActivationProgress() override
+    {
+        if (activationProgressIface_)
+        {
+            server_.remove_interface(activationProgressIface_);
+        }
+        activationProgressIface_ = server_.add_interface(
+            swPath_, "xyz.openbmc_project.Software.ActivationProgress");
+        activationProgressIface_->register_property("Progress", uint8_t{0});
+        activationProgressIface_->initialize();
+    }
+
+    void publishActivationProgress(uint8_t progress) override
+    {
+        if (activationProgressIface_)
+        {
+            activationProgressIface_->set_property("Progress", progress);
+        }
+    }
+
+    void removeActivationProgress() override
+    {
+        if (activationProgressIface_)
+        {
+            server_.remove_interface(activationProgressIface_);
+            activationProgressIface_.reset();
+        }
+    }
+
   private:
     static uint64_t epoch_now()
     {
@@ -99,10 +143,16 @@ class DbusStatePublisher final : public StatePublisher
         return std::string(prefix) + "InProgress";
     }
 
+    static constexpr std::string_view k_activation_active =
+        "xyz.openbmc_project.Software.Activation.Activations.Active";
+
     sdbusplus::asio::object_server& server_;
+    std::string swPath_;
     std::shared_ptr<sdbusplus::asio::dbus_interface> progIface_;
     std::shared_ptr<sdbusplus::asio::dbus_interface> stateIface_;
     std::shared_ptr<sdbusplus::asio::dbus_interface> swVersionIface_;
+    std::shared_ptr<sdbusplus::asio::dbus_interface> activationIface_;
+    std::shared_ptr<sdbusplus::asio::dbus_interface> activationProgressIface_;
 };
 
 std::unique_ptr<StatePublisher>
