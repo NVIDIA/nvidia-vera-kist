@@ -2,6 +2,7 @@
 
 #include <sdbusplus/asio/object_server.hpp>
 
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
@@ -44,6 +45,7 @@ struct IstPlatformConfig
     std::filesystem::path itmBinaryPath{"/bin/kist_itm"};
     HookPaths hooks;
     StoragePaths storage;
+    std::chrono::seconds transferInactivityTimeout{300};
 };
 
 /**
@@ -223,11 +225,14 @@ std::unique_ptr<StatePublisher>
 
 bool parsePlatformConfig(IstPlatformConfig& out, const std::string& path);
 
+class TransferSession;
+
 class IstService : public std::enable_shared_from_this<IstService>
 {
   public:
     static std::shared_ptr<IstService>
-        create(std::unique_ptr<StatePublisher> publisher,
+        create(boost::asio::io_context& io,
+               std::unique_ptr<StatePublisher> publisher,
                std::unique_ptr<HookRunner> hookRunner,
                std::shared_ptr<HostPowerMonitor> powerMonitor,
                std::unique_ptr<ItmRunner> itmRunner);
@@ -246,7 +251,8 @@ class IstService : public std::enable_shared_from_this<IstService>
     sdbusplus::message::unix_fd startUpdate();
 
   private:
-    IstService(std::unique_ptr<StatePublisher> publisher,
+    IstService(boost::asio::io_context& io,
+               std::unique_ptr<StatePublisher> publisher,
                std::unique_ptr<HookRunner> hookRunner,
                std::shared_ptr<HostPowerMonitor> powerMonitor,
                std::unique_ptr<ItmRunner> itmRunner);
@@ -263,6 +269,7 @@ class IstService : public std::enable_shared_from_this<IstService>
     void onDeassertDone(bool itmOk, bool okDeassert);
     void onResetDone(bool itmOk, bool okReset);
 
+    boost::asio::io_context& io_;
     std::unique_ptr<StatePublisher> publisher_;
 
     IstPlatformConfig platformCfg_;
@@ -273,4 +280,5 @@ class IstService : public std::enable_shared_from_this<IstService>
     std::unique_ptr<HookRunner> hookRunner_;
     std::shared_ptr<HostPowerMonitor> powerMonitor_;
     std::unique_ptr<ItmRunner> itmRunner_;
+    std::shared_ptr<TransferSession> activeTransfer_;
 };

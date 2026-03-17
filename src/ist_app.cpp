@@ -61,21 +61,24 @@ static bool is_path_within(const fs::path& child, const fs::path& parent)
 // ----------------
 
 std::shared_ptr<IstService>
-    IstService::create(std::unique_ptr<StatePublisher> publisher,
+    IstService::create(boost::asio::io_context& io,
+                       std::unique_ptr<StatePublisher> publisher,
                        std::unique_ptr<HookRunner> hook_runner,
                        std::shared_ptr<HostPowerMonitor> power_monitor,
                        std::unique_ptr<ItmRunner> itm_runner)
 {
     return std::shared_ptr<IstService>(
-        new IstService(std::move(publisher), std::move(hook_runner),
+        new IstService(io, std::move(publisher), std::move(hook_runner),
                        std::move(power_monitor), std::move(itm_runner)));
 }
 
-IstService::IstService(std::unique_ptr<StatePublisher> publisher,
+IstService::IstService(boost::asio::io_context& io,
+                       std::unique_ptr<StatePublisher> publisher,
                        std::unique_ptr<HookRunner> hook_runner,
                        std::shared_ptr<HostPowerMonitor> power_monitor,
                        std::unique_ptr<ItmRunner> itm_runner) :
-    publisher_(std::move(publisher)), hookRunner_(std::move(hook_runner)),
+    io_(io), publisher_(std::move(publisher)),
+    hookRunner_(std::move(hook_runner)),
     powerMonitor_(std::move(power_monitor)), itmRunner_(std::move(itm_runner))
 {}
 
@@ -523,20 +526,6 @@ void IstService::onResetDone(bool itm_ok, bool ok_reset)
         transitionTo(IstStage::idle,
                      itm_ok ? IstStatus::completed : IstStatus::failed);
     }
-}
-
-// TODO: Implement image transfer flow (pipe creation, async read loop,
-// transfer timeout, PLDM processing, and mount).
-sdbusplus::message::unix_fd IstService::startUpdate()
-{
-    if (!initialized_)
-    {
-        std::cerr << "startUpdate called before initialize\n";
-        throw sdbusplus::exception::SdBusError(EINVAL, "Not initialized");
-    }
-    std::cerr << "startUpdate: not yet implemented\n";
-    throw sdbusplus::exception::SdBusError(ENOTSUP,
-                                           "Update not yet implemented");
 }
 
 // ----------------

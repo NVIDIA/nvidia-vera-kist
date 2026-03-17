@@ -110,6 +110,7 @@ if get_option('build_ist')
     ist_app_a = static_library(
         'ist_app_a',
         'src/ist_app.cpp',
+        'src/update_manager.cpp',
         'src/hook_runner.cpp',
         'src/host_power_monitor.cpp',
         'src/itm_runner.cpp',

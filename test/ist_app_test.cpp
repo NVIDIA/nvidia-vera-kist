@@ -1,3 +1,5 @@
+#include <unistd.h>
+
 #include <ist_app.hpp>
 #include <sdbusplus/exception.hpp>
 
@@ -111,6 +113,7 @@ TEST(IstPlatformConfigTest, DefaultValues)
     EXPECT_TRUE(cfg.storage.vectorMountPath.empty());
     EXPECT_TRUE(cfg.storage.vectorStoragePath.empty());
     EXPECT_TRUE(cfg.storage.resultStoragePath.empty());
+    EXPECT_EQ(cfg.transferInactivityTimeout, std::chrono::seconds(300));
 }
 
 // ----------------
@@ -176,9 +179,9 @@ class IstServiceTest : public ::testing::Test
         powerMonitor_ = power_monitor.get();
         itmRunner_ = itm_runner.get();
 
-        service_ =
-            IstService::create(std::move(publisher), std::move(hook_runner),
-                               std::move(power_monitor), std::move(itm_runner));
+        service_ = IstService::create(
+            io_, std::move(publisher), std::move(hook_runner),
+            std::move(power_monitor), std::move(itm_runner));
     }
 
     bool init_from_file(const std::string& path)
@@ -203,6 +206,7 @@ class IstServiceTest : public ::testing::Test
         fs::remove_all(tmpDir_);
     }
 
+    boost::asio::io_context io_;
     std::shared_ptr<IstService> service_;
 
     MockStatePublisher* publisher_ = nullptr;
@@ -1559,4 +1563,151 @@ TEST_F(IstServiceTest, StartIstBeforeInitializeThrows)
     EXPECT_THROW(service_->startIST(params), sdbusplus::exception::SdBusError);
     EXPECT_EQ(service_->state().status, IstStatus::aborted);
     EXPECT_EQ(service_->state().stage, IstStage::idle);
+}
+
+// ----------------
+// StartUpdate / image transfer tests
+// ----------------
+
+TEST_F(IstServiceTest, StartUpdateReturnsValidFd)
+{
+    init_from_file(configPath_);
+    int fd = static_cast<int>(service_->startUpdate());
+    EXPECT_GE(fd, 0);
+    ::close(fd);
+    io_.run();
+}
+
+TEST_F(IstServiceTest, StartUpdateTransfersData)
+{
+    init_from_file(configPath_);
+    int fd = static_cast<int>(service_->startUpdate());
+
+    const std::string payload = "hello image data";
+    ASSERT_EQ(::write(fd, payload.data(), payload.size()),
+              static_cast<ssize_t>(payload.size()));
+    ::close(fd);
+
+    io_.run();
+
+    fs::path image_path = tmpDir_ / "storage" / "CPU-IST.img";
+    ASSERT_TRUE(fs::exists(image_path));
+
+    std::ifstream img(image_path, std::ios::binary);
+    std::string content((std::istreambuf_iterator<char>(img)),
+                        std::istreambuf_iterator<char>());
+    EXPECT_EQ(content, payload);
+}
+
+TEST_F(IstServiceTest, StartUpdateRejectsConcurrentTransfer)
+{
+    init_from_file(configPath_);
+    int fd = static_cast<int>(service_->startUpdate());
+
+    EXPECT_THROW(service_->startUpdate(), sdbusplus::exception::SdBusError);
+
+    ::close(fd);
+    io_.run();
+}
+
+TEST_F(IstServiceTest, StartUpdateRejectsWhileIstRunning)
+{
+    init_from_file(configPath_);
+
+    DoneCb assert_done;
+    EXPECT_CALL(
+        *hookRunner_,
+        asyncRun(::testing::_, StrEq("istBootAssert hook"), ::testing::_))
+        .WillOnce([&](const std::string&, const std::string&, DoneCb done) {
+            assert_done = std::move(done);
+        });
+
+    ParamMap params;
+    service_->startIST(params);
+
+    EXPECT_THROW(service_->startUpdate(), sdbusplus::exception::SdBusError);
+}
+
+TEST_F(IstServiceTest, StartUpdateEmptyTransferCleansUp)
+{
+    init_from_file(configPath_);
+    int fd = static_cast<int>(service_->startUpdate());
+    ::close(fd);
+
+    io_.run();
+
+    fs::path image_path = tmpDir_ / "storage" / "CPU-IST.img";
+    EXPECT_FALSE(fs::exists(image_path));
+}
+
+TEST_F(IstServiceTest, StartUpdateTimesOut)
+{
+    IstPlatformConfig cfg;
+    ASSERT_TRUE(parsePlatformConfig(cfg, configPath_));
+    cfg.transferInactivityTimeout = std::chrono::seconds(1);
+    ASSERT_TRUE(service_->initialize(std::move(cfg)));
+
+    int fd = static_cast<int>(service_->startUpdate());
+
+    io_.run();
+
+    fs::path image_path = tmpDir_ / "storage" / "CPU-IST.img";
+    EXPECT_FALSE(fs::exists(image_path));
+
+    ::close(fd);
+}
+
+TEST_F(IstServiceTest, StartUpdateAllowsNewTransferAfterCompletion)
+{
+    init_from_file(configPath_);
+
+    int fd1 = static_cast<int>(service_->startUpdate());
+    const std::string data1 = "first transfer";
+    ASSERT_EQ(::write(fd1, data1.data(), data1.size()),
+              static_cast<ssize_t>(data1.size()));
+    ::close(fd1);
+    io_.run();
+
+    fs::path image_path = tmpDir_ / "storage" / "CPU-IST.img";
+    ASSERT_TRUE(fs::exists(image_path));
+
+    io_.restart();
+
+    int fd2 = static_cast<int>(service_->startUpdate());
+    const std::string data2 = "second transfer";
+    ASSERT_EQ(::write(fd2, data2.data(), data2.size()),
+              static_cast<ssize_t>(data2.size()));
+    ::close(fd2);
+    io_.run();
+
+    std::ifstream img(image_path, std::ios::binary);
+    std::string content((std::istreambuf_iterator<char>(img)),
+                        std::istreambuf_iterator<char>());
+    EXPECT_EQ(content, data2);
+}
+
+TEST_F(IstServiceTest, StartUpdateRejectsEmptyStoragePath)
+{
+    write_config(R"({
+        "hookDirectory": ")" +
+                 (tmpDir_ / "hooks").string() + R"(",
+        "hookPaths": {
+            "istBootAssert": ")" +
+                 (tmpDir_ / "hooks/assert.sh").string() + R"(",
+            "istBootDeassert": ")" +
+                 (tmpDir_ / "hooks/deassert.sh").string() + R"(",
+            "resetSystem": ")" +
+                 (tmpDir_ / "hooks/reset.sh").string() + R"("
+        },
+        "storageConfig": {
+            "vectorMountPath": ")" +
+                 (tmpDir_ / "vectors").string() + R"(",
+            "resultStoragePath": ")" +
+                 (tmpDir_ / "results").string() + R"("
+        },
+        "softwareInventoryId": "IST_Vectors"
+    })");
+    init_from_file(configPath_);
+
+    EXPECT_THROW(service_->startUpdate(), sdbusplus::exception::SdBusError);
 }

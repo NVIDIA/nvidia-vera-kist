@@ -1,3 +1,5 @@
+#include <unistd.h>
+
 #include <ist_app.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/message/types.hpp>
@@ -59,7 +61,7 @@ int main(int, char**)
     std::string sw_path = sw_path_prefix + platform_cfg.softwareInventoryId;
 
     std::shared_ptr<IstService> service = IstService::create(
-        makeDbusStatePublisher(server, sw_path), makeHookRunner(io),
+        io, makeDbusStatePublisher(server, sw_path), makeHookRunner(io),
         makeHostPowerMonitor(io, conn), makeItmRunner(io));
 
     if (!service->initialize(std::move(platform_cfg)))
@@ -88,8 +90,15 @@ int main(int, char**)
     // Software update interface
     std::shared_ptr<sdbusplus::asio::dbus_interface> update_iface =
         server.add_interface(sw_path, "xyz.openbmc_project.Software.Update");
-    update_iface->register_method(
-        "StartUpdate", [service]() { return service->startUpdate(); });
+    update_iface->register_method("StartUpdate", [service, &io]() {
+        sdbusplus::message::unix_fd fd = service->startUpdate();
+        int raw_fd = static_cast<int>(fd);
+        // The D-Bus layer dup()s this FD into the reply message, so we own
+        // a now-redundant copy. Post the close so it runs after the reply
+        // is fully built (i.e., after this handler returns).
+        boost::asio::post(io, [raw_fd]() { ::close(raw_fd); });
+        return fd;
+    });
     update_iface->initialize();
 
     conn->request_name("com.nvidia.vera.ist");
