@@ -199,6 +199,7 @@ class StatePublisher
     virtual ~StatePublisher() = default;
     virtual void publish(const IstState& state) = 0;
     virtual void publishProgress(uint8_t progress) = 0;
+    virtual void publishVersion(const std::string& version) = 0;
     virtual void createProgress() = 0;
     virtual void removeProgress() = 0;
     virtual void publishActivation(std::string_view state) = 0;
@@ -276,6 +277,8 @@ class IstService : public std::enable_shared_from_this<IstService>
 
     void onTransferComplete(bool ok, const std::filesystem::path& imagePath);
     void onStripComplete(bool ok);
+    bool mountImages();
+    void readAndPublishVersion();
 
     boost::asio::io_context& io_;
     std::unique_ptr<StatePublisher> publisher_;

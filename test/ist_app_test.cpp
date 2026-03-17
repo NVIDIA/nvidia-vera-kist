@@ -56,6 +56,7 @@ class MockStatePublisher : public StatePublisher
   public:
     MOCK_METHOD(void, publish, (const IstState& state), (override));
     MOCK_METHOD(void, publishProgress, (uint8_t progress), (override));
+    MOCK_METHOD(void, publishVersion, (const std::string& version), (override));
     MOCK_METHOD(void, createProgress, (), (override));
     MOCK_METHOD(void, removeProgress, (), (override));
     MOCK_METHOD(void, publishActivation, (std::string_view state), (override));
@@ -1942,4 +1943,64 @@ TEST_F(IstServiceTest, StartUpdatePldmStripMultiChunk)
     std::vector<uint8_t> content((std::istreambuf_iterator<char>(img)),
                                  std::istreambuf_iterator<char>());
     EXPECT_EQ(content, payload);
+}
+
+// ----------------
+// Version publishing tests
+// ----------------
+
+TEST_F(IstServiceTest, ReadAndPublishVersionSucceeds)
+{
+    std::ofstream(tmpDir_ / "vectors" / "version.txt") << "1.2.3-abc";
+
+    EXPECT_CALL(*publisher_, publishVersion("1.2.3-abc")).Times(1);
+    ASSERT_TRUE(init_from_file(configPath_));
+}
+
+TEST_F(IstServiceTest, ReadAndPublishVersionMissingFile)
+{
+    EXPECT_CALL(*publisher_, publishVersion(testing::_)).Times(0);
+    ASSERT_TRUE(init_from_file(configPath_));
+}
+
+TEST_F(IstServiceTest, ReadAndPublishVersionEmptyFile)
+{
+    std::ofstream(tmpDir_ / "vectors" / "version.txt") << "";
+
+    EXPECT_CALL(*publisher_, publishVersion(testing::_)).Times(0);
+    ASSERT_TRUE(init_from_file(configPath_));
+}
+
+TEST_F(IstServiceTest, ReadAndPublishVersionWhitespaceOnly)
+{
+    std::ofstream(tmpDir_ / "vectors" / "version.txt") << "   \t\n";
+
+    EXPECT_CALL(*publisher_, publishVersion(testing::_)).Times(0);
+    ASSERT_TRUE(init_from_file(configPath_));
+}
+
+TEST_F(IstServiceTest, ReadAndPublishVersionTrimWhitespace)
+{
+    std::ofstream(tmpDir_ / "vectors" / "version.txt") << "  1.2.3 \t";
+
+    EXPECT_CALL(*publisher_, publishVersion("1.2.3")).Times(1);
+    ASSERT_TRUE(init_from_file(configPath_));
+}
+
+TEST_F(IstServiceTest, ReadAndPublishVersionMultipleLines)
+{
+    std::ofstream(tmpDir_ / "vectors" / "version.txt") << "1.2.3\nextra\n";
+
+    EXPECT_CALL(*publisher_, publishVersion("1.2.3")).Times(1);
+    ASSERT_TRUE(init_from_file(configPath_));
+}
+
+TEST_F(IstServiceTest, ReadAndPublishVersionVeryLongString)
+{
+    std::string long_version(4096, 'x');
+    std::ofstream(tmpDir_ / "vectors" / "version.txt") << long_version;
+
+    std::string truncated(256, 'x');
+    EXPECT_CALL(*publisher_, publishVersion(truncated)).Times(1);
+    ASSERT_TRUE(init_from_file(configPath_));
 }

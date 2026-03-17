@@ -254,6 +254,11 @@ bool IstService::initialize(IstPlatformConfig cfg)
     }
 
     initialized_ = true;
+
+    // Best effort: Even if mount images fails here it may be due to the
+    // test vectors already being mounted previously.
+    mountImages();
+    readAndPublishVersion();
     return true;
 }
 

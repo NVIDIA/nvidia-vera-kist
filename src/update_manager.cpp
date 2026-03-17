@@ -5,12 +5,14 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <boost/algorithm/string/trim.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/posix/stream_descriptor.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <ist_app.hpp>
 #include <sdbusplus/exception.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cerrno>
 #include <cstdint>
@@ -330,6 +332,47 @@ static void teardown_loop_devices_under(const fs::path& dir)
                   << " (backing " << backing_file << ")\n";
         teardown_loop_device(dev_path);
     }
+}
+
+// Allocate a free loop device, attach `image_path` as its backing file,
+// and return the device path (e.g. "/dev/loop3").  Returns std::nullopt
+// on failure.
+static std::optional<std::string> setup_loop_device(const fs::path& image_path,
+                                                    int open_flags)
+{
+    UniqueFd ctl_fd(::open("/dev/loop-control", O_RDWR | O_CLOEXEC));
+    if (ctl_fd.get() < 0)
+    {
+        std::cerr << "open loop-control: " << errno << '\n';
+        return std::nullopt;
+    }
+    int loop_num = ::ioctl(ctl_fd.get(), LOOP_CTL_GET_FREE);
+    if (loop_num < 0)
+    {
+        std::cerr << "LOOP_CTL_GET_FREE: " << errno << '\n';
+        return std::nullopt;
+    }
+
+    std::string loop_dev = "/dev/loop" + std::to_string(loop_num);
+
+    UniqueFd loop_fd(::open(loop_dev.c_str(), open_flags | O_CLOEXEC));
+    if (loop_fd.get() < 0)
+    {
+        std::cerr << "open " << loop_dev << ": " << errno << '\n';
+        return std::nullopt;
+    }
+    UniqueFd img_fd(::open(image_path.c_str(), open_flags | O_CLOEXEC));
+    if (img_fd.get() < 0)
+    {
+        std::cerr << "open " << image_path << ": " << errno << '\n';
+        return std::nullopt;
+    }
+    if (::ioctl(loop_fd.get(), LOOP_SET_FD, img_fd.get()) < 0)
+    {
+        std::cerr << "LOOP_SET_FD for " << image_path << ": " << errno << '\n';
+        return std::nullopt;
+    }
+    return loop_dev;
 }
 
 // ----------------------------------------------------------------
@@ -811,6 +854,163 @@ void IstService::onStripComplete(bool ok)
     }
 
     std::cout << "PLDM strip succeeded\n";
-    publisher_->publishActivation(k_activation_active);
     publisher_->removeActivationProgress();
+
+    if (!mountImages())
+    {
+        std::cerr << "Failed to mount images after PLDM strip\n";
+        publisher_->publishActivation(k_activation_failed);
+        return;
+    }
+
+    publisher_->publishActivation(k_activation_active);
+    readAndPublishVersion();
+}
+
+bool IstService::mountImages()
+{
+    const fs::path& storage_path = platformCfg_.storage.vectorStoragePath;
+    const fs::path& mount_path = platformCfg_.storage.vectorMountPath;
+
+    if (storage_path.empty() || mount_path.empty())
+    {
+        std::cerr << "vectorStoragePath or vectorMountPath not configured\n";
+        return false;
+    }
+
+    fs::path image_path = storage_path / k_image_file_name;
+    std::error_code ec;
+    bool exists = fs::exists(image_path, ec);
+    if (ec)
+    {
+        std::cerr << "Failed to stat " << image_path << ": " << ec.message()
+                  << '\n';
+        return false;
+    }
+    if (!exists)
+    {
+        std::cout << "No IST image at " << image_path << "; nothing to mount\n";
+        return false;
+    }
+
+    fs::create_directories(mount_path, ec);
+    if (ec)
+    {
+        std::cerr << "Failed to create " << mount_path << ": " << ec.message()
+                  << '\n';
+        return false;
+    }
+
+    std::optional<std::string> loop_dev =
+        setup_loop_device(image_path, O_RDONLY);
+    if (!loop_dev)
+    {
+        return false;
+    }
+
+    if (::mount(loop_dev->c_str(), mount_path.c_str(), "ext4",
+                MS_RDONLY | MS_NOATIME, nullptr) != 0)
+    {
+        if (errno == EBUSY)
+        {
+            // EBUSY means mount_path is already an active mount point.
+            // Detach the loop device we just created (it's unused) and
+            // return success — the existing mount is what we want.
+            std::cout << "Vectors already mounted at " << mount_path << '\n';
+            teardown_loop_device(*loop_dev);
+            return true;
+        }
+        std::cerr << "mount ext4 at " << mount_path << ": " << errno << '\n';
+        teardown_loop_device(*loop_dev);
+        return false;
+    }
+    std::cout << "Mounted ext4 image at " << mount_path << '\n';
+
+    fs::path sqsh_path = mount_path / "GOLDEN_RES.sqfs";
+    exists = fs::exists(sqsh_path, ec);
+    if (ec)
+    {
+        std::cerr << "Failed to stat " << sqsh_path << ": " << ec.message()
+                  << '\n';
+        return false;
+    }
+    if (!exists)
+    {
+        std::cerr << "Golden results image not found: " << sqsh_path << '\n';
+        return false;
+    }
+
+    fs::path golden_mount = mount_path / "GOLDEN_RES";
+    fs::create_directories(golden_mount, ec);
+    if (ec)
+    {
+        std::cerr << "Failed to create " << golden_mount << ": " << ec.message()
+                  << '\n';
+        return false;
+    }
+
+    std::optional<std::string> sqsh_loop =
+        setup_loop_device(sqsh_path, O_RDONLY);
+    if (!sqsh_loop)
+    {
+        std::cerr << "Failed to set up loop device for squashfs\n";
+        return false;
+    }
+
+    if (::mount(sqsh_loop->c_str(), golden_mount.c_str(), "squashfs", MS_RDONLY,
+                nullptr) != 0)
+    {
+        std::cerr << "mount squashfs at " << golden_mount << ": " << errno
+                  << '\n';
+        teardown_loop_device(*sqsh_loop);
+        return false;
+    }
+    std::cout << "Mounted golden results at " << golden_mount << '\n';
+
+    return true;
+}
+
+void IstService::readAndPublishVersion()
+{
+    const fs::path& mount_path = platformCfg_.storage.vectorMountPath;
+    if (mount_path.empty())
+    {
+        std::cerr << "vectorMountPath not configured; skipping version read\n";
+        return;
+    }
+
+    fs::path version_file = mount_path / "version.txt";
+    std::ifstream f(version_file);
+    if (!f.is_open())
+    {
+        std::cout << "No version.txt at " << version_file
+                  << "; version unavailable\n";
+        return;
+    }
+
+    std::string version;
+    if (!std::getline(f, version))
+    {
+        std::cerr << "Failed to read " << version_file << '\n';
+        return;
+    }
+
+    boost::algorithm::trim(version);
+
+    constexpr size_t k_max_version_length = 256;
+    if (version.size() > k_max_version_length)
+    {
+        std::cerr << "Version string too long (" << version.size()
+                  << " chars), truncating to " << k_max_version_length << '\n';
+        version.resize(k_max_version_length);
+    }
+
+    if (version.empty())
+    {
+        std::cerr << "version.txt at " << version_file << " is empty\n";
+        return;
+    }
+
+    publisher_->publishVersion(version);
+    std::cout << "IST vector version: " << version << '\n';
 }

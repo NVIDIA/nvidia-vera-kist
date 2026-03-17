@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <iostream>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -51,6 +52,19 @@ class DbusStatePublisher final : public StatePublisher
         if (progIface_)
         {
             progIface_->set_property("Progress", progress);
+        }
+    }
+
+    void publishVersion(const std::string& version) override
+    {
+        if (swVersionIface_)
+        {
+            swVersionIface_->set_property("Version", version);
+        }
+        else
+        {
+            std::cerr << "publishVersion: swVersionIface_ is null, version="
+                      << version << '\n';
         }
     }
 
