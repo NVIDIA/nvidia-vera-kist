@@ -174,6 +174,7 @@ bool parsePlatformConfig(IstPlatformConfig& out, const std::string& path)
 
     json sc = d.value("storageConfig", json::object());
     out.storage.vectorMountPath = json_path(sc, "vectorMountPath");
+    out.storage.vectorStoragePath = json_path(sc, "vectorStoragePath");
     out.storage.resultStoragePath = json_path(sc, "resultStoragePath");
 
     // Validate hook paths: reject explicitly-set-but-empty values,
@@ -218,6 +219,8 @@ void IstService::printIstPlatformConfig() const
     std::cout << "storage:\n";
     std::cout << "  vectorMountPath = " << platformCfg_.storage.vectorMountPath
               << '\n';
+    std::cout << "  vectorStoragePath = "
+              << platformCfg_.storage.vectorStoragePath << '\n';
     std::cout << "  resultStoragePath = "
               << platformCfg_.storage.resultStoragePath << '\n';
 }

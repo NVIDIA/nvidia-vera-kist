@@ -33,6 +33,7 @@ struct HookPaths
 struct StoragePaths
 {
     std::filesystem::path vectorMountPath;
+    std::filesystem::path vectorStoragePath;
     std::filesystem::path resultStoragePath;
 };
 

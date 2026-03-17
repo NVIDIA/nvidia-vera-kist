@@ -109,6 +109,7 @@ TEST(IstPlatformConfigTest, DefaultValues)
     EXPECT_TRUE(cfg.hooks.resetSystem.empty());
     EXPECT_TRUE(cfg.hooks.errorCheck.empty());
     EXPECT_TRUE(cfg.storage.vectorMountPath.empty());
+    EXPECT_TRUE(cfg.storage.vectorStoragePath.empty());
     EXPECT_TRUE(cfg.storage.resultStoragePath.empty());
 }
 
@@ -126,6 +127,7 @@ class IstServiceTest : public ::testing::Test
                   ("ist_test_" + std::to_string(getpid()) + "_" +
                    std::to_string(counter++));
         fs::create_directories(tmpDir_ / "vectors");
+        fs::create_directories(tmpDir_ / "storage");
         fs::create_directories(tmpDir_ / "results");
         fs::create_directories(tmpDir_ / "hooks");
 
@@ -151,6 +153,8 @@ class IstServiceTest : public ::testing::Test
             "storageConfig": {
                 "vectorMountPath": ")" +
                      (tmpDir_ / "vectors").string() + R"(",
+                "vectorStoragePath": ")" +
+                     (tmpDir_ / "storage").string() + R"(",
                 "resultStoragePath": ")" +
                      (tmpDir_ / "results").string() + R"("
             },
@@ -260,6 +264,8 @@ TEST_F(IstServiceTest, SoftwareInventoryIdMissingFails)
         "storageConfig": {
             "vectorMountPath": ")" +
                  (tmpDir_ / "vectors").string() + R"(",
+            "vectorStoragePath": ")" +
+                 (tmpDir_ / "storage").string() + R"(",
             "resultStoragePath": ")" +
                  (tmpDir_ / "results").string() + R"("
         }
@@ -283,6 +289,8 @@ TEST_F(IstServiceTest, SoftwareInventoryIdCustomValue)
         "storageConfig": {
             "vectorMountPath": ")" +
                  (tmpDir_ / "vectors").string() + R"(",
+            "vectorStoragePath": ")" +
+                 (tmpDir_ / "storage").string() + R"(",
             "resultStoragePath": ")" +
                  (tmpDir_ / "results").string() + R"("
         },
@@ -308,6 +316,8 @@ TEST_F(IstServiceTest, SoftwareInventoryIdRejectsInvalidChars)
         "storageConfig": {
             "vectorMountPath": ")" +
                  (tmpDir_ / "vectors").string() + R"(",
+            "vectorStoragePath": ")" +
+                 (tmpDir_ / "storage").string() + R"(",
             "resultStoragePath": ")" +
                  (tmpDir_ / "results").string() + R"("
         },
@@ -332,6 +342,8 @@ TEST_F(IstServiceTest, SoftwareInventoryIdRejectsDash)
         "storageConfig": {
             "vectorMountPath": ")" +
                  (tmpDir_ / "vectors").string() + R"(",
+            "vectorStoragePath": ")" +
+                 (tmpDir_ / "storage").string() + R"(",
             "resultStoragePath": ")" +
                  (tmpDir_ / "results").string() + R"("
         },
@@ -356,6 +368,8 @@ TEST_F(IstServiceTest, SoftwareInventoryIdRejectsSpace)
         "storageConfig": {
             "vectorMountPath": ")" +
                  (tmpDir_ / "vectors").string() + R"(",
+            "vectorStoragePath": ")" +
+                 (tmpDir_ / "storage").string() + R"(",
             "resultStoragePath": ")" +
                  (tmpDir_ / "results").string() + R"("
         },
@@ -380,6 +394,8 @@ TEST_F(IstServiceTest, SoftwareInventoryIdRejectsDot)
         "storageConfig": {
             "vectorMountPath": ")" +
                  (tmpDir_ / "vectors").string() + R"(",
+            "vectorStoragePath": ")" +
+                 (tmpDir_ / "storage").string() + R"(",
             "resultStoragePath": ")" +
                  (tmpDir_ / "results").string() + R"("
         },
@@ -404,6 +420,8 @@ TEST_F(IstServiceTest, SoftwareInventoryIdRejectsEmpty)
         "storageConfig": {
             "vectorMountPath": ")" +
                  (tmpDir_ / "vectors").string() + R"(",
+            "vectorStoragePath": ")" +
+                 (tmpDir_ / "storage").string() + R"(",
             "resultStoragePath": ")" +
                  (tmpDir_ / "results").string() + R"("
         },
@@ -428,6 +446,8 @@ TEST_F(IstServiceTest, SoftwareInventoryIdAcceptsUnderscoresAndDigits)
         "storageConfig": {
             "vectorMountPath": ")" +
                  (tmpDir_ / "vectors").string() + R"(",
+            "vectorStoragePath": ")" +
+                 (tmpDir_ / "storage").string() + R"(",
             "resultStoragePath": ")" +
                  (tmpDir_ / "results").string() + R"("
         },
@@ -965,6 +985,8 @@ TEST_F(IstServiceTest, StartIstThrowsWhenAssertHookMissing)
         "storageConfig": {
             "vectorMountPath": ")" +
                  (tmpDir_ / "vectors").string() + R"(",
+            "vectorStoragePath": ")" +
+                 (tmpDir_ / "storage").string() + R"(",
             "resultStoragePath": ")" +
                  (tmpDir_ / "results").string() + R"("
         },
@@ -1026,6 +1048,8 @@ TEST_F(IstServiceTest, CleanupFailsWhenDeassertHookMissing)
         "storageConfig": {
             "vectorMountPath": ")" +
                  (tmpDir_ / "vectors").string() + R"(",
+            "vectorStoragePath": ")" +
+                 (tmpDir_ / "storage").string() + R"(",
             "resultStoragePath": ")" +
                  (tmpDir_ / "results").string() + R"("
         },
@@ -1182,6 +1206,8 @@ TEST_F(IstServiceTest, AutoRebootFailsWhenResetHookMissing)
         "storageConfig": {
             "vectorMountPath": ")" +
                  (tmpDir_ / "vectors").string() + R"(",
+            "vectorStoragePath": ")" +
+                 (tmpDir_ / "storage").string() + R"(",
             "resultStoragePath": ")" +
                  (tmpDir_ / "results").string() + R"("
         },
