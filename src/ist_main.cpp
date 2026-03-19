@@ -4,11 +4,30 @@
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/message/types.hpp>
 
+#include <cerrno>
 #include <iostream>
 
 static constexpr const char* config_path = "/etc/ist/platform_cfg.json";
 static constexpr const char* sw_path_prefix =
     "/xyz/openbmc_project/inventory_software/";
+
+// The D-Bus layer dup()s the FD into the reply message, so we own a
+// now-redundant copy.  Post the close so it runs after the reply is
+// fully built (i.e., after the handler returns).
+static sdbusplus::message::unix_fd
+    return_and_post_close(sdbusplus::message::unix_fd fd,
+                          boost::asio::io_context& io)
+{
+    int raw_fd = static_cast<int>(fd);
+    boost::asio::post(io, [raw_fd]() {
+        if (::close(raw_fd) < 0)
+        {
+            std::cerr << "IST: close fd " << raw_fd << " failed: " << errno
+                      << '\n';
+        }
+    });
+    return fd;
+}
 
 static void start_ist_from_dbus(const std::shared_ptr<IstService>& service,
                                 int32_t sw_timeout_sec, bool continue_on_fail,
@@ -85,19 +104,16 @@ int main(int, char**)
                                 auto_reboot_on_complete, test_list, socket_list,
                                 save_result_on_pass, save_result_on_fail);
         });
+    control_iface->register_method("GetResultsFd", [service, &io]() {
+        return return_and_post_close(service->getResultsFd(), io);
+    });
     control_iface->initialize();
 
     // Software update interface
     std::shared_ptr<sdbusplus::asio::dbus_interface> update_iface =
         server.add_interface(sw_path, "xyz.openbmc_project.Software.Update");
     update_iface->register_method("StartUpdate", [service, &io]() {
-        sdbusplus::message::unix_fd fd = service->startUpdate();
-        int raw_fd = static_cast<int>(fd);
-        // The D-Bus layer dup()s this FD into the reply message, so we own
-        // a now-redundant copy. Post the close so it runs after the reply
-        // is fully built (i.e., after this handler returns).
-        boost::asio::post(io, [raw_fd]() { ::close(raw_fd); });
-        return fd;
+        return return_and_post_close(service->startUpdate(), io);
     });
     update_iface->initialize();
 

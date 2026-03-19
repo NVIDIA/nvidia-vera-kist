@@ -45,56 +45,6 @@ static constexpr std::array k_managed_image_names = {
 };
 
 // ----------------------------------------------------------------
-// File-descriptor wrapper
-// ----------------------------------------------------------------
-
-class UniqueFd
-{
-  public:
-    explicit UniqueFd(int fd = -1) noexcept : fd_(fd)
-    {}
-    ~UniqueFd()
-    {
-        if (fd_ >= 0)
-        {
-            ::close(fd_);
-        }
-    }
-    UniqueFd(const UniqueFd&) = delete;
-    UniqueFd& operator=(const UniqueFd&) = delete;
-    UniqueFd(UniqueFd&& o) noexcept : fd_(o.fd_)
-    {
-        o.fd_ = -1;
-    }
-    UniqueFd& operator=(UniqueFd&& o) noexcept
-    {
-        if (this != &o)
-        {
-            if (fd_ >= 0)
-            {
-                ::close(fd_);
-            }
-            fd_ = o.fd_;
-            o.fd_ = -1;
-        }
-        return *this;
-    }
-    int get() const noexcept
-    {
-        return fd_;
-    }
-    int release() noexcept
-    {
-        int fd = fd_;
-        fd_ = -1;
-        return fd;
-    }
-
-  private:
-    int fd_;
-};
-
-// ----------------------------------------------------------------
 // PLDM package helpers
 // ----------------------------------------------------------------
 

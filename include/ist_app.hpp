@@ -1,5 +1,7 @@
 #pragma once
 
+#include <unistd.h>
+
 #include <sdbusplus/asio/object_server.hpp>
 
 #include <chrono>
@@ -11,6 +13,56 @@
 #include <string>
 #include <unordered_map>
 #include <variant>
+
+// ----------------
+// File-descriptor wrapper
+// ----------------
+
+class UniqueFd
+{
+  public:
+    explicit UniqueFd(int fd = -1) noexcept : fd_(fd)
+    {}
+    ~UniqueFd()
+    {
+        if (fd_ >= 0)
+        {
+            ::close(fd_);
+        }
+    }
+    UniqueFd(const UniqueFd&) = delete;
+    UniqueFd& operator=(const UniqueFd&) = delete;
+    UniqueFd(UniqueFd&& o) noexcept : fd_(o.fd_)
+    {
+        o.fd_ = -1;
+    }
+    UniqueFd& operator=(UniqueFd&& o) noexcept
+    {
+        if (this != &o)
+        {
+            if (fd_ >= 0)
+            {
+                ::close(fd_);
+            }
+            fd_ = o.fd_;
+            o.fd_ = -1;
+        }
+        return *this;
+    }
+    int get() const noexcept
+    {
+        return fd_;
+    }
+    int release() noexcept
+    {
+        int fd = fd_;
+        fd_ = -1;
+        return fd;
+    }
+
+  private:
+    int fd_ = -1;
+};
 
 // ----------------
 // Type aliases
@@ -255,6 +307,7 @@ class IstService : public std::enable_shared_from_this<IstService>
     }
     void startIST(const ParamMap& testParams);
     sdbusplus::message::unix_fd startUpdate();
+    sdbusplus::message::unix_fd getResultsFd();
 
   private:
     IstService(boost::asio::io_context& io,
