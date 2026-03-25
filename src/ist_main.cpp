@@ -30,7 +30,8 @@ static sdbusplus::message::unix_fd
 }
 
 static void start_ist_from_dbus(const std::shared_ptr<IstService>& service,
-                                int32_t sw_timeout_sec, bool continue_on_fail,
+                                int32_t sw_timeout_sec,
+                                const std::string& continue_on_fail,
                                 bool auto_reboot_on_complete,
                                 const std::string& test_list,
                                 const std::string& socket_list,
@@ -42,7 +43,10 @@ static void start_ist_from_dbus(const std::shared_ptr<IstService>& service,
     {
         params["istSwTimeoutSec"] = static_cast<int>(sw_timeout_sec);
     }
-    params["istContinueOnFail"] = continue_on_fail;
+    if (continue_on_fail != "Default" && !continue_on_fail.empty())
+    {
+        params["istContinueOnFail"] = (continue_on_fail == "Enable");
+    }
     params["autoRebootOnComplete"] = auto_reboot_on_complete;
     if (!test_list.empty())
     {
@@ -52,11 +56,11 @@ static void start_ist_from_dbus(const std::shared_ptr<IstService>& service,
     {
         params["customSocketList"] = socket_list;
     }
-    if (!save_result_on_pass.empty())
+    if (save_result_on_pass != "Default" && !save_result_on_pass.empty())
     {
         params["istSaveResOnPass"] = (save_result_on_pass == "Enable");
     }
-    if (!save_result_on_fail.empty())
+    if (save_result_on_fail != "Default" && !save_result_on_fail.empty())
     {
         params["istSaveResOnFail"] = (save_result_on_fail == "Enable");
     }
@@ -95,7 +99,7 @@ int main(int, char**)
                              "xyz.openbmc_project.ist.Control");
     control_iface->register_method(
         "StartIST",
-        [service](int32_t sw_timeout_sec, bool continue_on_fail,
+        [service](int32_t sw_timeout_sec, const std::string& continue_on_fail,
                   bool auto_reboot_on_complete, const std::string& test_list,
                   const std::string& socket_list,
                   const std::string& save_result_on_pass,
