@@ -18,6 +18,7 @@ class DbusStatePublisher final : public StatePublisher
                                             "com.nvidia.vera.ist.State");
         stateIface_->register_property("Stage",
                                        istStageToString(IstStage::idle));
+        stateIface_->register_property("IstInProgress", false);
         stateIface_->initialize();
 
         swVersionIface_ = server_.add_interface(
@@ -35,6 +36,8 @@ class DbusStatePublisher final : public StatePublisher
     void publish(const IstState& state) override
     {
         stateIface_->set_property("Stage", istStageToString(state.stage));
+        stateIface_->set_property("IstInProgress",
+                                  state.stage != IstStage::idle);
         if (progIface_)
         {
             progIface_->set_property("Status",
