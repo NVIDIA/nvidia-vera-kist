@@ -67,9 +67,6 @@ add_project_arguments(
     language: 'cpp',
 )
 
-if get_option('build_itm')
-    subdir('itm')
-endif
 
 if get_option('build_ist')
     systemd = dependency('systemd')
