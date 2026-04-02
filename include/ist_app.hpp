@@ -222,9 +222,9 @@ class HookRunner
 {
   public:
     virtual ~HookRunner() = default;
-    virtual void
-        asyncRun(const std::string& cmd, std::string what,
-                 std::move_only_function<void(bool ok) const> done) = 0;
+    virtual void asyncRun(const std::string& cmd, std::string what,
+                          std::move_only_function<void(bool ok) const> done,
+                          std::vector<std::string> args = {}) = 0;
 };
 
 class HostPowerMonitor
@@ -324,6 +324,7 @@ class IstService : public std::enable_shared_from_this<IstService>
 
     void onIstBootAssertDone(bool ok);
     void onPowerCycleDone(bool ok);
+    void startItmRun();
     void runIstCleanup(bool itmOk);
     void onDeassertDone(bool itmOk, bool okDeassert);
     void onResetDone(bool itmOk, bool okReset);

@@ -28,7 +28,8 @@ class MockHookRunner : public HookRunner
   public:
     MOCK_METHOD(void, asyncRun,
                 (const std::string& cmd, std::string what,
-                 std::move_only_function<void(bool ok) const> done),
+                 std::move_only_function<void(bool ok) const> done,
+                 std::vector<std::string> args),
                 (override));
 };
 
@@ -546,10 +547,11 @@ TEST_F(IstServiceTest, StartIstCallsAssertHook)
 
     // Expect the istBootAssert hook to be called
     std::move_only_function<void(bool) const> assert_done;
-    EXPECT_CALL(
-        *hookRunner_,
-        asyncRun(::testing::_, StrEq("istBootAssert hook"), ::testing::_))
-        .WillOnce([&](const std::string&, const std::string&, DoneCb done) {
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootAssert hook"),
+                         ::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::string&, DoneCb done,
+                      const std::vector<std::string>&) {
             assert_done = std::move(done);
         });
 
@@ -568,10 +570,11 @@ TEST_F(IstServiceTest, AssertHookFailureTransitionsToFailed)
     init_from_file(configPath_);
 
     std::move_only_function<void(bool) const> assert_done;
-    EXPECT_CALL(
-        *hookRunner_,
-        asyncRun(::testing::_, StrEq("istBootAssert hook"), ::testing::_))
-        .WillOnce([&](const std::string&, const std::string&, DoneCb done) {
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootAssert hook"),
+                         ::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::string&, DoneCb done,
+                      const std::vector<std::string>&) {
             assert_done = std::move(done);
         });
 
@@ -590,10 +593,11 @@ TEST_F(IstServiceTest, AssertHookSuccessWaitsForPowerCycle)
     init_from_file(configPath_);
 
     std::move_only_function<void(bool) const> assert_done;
-    EXPECT_CALL(
-        *hookRunner_,
-        asyncRun(::testing::_, StrEq("istBootAssert hook"), ::testing::_))
-        .WillOnce([&](const std::string&, const std::string&, DoneCb done) {
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootAssert hook"),
+                         ::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::string&, DoneCb done,
+                      const std::vector<std::string>&) {
             assert_done = std::move(done);
         });
 
@@ -616,10 +620,11 @@ TEST_F(IstServiceTest, PowerCycleFailureRunsDeassertThenFails)
     init_from_file(configPath_);
 
     std::move_only_function<void(bool) const> assert_done;
-    EXPECT_CALL(
-        *hookRunner_,
-        asyncRun(::testing::_, StrEq("istBootAssert hook"), ::testing::_))
-        .WillOnce([&](const std::string&, const std::string&, DoneCb done) {
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootAssert hook"),
+                         ::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::string&, DoneCb done,
+                      const std::vector<std::string>&) {
             assert_done = std::move(done);
         });
 
@@ -628,10 +633,11 @@ TEST_F(IstServiceTest, PowerCycleFailureRunsDeassertThenFails)
         .WillOnce([&](DoneCb done) { power_done = std::move(done); });
 
     std::move_only_function<void(bool) const> deassert_done;
-    EXPECT_CALL(
-        *hookRunner_,
-        asyncRun(::testing::_, StrEq("istBootDeassert hook"), ::testing::_))
-        .WillOnce([&](const std::string&, const std::string&, DoneCb done) {
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootDeassert hook"),
+                         ::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::string&, DoneCb done,
+                      const std::vector<std::string>&) {
             deassert_done = std::move(done);
         });
 
@@ -656,10 +662,11 @@ TEST_F(IstServiceTest, PowerCycleSuccessStartsItm)
     init_from_file(configPath_);
 
     std::move_only_function<void(bool) const> assert_done;
-    EXPECT_CALL(
-        *hookRunner_,
-        asyncRun(::testing::_, StrEq("istBootAssert hook"), ::testing::_))
-        .WillOnce([&](const std::string&, const std::string&, DoneCb done) {
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootAssert hook"),
+                         ::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::string&, DoneCb done,
+                      const std::vector<std::string>&) {
             assert_done = std::move(done);
         });
 
@@ -682,16 +689,194 @@ TEST_F(IstServiceTest, PowerCycleSuccessStartsItm)
     ASSERT_TRUE(itm_done);
 }
 
+TEST_F(IstServiceTest, CakBypassScriptRunsWhenPresent)
+{
+    std::ofstream give_me_a_name(tmpDir_ / "hooks" / "ist_cak_bypass.sh");
+    init_from_file(configPath_);
+
+    std::move_only_function<void(bool) const> assert_done;
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootAssert hook"),
+                         ::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::string&, DoneCb done,
+                      const std::vector<std::string>&) {
+            assert_done = std::move(done);
+        });
+
+    std::move_only_function<void(bool) const> power_done;
+    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+        .WillOnce([&](DoneCb done) { power_done = std::move(done); });
+
+    std::move_only_function<void(bool) const> cak_done;
+    EXPECT_CALL(*hookRunner_, asyncRun(::testing::_, StrEq("CAK bypass"),
+                                       ::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::string&, DoneCb done,
+                      const std::vector<std::string>&) {
+            cak_done = std::move(done);
+        });
+
+    std::move_only_function<void(bool) const> itm_done;
+    EXPECT_CALL(*itmRunner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
+                                      ::testing::_))
+        .WillOnce([&](const IstTestConfig&, const IstPlatformConfig&,
+                      DoneCb done, ProgressCb) { itm_done = std::move(done); });
+
+    ParamMap params;
+    service_->startIST(params);
+    assert_done(true);
+    power_done(true);
+
+    ASSERT_TRUE(cak_done);
+    EXPECT_FALSE(itm_done);
+
+    cak_done(true);
+
+    EXPECT_EQ(service_->state().stage, IstStage::runningIst);
+    ASSERT_TRUE(itm_done);
+}
+
+TEST_F(IstServiceTest, CakBypassFailureAbortsIst)
+{
+    std::ofstream give_me_a_name(tmpDir_ / "hooks" / "ist_cak_bypass.sh");
+    init_from_file(configPath_);
+
+    std::move_only_function<void(bool) const> assert_done;
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootAssert hook"),
+                         ::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::string&, DoneCb done,
+                      const std::vector<std::string>&) {
+            assert_done = std::move(done);
+        });
+
+    std::move_only_function<void(bool) const> power_done;
+    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+        .WillOnce([&](DoneCb done) { power_done = std::move(done); });
+
+    std::move_only_function<void(bool) const> cak_done;
+    EXPECT_CALL(*hookRunner_, asyncRun(::testing::_, StrEq("CAK bypass"),
+                                       ::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::string&, DoneCb done,
+                      const std::vector<std::string>&) {
+            cak_done = std::move(done);
+        });
+
+    EXPECT_CALL(*itmRunner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
+                                      ::testing::_))
+        .Times(0);
+
+    std::move_only_function<void(bool) const> deassert_done;
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootDeassert hook"),
+                         ::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::string&, DoneCb done,
+                      const std::vector<std::string>&) {
+            deassert_done = std::move(done);
+        });
+
+    ParamMap params;
+    service_->startIST(params);
+    assert_done(true);
+    power_done(true);
+    ASSERT_TRUE(cak_done);
+
+    cak_done(false);
+
+    EXPECT_EQ(service_->state().stage, IstStage::cleanup);
+    ASSERT_TRUE(deassert_done);
+
+    deassert_done(true);
+
+    EXPECT_EQ(service_->state().status, IstStatus::failed);
+    EXPECT_EQ(service_->state().stage, IstStage::idle);
+}
+
+TEST_F(IstServiceTest, CakBypassSkippedWhenScriptMissing)
+{
+    init_from_file(configPath_);
+
+    std::move_only_function<void(bool) const> assert_done;
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootAssert hook"),
+                         ::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::string&, DoneCb done,
+                      const std::vector<std::string>&) {
+            assert_done = std::move(done);
+        });
+
+    std::move_only_function<void(bool) const> power_done;
+    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+        .WillOnce([&](DoneCb done) { power_done = std::move(done); });
+
+    EXPECT_CALL(*hookRunner_, asyncRun(::testing::_, StrEq("CAK bypass"),
+                                       ::testing::_, ::testing::_))
+        .Times(0);
+
+    std::move_only_function<void(bool) const> itm_done;
+    EXPECT_CALL(*itmRunner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
+                                      ::testing::_))
+        .WillOnce([&](const IstTestConfig&, const IstPlatformConfig&,
+                      DoneCb done, ProgressCb) { itm_done = std::move(done); });
+
+    ParamMap params;
+    service_->startIST(params);
+    assert_done(true);
+    power_done(true);
+
+    EXPECT_EQ(service_->state().stage, IstStage::runningIst);
+    ASSERT_TRUE(itm_done);
+}
+
+TEST_F(IstServiceTest, AutoRebootPassesSkipCakToResetHook)
+{
+    init_from_file(configPath_);
+
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootAssert hook"),
+                         ::testing::_, ::testing::_))
+        .WillOnce([](const std::string&, const std::string&, DoneCb done,
+                     const std::vector<std::string>&) { done(true); });
+    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+        .WillOnce([](DoneCb done) { done(true); });
+    EXPECT_CALL(*itmRunner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
+                                      ::testing::_))
+        .WillOnce([](const IstTestConfig&, const IstPlatformConfig&,
+                     DoneCb done, ProgressCb) { done(true); });
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootDeassert hook"),
+                         ::testing::_, ::testing::_))
+        .WillOnce([](const std::string&, const std::string&, DoneCb done,
+                     const std::vector<std::string>&) { done(true); });
+
+    std::vector<std::string> captured_args;
+    EXPECT_CALL(*hookRunner_, asyncRun(::testing::_, StrEq("resetSystem hook"),
+                                       ::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::string&, DoneCb done,
+                      std::vector<std::string> args) {
+            captured_args = std::move(args);
+            done(true);
+        });
+
+    ParamMap params;
+    params["autoRebootOnComplete"] = true;
+    service_->startIST(params);
+
+    ASSERT_THAT(captured_args,
+                ::testing::ElementsAre(std::string("--skip-cak")));
+    EXPECT_EQ(service_->state().status, IstStatus::completed);
+}
+
 TEST_F(IstServiceTest, ItmSuccessCompletesWithCleanup)
 {
     init_from_file(configPath_);
 
     // Chain: assert hook → power cycle → ITM → deassert hook
     std::move_only_function<void(bool) const> assert_done;
-    EXPECT_CALL(
-        *hookRunner_,
-        asyncRun(::testing::_, StrEq("istBootAssert hook"), ::testing::_))
-        .WillOnce([&](const std::string&, const std::string&, DoneCb done) {
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootAssert hook"),
+                         ::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::string&, DoneCb done,
+                      const std::vector<std::string>&) {
             assert_done = std::move(done);
         });
 
@@ -706,10 +891,11 @@ TEST_F(IstServiceTest, ItmSuccessCompletesWithCleanup)
                       DoneCb done, ProgressCb) { itm_done = std::move(done); });
 
     std::move_only_function<void(bool) const> deassert_done;
-    EXPECT_CALL(
-        *hookRunner_,
-        asyncRun(::testing::_, StrEq("istBootDeassert hook"), ::testing::_))
-        .WillOnce([&](const std::string&, const std::string&, DoneCb done) {
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootDeassert hook"),
+                         ::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::string&, DoneCb done,
+                      const std::vector<std::string>&) {
             deassert_done = std::move(done);
         });
 
@@ -732,10 +918,11 @@ TEST_F(IstServiceTest, ItmFailureResultsInFailedStatus)
     init_from_file(configPath_);
 
     std::move_only_function<void(bool) const> assert_done;
-    EXPECT_CALL(
-        *hookRunner_,
-        asyncRun(::testing::_, StrEq("istBootAssert hook"), ::testing::_))
-        .WillOnce([&](const std::string&, const std::string&, DoneCb done) {
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootAssert hook"),
+                         ::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::string&, DoneCb done,
+                      const std::vector<std::string>&) {
             assert_done = std::move(done);
         });
 
@@ -750,10 +937,11 @@ TEST_F(IstServiceTest, ItmFailureResultsInFailedStatus)
                       DoneCb done, ProgressCb) { itm_done = std::move(done); });
 
     std::move_only_function<void(bool) const> deassert_done;
-    EXPECT_CALL(
-        *hookRunner_,
-        asyncRun(::testing::_, StrEq("istBootDeassert hook"), ::testing::_))
-        .WillOnce([&](const std::string&, const std::string&, DoneCb done) {
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootDeassert hook"),
+                         ::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::string&, DoneCb done,
+                      const std::vector<std::string>&) {
             deassert_done = std::move(done);
         });
 
@@ -776,10 +964,11 @@ TEST_F(IstServiceTest, CleanupDeassertFailureStaysInFailed)
     init_from_file(configPath_);
 
     std::move_only_function<void(bool) const> assert_done;
-    EXPECT_CALL(
-        *hookRunner_,
-        asyncRun(::testing::_, StrEq("istBootAssert hook"), ::testing::_))
-        .WillOnce([&](const std::string&, const std::string&, DoneCb done) {
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootAssert hook"),
+                         ::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::string&, DoneCb done,
+                      const std::vector<std::string>&) {
             assert_done = std::move(done);
         });
 
@@ -794,10 +983,11 @@ TEST_F(IstServiceTest, CleanupDeassertFailureStaysInFailed)
                       DoneCb done, ProgressCb) { itm_done = std::move(done); });
 
     std::move_only_function<void(bool) const> deassert_done;
-    EXPECT_CALL(
-        *hookRunner_,
-        asyncRun(::testing::_, StrEq("istBootDeassert hook"), ::testing::_))
-        .WillOnce([&](const std::string&, const std::string&, DoneCb done) {
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootDeassert hook"),
+                         ::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::string&, DoneCb done,
+                      const std::vector<std::string>&) {
             deassert_done = std::move(done);
         });
 
@@ -819,10 +1009,11 @@ TEST_F(IstServiceTest, AutoRebootCallsResetHook)
     init_from_file(configPath_);
 
     std::move_only_function<void(bool) const> assert_done;
-    EXPECT_CALL(
-        *hookRunner_,
-        asyncRun(::testing::_, StrEq("istBootAssert hook"), ::testing::_))
-        .WillOnce([&](const std::string&, const std::string&, DoneCb done) {
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootAssert hook"),
+                         ::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::string&, DoneCb done,
+                      const std::vector<std::string>&) {
             assert_done = std::move(done);
         });
 
@@ -837,17 +1028,19 @@ TEST_F(IstServiceTest, AutoRebootCallsResetHook)
                       DoneCb done, ProgressCb) { itm_done = std::move(done); });
 
     std::move_only_function<void(bool) const> deassert_done;
-    EXPECT_CALL(
-        *hookRunner_,
-        asyncRun(::testing::_, StrEq("istBootDeassert hook"), ::testing::_))
-        .WillOnce([&](const std::string&, const std::string&, DoneCb done) {
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootDeassert hook"),
+                         ::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::string&, DoneCb done,
+                      const std::vector<std::string>&) {
             deassert_done = std::move(done);
         });
 
     std::move_only_function<void(bool) const> reset_done;
-    EXPECT_CALL(*hookRunner_,
-                asyncRun(::testing::_, StrEq("resetSystem hook"), ::testing::_))
-        .WillOnce([&](const std::string&, const std::string&, DoneCb done) {
+    EXPECT_CALL(*hookRunner_, asyncRun(::testing::_, StrEq("resetSystem hook"),
+                                       ::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::string&, DoneCb done,
+                      const std::vector<std::string>&) {
             reset_done = std::move(done);
         });
 
@@ -874,12 +1067,11 @@ TEST_F(IstServiceTest, StartIstPassesTestParams)
     init_from_file(configPath_);
 
     IstTestConfig captured_cfg;
-    EXPECT_CALL(
-        *hookRunner_,
-        asyncRun(::testing::_, StrEq("istBootAssert hook"), ::testing::_))
-        .WillOnce([](const std::string&, const std::string&, DoneCb done) {
-            done(true);
-        });
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootAssert hook"),
+                         ::testing::_, ::testing::_))
+        .WillOnce([](const std::string&, const std::string&, DoneCb done,
+                     const std::vector<std::string>&) { done(true); });
 
     EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
         .WillOnce([](DoneCb done) { done(true); });
@@ -893,12 +1085,11 @@ TEST_F(IstServiceTest, StartIstPassesTestParams)
         });
 
     // Deassert hook in cleanup
-    EXPECT_CALL(
-        *hookRunner_,
-        asyncRun(::testing::_, StrEq("istBootDeassert hook"), ::testing::_))
-        .WillOnce([](const std::string&, const std::string&, DoneCb done) {
-            done(true);
-        });
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootDeassert hook"),
+                         ::testing::_, ::testing::_))
+        .WillOnce([](const std::string&, const std::string&, DoneCb done,
+                     const std::vector<std::string>&) { done(true); });
 
     ParamMap params;
     params["customTestList"] = std::string("test1,test2");
@@ -930,12 +1121,11 @@ TEST_F(IstServiceTest, SwTimeoutClampedToRange)
     init_from_file(configPath_);
 
     IstTestConfig captured_cfg;
-    EXPECT_CALL(
-        *hookRunner_,
-        asyncRun(::testing::_, StrEq("istBootAssert hook"), ::testing::_))
-        .WillOnce([](const std::string&, const std::string&, DoneCb done) {
-            done(true);
-        });
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootAssert hook"),
+                         ::testing::_, ::testing::_))
+        .WillOnce([](const std::string&, const std::string&, DoneCb done,
+                     const std::vector<std::string>&) { done(true); });
     EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
         .WillOnce([](DoneCb done) { done(true); });
     EXPECT_CALL(*itmRunner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
@@ -945,12 +1135,11 @@ TEST_F(IstServiceTest, SwTimeoutClampedToRange)
             captured_cfg = cfg;
             done(true);
         });
-    EXPECT_CALL(
-        *hookRunner_,
-        asyncRun(::testing::_, StrEq("istBootDeassert hook"), ::testing::_))
-        .WillOnce([](const std::string&, const std::string&, DoneCb done) {
-            done(true);
-        });
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootDeassert hook"),
+                         ::testing::_, ::testing::_))
+        .WillOnce([](const std::string&, const std::string&, DoneCb done,
+                     const std::vector<std::string>&) { done(true); });
 
     // Pass a timeout below minimum (60s)
     ParamMap params;
@@ -1018,12 +1207,11 @@ TEST_F(IstServiceTest, SwTimeoutClampedToMax)
     init_from_file(configPath_);
 
     IstTestConfig captured_cfg;
-    EXPECT_CALL(
-        *hookRunner_,
-        asyncRun(::testing::_, StrEq("istBootAssert hook"), ::testing::_))
-        .WillOnce([](const std::string&, const std::string&, DoneCb done) {
-            done(true);
-        });
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootAssert hook"),
+                         ::testing::_, ::testing::_))
+        .WillOnce([](const std::string&, const std::string&, DoneCb done,
+                     const std::vector<std::string>&) { done(true); });
     EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
         .WillOnce([](DoneCb done) { done(true); });
     EXPECT_CALL(*itmRunner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
@@ -1033,12 +1221,11 @@ TEST_F(IstServiceTest, SwTimeoutClampedToMax)
             captured_cfg = cfg;
             done(true);
         });
-    EXPECT_CALL(
-        *hookRunner_,
-        asyncRun(::testing::_, StrEq("istBootDeassert hook"), ::testing::_))
-        .WillOnce([](const std::string&, const std::string&, DoneCb done) {
-            done(true);
-        });
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootDeassert hook"),
+                         ::testing::_, ::testing::_))
+        .WillOnce([](const std::string&, const std::string&, DoneCb done,
+                     const std::vector<std::string>&) { done(true); });
 
     ParamMap params;
     params["istSwTimeoutSec"] = 99999;
@@ -1071,10 +1258,11 @@ TEST_F(IstServiceTest, CleanupFailsWhenDeassertHookMissing)
     init_from_file(configPath_);
 
     std::move_only_function<void(bool) const> assert_done;
-    EXPECT_CALL(
-        *hookRunner_,
-        asyncRun(::testing::_, StrEq("istBootAssert hook"), ::testing::_))
-        .WillOnce([&](const std::string&, const std::string&, DoneCb done) {
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootAssert hook"),
+                         ::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::string&, DoneCb done,
+                      const std::vector<std::string>&) {
             assert_done = std::move(done);
         });
 
@@ -1104,10 +1292,11 @@ TEST_F(IstServiceTest, AutoRebootResetFailureTransitionsToFailed)
     init_from_file(configPath_);
 
     std::move_only_function<void(bool) const> assert_done;
-    EXPECT_CALL(
-        *hookRunner_,
-        asyncRun(::testing::_, StrEq("istBootAssert hook"), ::testing::_))
-        .WillOnce([&](const std::string&, const std::string&, DoneCb done) {
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootAssert hook"),
+                         ::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::string&, DoneCb done,
+                      const std::vector<std::string>&) {
             assert_done = std::move(done);
         });
 
@@ -1122,17 +1311,19 @@ TEST_F(IstServiceTest, AutoRebootResetFailureTransitionsToFailed)
                       DoneCb done, ProgressCb) { itm_done = std::move(done); });
 
     std::move_only_function<void(bool) const> deassert_done;
-    EXPECT_CALL(
-        *hookRunner_,
-        asyncRun(::testing::_, StrEq("istBootDeassert hook"), ::testing::_))
-        .WillOnce([&](const std::string&, const std::string&, DoneCb done) {
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootDeassert hook"),
+                         ::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::string&, DoneCb done,
+                      const std::vector<std::string>&) {
             deassert_done = std::move(done);
         });
 
     std::move_only_function<void(bool) const> reset_done;
-    EXPECT_CALL(*hookRunner_,
-                asyncRun(::testing::_, StrEq("resetSystem hook"), ::testing::_))
-        .WillOnce([&](const std::string&, const std::string&, DoneCb done) {
+    EXPECT_CALL(*hookRunner_, asyncRun(::testing::_, StrEq("resetSystem hook"),
+                                       ::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::string&, DoneCb done,
+                      const std::vector<std::string>&) {
             reset_done = std::move(done);
         });
 
@@ -1156,10 +1347,11 @@ TEST_F(IstServiceTest, AutoRebootWithItmFailureStillFailed)
     init_from_file(configPath_);
 
     std::move_only_function<void(bool) const> assert_done;
-    EXPECT_CALL(
-        *hookRunner_,
-        asyncRun(::testing::_, StrEq("istBootAssert hook"), ::testing::_))
-        .WillOnce([&](const std::string&, const std::string&, DoneCb done) {
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootAssert hook"),
+                         ::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::string&, DoneCb done,
+                      const std::vector<std::string>&) {
             assert_done = std::move(done);
         });
 
@@ -1174,17 +1366,19 @@ TEST_F(IstServiceTest, AutoRebootWithItmFailureStillFailed)
                       DoneCb done, ProgressCb) { itm_done = std::move(done); });
 
     std::move_only_function<void(bool) const> deassert_done;
-    EXPECT_CALL(
-        *hookRunner_,
-        asyncRun(::testing::_, StrEq("istBootDeassert hook"), ::testing::_))
-        .WillOnce([&](const std::string&, const std::string&, DoneCb done) {
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootDeassert hook"),
+                         ::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::string&, DoneCb done,
+                      const std::vector<std::string>&) {
             deassert_done = std::move(done);
         });
 
     std::move_only_function<void(bool) const> reset_done;
-    EXPECT_CALL(*hookRunner_,
-                asyncRun(::testing::_, StrEq("resetSystem hook"), ::testing::_))
-        .WillOnce([&](const std::string&, const std::string&, DoneCb done) {
+    EXPECT_CALL(*hookRunner_, asyncRun(::testing::_, StrEq("resetSystem hook"),
+                                       ::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::string&, DoneCb done,
+                      const std::vector<std::string>&) {
             reset_done = std::move(done);
         });
 
@@ -1229,10 +1423,11 @@ TEST_F(IstServiceTest, AutoRebootFailsWhenResetHookMissing)
     init_from_file(configPath_);
 
     std::move_only_function<void(bool) const> assert_done;
-    EXPECT_CALL(
-        *hookRunner_,
-        asyncRun(::testing::_, StrEq("istBootAssert hook"), ::testing::_))
-        .WillOnce([&](const std::string&, const std::string&, DoneCb done) {
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootAssert hook"),
+                         ::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::string&, DoneCb done,
+                      const std::vector<std::string>&) {
             assert_done = std::move(done);
         });
 
@@ -1247,10 +1442,11 @@ TEST_F(IstServiceTest, AutoRebootFailsWhenResetHookMissing)
                       DoneCb done, ProgressCb) { itm_done = std::move(done); });
 
     std::move_only_function<void(bool) const> deassert_done;
-    EXPECT_CALL(
-        *hookRunner_,
-        asyncRun(::testing::_, StrEq("istBootDeassert hook"), ::testing::_))
-        .WillOnce([&](const std::string&, const std::string&, DoneCb done) {
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootDeassert hook"),
+                         ::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::string&, DoneCb done,
+                      const std::vector<std::string>&) {
             deassert_done = std::move(done);
         });
 
@@ -1298,10 +1494,11 @@ TEST_F(IstServiceTest, SecondRunAfterCompletionWorks)
 
     // --- First run: full success ---
     std::move_only_function<void(bool) const> assert_done1;
-    EXPECT_CALL(
-        *hookRunner_,
-        asyncRun(::testing::_, StrEq("istBootAssert hook"), ::testing::_))
-        .WillOnce([&](const std::string&, const std::string&, DoneCb done) {
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootAssert hook"),
+                         ::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::string&, DoneCb done,
+                      const std::vector<std::string>&) {
             assert_done1 = std::move(done);
         });
 
@@ -1317,10 +1514,11 @@ TEST_F(IstServiceTest, SecondRunAfterCompletionWorks)
                       ProgressCb) { itm_done1 = std::move(done); });
 
     std::move_only_function<void(bool) const> deassert_done1;
-    EXPECT_CALL(
-        *hookRunner_,
-        asyncRun(::testing::_, StrEq("istBootDeassert hook"), ::testing::_))
-        .WillOnce([&](const std::string&, const std::string&, DoneCb done) {
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootDeassert hook"),
+                         ::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::string&, DoneCb done,
+                      const std::vector<std::string>&) {
             deassert_done1 = std::move(done);
         });
 
@@ -1337,10 +1535,11 @@ TEST_F(IstServiceTest, SecondRunAfterCompletionWorks)
 
     // --- Second run: should start cleanly with fresh state ---
     std::move_only_function<void(bool) const> assert_done2;
-    EXPECT_CALL(
-        *hookRunner_,
-        asyncRun(::testing::_, StrEq("istBootAssert hook"), ::testing::_))
-        .WillOnce([&](const std::string&, const std::string&, DoneCb done) {
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootAssert hook"),
+                         ::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::string&, DoneCb done,
+                      const std::vector<std::string>&) {
             assert_done2 = std::move(done);
         });
 
@@ -1360,10 +1559,11 @@ TEST_F(IstServiceTest, SecondRunAfterCompletionWorks)
         });
 
     std::move_only_function<void(bool) const> deassert_done2;
-    EXPECT_CALL(
-        *hookRunner_,
-        asyncRun(::testing::_, StrEq("istBootDeassert hook"), ::testing::_))
-        .WillOnce([&](const std::string&, const std::string&, DoneCb done) {
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootDeassert hook"),
+                         ::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::string&, DoneCb done,
+                      const std::vector<std::string>&) {
             deassert_done2 = std::move(done);
         });
 
@@ -1389,24 +1589,22 @@ TEST_F(IstServiceTest, ProgressInterfaceCreatedOnStartAndRemovedOnComplete)
 
     EXPECT_CALL(*publisher_, createProgress()).Times(1);
 
-    EXPECT_CALL(
-        *hookRunner_,
-        asyncRun(::testing::_, StrEq("istBootAssert hook"), ::testing::_))
-        .WillOnce([](const std::string&, const std::string&, DoneCb done) {
-            done(true);
-        });
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootAssert hook"),
+                         ::testing::_, ::testing::_))
+        .WillOnce([](const std::string&, const std::string&, DoneCb done,
+                     const std::vector<std::string>&) { done(true); });
     EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
         .WillOnce([](DoneCb done) { done(true); });
     EXPECT_CALL(*itmRunner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
                                       ::testing::_))
         .WillOnce([](const IstTestConfig&, const IstPlatformConfig&,
                      DoneCb done, ProgressCb) { done(true); });
-    EXPECT_CALL(
-        *hookRunner_,
-        asyncRun(::testing::_, StrEq("istBootDeassert hook"), ::testing::_))
-        .WillOnce([](const std::string&, const std::string&, DoneCb done) {
-            done(true);
-        });
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootDeassert hook"),
+                         ::testing::_, ::testing::_))
+        .WillOnce([](const std::string&, const std::string&, DoneCb done,
+                     const std::vector<std::string>&) { done(true); });
 
     EXPECT_CALL(*publisher_, removeProgress()).Times(1);
 
@@ -1436,10 +1634,11 @@ TEST_F(IstServiceTest, ProgressInterfaceRemovedOnFailure)
     EXPECT_CALL(*publisher_, createProgress()).Times(1);
 
     DoneCb assert_done;
-    EXPECT_CALL(
-        *hookRunner_,
-        asyncRun(::testing::_, StrEq("istBootAssert hook"), ::testing::_))
-        .WillOnce([&](const std::string&, const std::string&, DoneCb done) {
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootAssert hook"),
+                         ::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::string&, DoneCb done,
+                      const std::vector<std::string>&) {
             assert_done = std::move(done);
         });
 
@@ -1457,10 +1656,11 @@ TEST_F(IstServiceTest, ProgressCallbackUpdatesStateAndPublishes)
     init_from_file(configPath_);
 
     DoneCb assert_done;
-    EXPECT_CALL(
-        *hookRunner_,
-        asyncRun(::testing::_, StrEq("istBootAssert hook"), ::testing::_))
-        .WillOnce([&](const std::string&, const std::string&, DoneCb done) {
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootAssert hook"),
+                         ::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::string&, DoneCb done,
+                      const std::vector<std::string>&) {
             assert_done = std::move(done);
         });
 
@@ -1510,10 +1710,11 @@ TEST_F(IstServiceTest, SecondRunAfterFailureWorks)
 
     // --- First run: fails at assert hook ---
     DoneCb assert_done1;
-    EXPECT_CALL(
-        *hookRunner_,
-        asyncRun(::testing::_, StrEq("istBootAssert hook"), ::testing::_))
-        .WillOnce([&](const std::string&, const std::string&, DoneCb done) {
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootAssert hook"),
+                         ::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::string&, DoneCb done,
+                      const std::vector<std::string>&) {
             assert_done1 = std::move(done);
         });
 
@@ -1526,10 +1727,11 @@ TEST_F(IstServiceTest, SecondRunAfterFailureWorks)
 
     // --- Second run: should be accepted and start cleanly ---
     DoneCb assert_done2;
-    EXPECT_CALL(
-        *hookRunner_,
-        asyncRun(::testing::_, StrEq("istBootAssert hook"), ::testing::_))
-        .WillOnce([&](const std::string&, const std::string&, DoneCb done) {
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootAssert hook"),
+                         ::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::string&, DoneCb done,
+                      const std::vector<std::string>&) {
             assert_done2 = std::move(done);
         });
 
@@ -1545,10 +1747,11 @@ TEST_F(IstServiceTest, SecondRunAfterFailureWorks)
                       ProgressCb) { itm_done2 = std::move(done); });
 
     DoneCb deassert_done2;
-    EXPECT_CALL(
-        *hookRunner_,
-        asyncRun(::testing::_, StrEq("istBootDeassert hook"), ::testing::_))
-        .WillOnce([&](const std::string&, const std::string&, DoneCb done) {
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootDeassert hook"),
+                         ::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::string&, DoneCb done,
+                      const std::vector<std::string>&) {
             deassert_done2 = std::move(done);
         });
 
@@ -1688,10 +1891,11 @@ TEST_F(IstServiceTest, StartUpdateRejectsWhileIstRunning)
     init_from_file(configPath_);
 
     DoneCb assert_done;
-    EXPECT_CALL(
-        *hookRunner_,
-        asyncRun(::testing::_, StrEq("istBootAssert hook"), ::testing::_))
-        .WillOnce([&](const std::string&, const std::string&, DoneCb done) {
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootAssert hook"),
+                         ::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::string&, DoneCb done,
+                      const std::vector<std::string>&) {
             assert_done = std::move(done);
         });
 

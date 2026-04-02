@@ -30,20 +30,22 @@ class HookRunnerImpl final : public HookRunner
     explicit HookRunnerImpl(boost::asio::io_context& io) : io_(io)
     {}
     void asyncRun(const std::string& cmd, std::string what,
-                  std::move_only_function<void(bool) const> done) override;
+                  std::move_only_function<void(bool) const> done,
+                  std::vector<std::string> args = {}) override;
 
   private:
     boost::asio::io_context& io_;
 };
 
 void HookRunnerImpl::asyncRun(const std::string& cmd, std::string what,
-                              std::move_only_function<void(bool) const> done)
+                              std::move_only_function<void(bool) const> done,
+                              std::vector<std::string> args)
 {
     std::shared_ptr<bpv2::process> proc;
     try
     {
         proc = std::make_shared<bpv2::process>(
-            io_, cmd, std::vector<std::string>{},
+            io_, cmd, std::move(args),
             bpv2::process_stdio{.in = nullptr, .out = nullptr, .err = nullptr});
     }
     catch (const std::exception& e)

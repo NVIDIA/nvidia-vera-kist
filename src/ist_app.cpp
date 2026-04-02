@@ -459,6 +459,39 @@ void IstService::onPowerCycleDone(bool ok)
 
     transitionTo(IstStage::runningIst);
 
+    std::filesystem::path cak_script =
+        platformCfg_.hookDir / "ist_cak_bypass.sh";
+    std::error_code ec;
+    if (std::filesystem::exists(cak_script, ec) && !ec)
+    {
+        if (!is_path_within(cak_script, platformCfg_.hookDir))
+        {
+            std::cerr << "CAK bypass script '" << cak_script.string()
+                      << "' resolves outside hookDirectory '"
+                      << platformCfg_.hookDir.string() << "'\n";
+            runIstCleanup(false);
+            return;
+        }
+        hookRunner_->asyncRun(
+            cak_script, "CAK bypass", [self = shared_from_this()](bool ok_cak) {
+                if (!ok_cak)
+                {
+                    std::cerr << "CAK bypass hook failed, aborting IST\n";
+                    self->runIstCleanup(false);
+                    return;
+                }
+                self->startItmRun();
+            });
+        return;
+    }
+
+    startItmRun();
+}
+
+void IstService::startItmRun()
+{
+    transitionTo(IstStage::runningIst);
+
     itmRunner_->asyncRun(
         test_, platformCfg_,
         [self = shared_from_this()](bool itm_ok) {
@@ -511,7 +544,8 @@ void IstService::onDeassertDone(bool itm_ok, bool ok_deassert)
             reset_cmd, "resetSystem hook",
             [self = shared_from_this(), itm_ok](bool ok_reset) {
                 self->onResetDone(itm_ok, ok_reset);
-            });
+            },
+            {"--skip-cak"});
     }
     else
     {
