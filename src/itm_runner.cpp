@@ -126,7 +126,7 @@ class ItmProcess final : public std::enable_shared_from_this<ItmProcess>
 {
   public:
     ItmProcess(boost::asio::io_context& io,
-               std::move_only_function<void(bool) const> done) :
+               std::move_only_function<void(int) const> done) :
         deadline_(io), done_(std::move(done))
     {}
 
@@ -140,7 +140,7 @@ class ItmProcess final : public std::enable_shared_from_this<ItmProcess>
     std::shared_ptr<bpv2::process> proc_;
     std::shared_ptr<ProgressPoller> poller_;
     boost::asio::steady_timer deadline_;
-    std::move_only_function<void(bool) const> done_;
+    std::move_only_function<void(int) const> done_;
     bool timedOut_{false};
 };
 
@@ -199,22 +199,24 @@ void ItmProcess::on_process_exit(const boost::system::error_code& ec,
     deadline_.cancel();
     proc_.reset();
 
-    bool ok = (!ec && exit_code == 0);
     if (timedOut_)
     {
         std::cerr << "kist_itm killed due to SW timeout\n";
-        ok = false;
+        done_(-1);
+        return;
     }
-    else if (ec)
+    if (ec)
     {
         std::cerr << "kist_itm wait failed: ec=" << ec.message()
                   << " exit=" << exit_code << '\n';
+        done_(-1);
+        return;
     }
-    else if (exit_code != 0)
+    if (exit_code != 0)
     {
         std::cerr << "kist_itm exited with code " << exit_code << '\n';
     }
-    done_(ok);
+    done_(exit_code);
 }
 
 class ItmRunnerImpl final : public ItmRunner
@@ -224,7 +226,7 @@ class ItmRunnerImpl final : public ItmRunner
     {}
     void asyncRun(
         const IstTestConfig& cfg, const IstPlatformConfig& platform_cfg,
-        std::move_only_function<void(bool) const> done,
+        std::move_only_function<void(int) const> done,
         std::move_only_function<void(uint8_t) const> on_progress) override;
 
   private:
@@ -291,13 +293,13 @@ static std::vector<std::string>
 
 void ItmRunnerImpl::asyncRun(
     const IstTestConfig& cfg, const IstPlatformConfig& platform_cfg,
-    std::move_only_function<void(bool) const> done,
+    std::move_only_function<void(int) const> done,
     std::move_only_function<void(uint8_t) const> on_progress)
 {
     if (platform_cfg.storage.resultStoragePath.empty())
     {
         std::cerr << "resultStoragePath not found in platform config\n";
-        done(false);
+        done(-1);
         return;
     }
     fs::path progress_path =
@@ -321,7 +323,7 @@ void ItmRunnerImpl::asyncRun(
     catch (const std::exception& e)
     {
         std::cerr << "Failed to execute kist_itm: " << e.what() << '\n';
-        done(false);
+        done(-1);
         return;
     }
 

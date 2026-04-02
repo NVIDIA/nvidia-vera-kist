@@ -84,7 +84,7 @@ int main(int, char**)
     std::string sw_path = sw_path_prefix + platform_cfg.softwareInventoryId;
 
     std::shared_ptr<IstService> service = IstService::create(
-        io, makeDbusStatePublisher(server, sw_path), makeHookRunner(io),
+        io, makeDbusStatePublisher(server, conn, sw_path), makeHookRunner(io),
         makeHostPowerMonitor(io, conn), makeItmRunner(io));
 
     if (!service->initialize(std::move(platform_cfg)))

@@ -1,4 +1,5 @@
 #include <ist_app.hpp>
+#include <sdbusplus/asio/connection.hpp>
 
 #include <chrono>
 #include <cstdint>
@@ -6,13 +7,15 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <vector>
 
 class DbusStatePublisher final : public StatePublisher
 {
   public:
     DbusStatePublisher(sdbusplus::asio::object_server& server,
+                       std::shared_ptr<sdbusplus::asio::connection> conn,
                        const std::string& sw_path) :
-        server_(server), swPath_(sw_path)
+        server_(server), conn_(std::move(conn)), swPath_(sw_path)
     {
         stateIface_ = server_.add_interface("/com/nvidia/vera/ist",
                                             "com.nvidia.vera.ist.State");
@@ -133,6 +136,23 @@ class DbusStatePublisher final : public StatePublisher
         }
     }
 
+    void emitEventLog(
+        const std::string& message, const std::string& severity,
+        const std::map<std::string, std::string>& additional_data) override
+    {
+        conn_->async_method_call(
+            [](const boost::system::error_code& ec) {
+                if (ec)
+                {
+                    std::cerr << "Failed to create event log: " << ec.message()
+                              << '\n';
+                }
+            },
+            "xyz.openbmc_project.Logging", "/xyz/openbmc_project/logging",
+            "xyz.openbmc_project.Logging.Create", "Create", message, severity,
+            additional_data);
+    }
+
   private:
     static uint64_t epoch_now()
     {
@@ -164,6 +184,7 @@ class DbusStatePublisher final : public StatePublisher
         "xyz.openbmc_project.Software.Activation.Activations.Active";
 
     sdbusplus::asio::object_server& server_;
+    std::shared_ptr<sdbusplus::asio::connection> conn_;
     std::string swPath_;
     std::shared_ptr<sdbusplus::asio::dbus_interface> progIface_;
     std::shared_ptr<sdbusplus::asio::dbus_interface> stateIface_;
@@ -174,7 +195,9 @@ class DbusStatePublisher final : public StatePublisher
 
 std::unique_ptr<StatePublisher>
     makeDbusStatePublisher(sdbusplus::asio::object_server& server,
+                           std::shared_ptr<sdbusplus::asio::connection> conn,
                            const std::string& sw_path)
 {
-    return std::make_unique<DbusStatePublisher>(server, sw_path);
+    return std::make_unique<DbusStatePublisher>(server, std::move(conn),
+                                                sw_path);
 }

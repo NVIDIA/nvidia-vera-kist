@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -70,6 +71,14 @@ class UniqueFd
 
 using IstParamVariant = std::variant<std::string, bool, int>;
 using ParamMap = std::unordered_map<std::string, IstParamVariant>;
+
+// ----------------
+// ITM exit codes and error-marker path
+// ----------------
+
+inline constexpr char err_marker_dir[] = "/tmp/ist/err_marker";
+inline constexpr int itm_exit_mismatch = 8;
+inline constexpr int itm_exit_platform_error = 14;
 
 // ----------------
 // Configuration
@@ -241,7 +250,7 @@ class ItmRunner
     virtual ~ItmRunner() = default;
     virtual void
         asyncRun(const IstTestConfig& cfg, const IstPlatformConfig& platformCfg,
-                 std::move_only_function<void(bool ok) const> done,
+                 std::move_only_function<void(int exitCode) const> done,
                  std::move_only_function<void(uint8_t) const> onProgress) = 0;
 };
 
@@ -258,6 +267,9 @@ class StatePublisher
     virtual void createActivationProgress() = 0;
     virtual void publishActivationProgress(uint8_t progress) = 0;
     virtual void removeActivationProgress() = 0;
+    virtual void emitEventLog(
+        const std::string& message, const std::string& severity,
+        const std::map<std::string, std::string>& additionalData) = 0;
 };
 
 // ----------------
@@ -271,6 +283,7 @@ std::shared_ptr<HostPowerMonitor>
 std::unique_ptr<ItmRunner> makeItmRunner(boost::asio::io_context& io);
 std::unique_ptr<StatePublisher>
     makeDbusStatePublisher(sdbusplus::asio::object_server& server,
+                           std::shared_ptr<sdbusplus::asio::connection> conn,
                            const std::string& swPath);
 
 // ----------------
@@ -325,9 +338,10 @@ class IstService : public std::enable_shared_from_this<IstService>
     void onIstBootAssertDone(bool ok);
     void onPowerCycleDone(bool ok);
     void startItmRun();
-    void runIstCleanup(bool itmOk);
-    void onDeassertDone(bool itmOk, bool okDeassert);
-    void onResetDone(bool itmOk, bool okReset);
+    void runIstCleanup(int itmExit);
+    void emitIstEventLog(int itmExit);
+    void onDeassertDone(int itmExit, bool okDeassert);
+    void onResetDone(int itmExit, bool okReset);
 
     void onTransferComplete(bool ok, const std::filesystem::path& imagePath);
     void onStripComplete(bool ok);

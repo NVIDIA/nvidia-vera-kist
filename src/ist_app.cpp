@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <string>
 
 namespace fs = std::filesystem;
@@ -453,7 +454,7 @@ void IstService::onPowerCycleDone(bool ok)
     if (!ok)
     {
         std::cerr << "Unable to detect power cycle, running cleanup\n";
-        runIstCleanup(false);
+        runIstCleanup(-1);
         return;
     }
 
@@ -469,7 +470,7 @@ void IstService::onPowerCycleDone(bool ok)
             std::cerr << "CAK bypass script '" << cak_script.string()
                       << "' resolves outside hookDirectory '"
                       << platformCfg_.hookDir.string() << "'\n";
-            runIstCleanup(false);
+            runIstCleanup(-1);
             return;
         }
         hookRunner_->asyncRun(
@@ -477,7 +478,7 @@ void IstService::onPowerCycleDone(bool ok)
                 if (!ok_cak)
                 {
                     std::cerr << "CAK bypass hook failed, aborting IST\n";
-                    self->runIstCleanup(false);
+                    self->runIstCleanup(-1);
                     return;
                 }
                 self->startItmRun();
@@ -494,8 +495,8 @@ void IstService::startItmRun()
 
     itmRunner_->asyncRun(
         test_, platformCfg_,
-        [self = shared_from_this()](bool itm_ok) {
-            self->runIstCleanup(itm_ok);
+        [self = shared_from_this()](int itm_exit) {
+            self->runIstCleanup(itm_exit);
         },
         [self = shared_from_this()](uint8_t progress) {
             self->state_.progress = progress;
@@ -503,8 +504,9 @@ void IstService::startItmRun()
         });
 }
 
-void IstService::runIstCleanup(bool itm_ok)
+void IstService::runIstCleanup(int itm_exit)
 {
+    emitIstEventLog(itm_exit);
     transitionTo(IstStage::cleanup);
 
     const fs::path& hook_cmd = platformCfg_.hooks.istBootDeassert;
@@ -517,12 +519,69 @@ void IstService::runIstCleanup(bool itm_ok)
 
     hookRunner_->asyncRun(
         hook_cmd, "istBootDeassert hook",
-        [self = shared_from_this(), itm_ok](bool ok_deassert) {
-            self->onDeassertDone(itm_ok, ok_deassert);
+        [self = shared_from_this(), itm_exit](bool ok_deassert) {
+            self->onDeassertDone(itm_exit, ok_deassert);
         });
 }
 
-void IstService::onDeassertDone(bool itm_ok, bool ok_deassert)
+void IstService::emitIstEventLog(int itm_exit)
+{
+    if (itm_exit != itm_exit_mismatch && itm_exit != itm_exit_platform_error)
+    {
+        return;
+    }
+
+    std::string result = (itm_exit == itm_exit_mismatch) ? "Failed" : "Error";
+    std::string message = (itm_exit == itm_exit_mismatch)
+                              ? "IST mismatch: one or more tests failed"
+                              : "Failed due to error";
+
+    if (itm_exit == itm_exit_platform_error)
+    {
+        std::error_code ec;
+        std::string markers;
+        for (const auto& entry : fs::directory_iterator(err_marker_dir, ec))
+        {
+            if (!markers.empty())
+            {
+                markers += " | ";
+            }
+            markers += entry.path().filename().string();
+        }
+        if (!markers.empty())
+        {
+            message += ": " + markers;
+        }
+    }
+
+    std::map<std::string, std::string> additional_data = {
+        {"REDFISH_MESSAGE_ID", "Platform.1.0.PlatformError"},
+        {"IST_TYPE", "CPU"},
+        {"IST_STAGE", istStageToString(state_.stage)},
+        {"IST_PROGRESS", std::to_string(state_.progress)},
+        {"IST_RESULT", result},
+        {"IST_MESSAGE", message},
+    };
+    if (test_.continueOnFail.has_value())
+    {
+        additional_data["IST_CONTINUE_ON_FAIL"] =
+            *test_.continueOnFail ? "true" : "false";
+    }
+    if (test_.customTestList.has_value())
+    {
+        additional_data["IST_TEST_LIST"] = *test_.customTestList;
+    }
+    if (test_.customSocketList.has_value())
+    {
+        additional_data["IST_PACKAGE_LIST"] = *test_.customSocketList;
+    }
+
+    publisher_->emitEventLog("IST failed",
+                             "xyz.openbmc_project.Logging.Entry.Level.Warning",
+                             additional_data);
+}
+
+void IstService::onDeassertDone(int itm_exit, bool ok_deassert)
 {
     if (!ok_deassert)
     {
@@ -542,19 +601,20 @@ void IstService::onDeassertDone(bool itm_ok, bool ok_deassert)
         }
         hookRunner_->asyncRun(
             reset_cmd, "resetSystem hook",
-            [self = shared_from_this(), itm_ok](bool ok_reset) {
-                self->onResetDone(itm_ok, ok_reset);
+            [self = shared_from_this(), itm_exit](bool ok_reset) {
+                self->onResetDone(itm_exit, ok_reset);
             },
             {"--skip-cak"});
     }
     else
     {
+        bool itm_ok = (itm_exit == 0 || itm_exit == itm_exit_mismatch);
         transitionTo(IstStage::idle,
                      itm_ok ? IstStatus::completed : IstStatus::failed);
     }
 }
 
-void IstService::onResetDone(bool itm_ok, bool ok_reset)
+void IstService::onResetDone(int itm_exit, bool ok_reset)
 {
     if (!ok_reset)
     {
@@ -562,6 +622,7 @@ void IstService::onResetDone(bool itm_ok, bool ok_reset)
     }
     else
     {
+        bool itm_ok = (itm_exit == 0 || itm_exit == itm_exit_mismatch);
         transitionTo(IstStage::idle,
                      itm_ok ? IstStatus::completed : IstStatus::failed);
     }
@@ -581,6 +642,10 @@ void IstService::startIST(const ParamMap& test_params)
 
     state_.progress = 0;
     publisher_->createProgress();
+
+    std::error_code ec;
+    fs::remove_all(err_marker_dir, ec);
+
     transitionTo(IstStage::collateralVerification, IstStatus::inProgress);
 
     if (!collateralVerification(test_params))
