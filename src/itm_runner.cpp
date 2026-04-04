@@ -19,6 +19,7 @@
 #include <boost/process/v2/stdio.hpp>
 #include <ist_app.hpp>
 
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -138,6 +139,71 @@ class ProgressPoller final : public std::enable_shared_from_this<ProgressPoller>
     bool stopped_ = false;
 };
 
+// Reads from a pipe fd asynchronously and writes each chunk to both a log
+// file and stderr (which journald captures).  Stops automatically on EOF.
+class OutputTee final : public std::enable_shared_from_this<OutputTee>
+{
+  public:
+    OutputTee(boost::asio::io_context& io, int pipe_read_fd, UniqueFd log_fd) :
+        stream_(io, pipe_read_fd), logFd_(std::move(log_fd))
+    {}
+
+    void start()
+    {
+        read_next();
+    }
+
+    void stop()
+    {
+        boost::system::error_code ec;
+        // Return value discarded; errors are reported via ec
+        std::ignore = stream_.close(ec);
+        if (ec)
+        {
+            std::cerr << "OutputTee: failed to close stream: " << ec.message()
+                      << "\n";
+        }
+    }
+
+  private:
+    void read_next()
+    {
+        stream_.async_read_some(
+            boost::asio::buffer(buf_),
+            [self = shared_from_this()](const boost::system::error_code& ec,
+                                        std::size_t n) {
+                if (ec)
+                {
+                    return; // EOF or pipe closed
+                }
+                // Write to log file
+                const char* data = self->buf_.data();
+                std::size_t remaining = n;
+                while (remaining > 0)
+                {
+                    ssize_t written =
+                        ::write(self->logFd_.get(), data, remaining);
+                    if (written <= 0)
+                    {
+                        std::cerr << "OutputTee: write to log failed: " << errno
+                                  << "\n";
+                        break;
+                    }
+                    data += written;
+                    remaining -= static_cast<std::size_t>(written);
+                }
+                // Write to stderr for journald
+                std::ignore = ::write(STDERR_FILENO, self->buf_.data(), n);
+
+                self->read_next();
+            });
+    }
+
+    boost::asio::posix::stream_descriptor stream_;
+    UniqueFd logFd_;
+    std::array<char, 4096> buf_{};
+};
+
 class ItmProcess final : public std::enable_shared_from_this<ItmProcess>
 {
   public:
@@ -147,7 +213,8 @@ class ItmProcess final : public std::enable_shared_from_this<ItmProcess>
     {}
 
     void start(std::shared_ptr<bpv2::process> proc,
-               std::shared_ptr<ProgressPoller> poller, int timeout_sec);
+               std::shared_ptr<ProgressPoller> poller,
+               std::shared_ptr<OutputTee> tee, int timeout_sec);
 
   private:
     void on_deadline_expired(int timeout_sec);
@@ -155,16 +222,19 @@ class ItmProcess final : public std::enable_shared_from_this<ItmProcess>
 
     std::shared_ptr<bpv2::process> proc_;
     std::shared_ptr<ProgressPoller> poller_;
+    std::shared_ptr<OutputTee> tee_;
     boost::asio::steady_timer deadline_;
     std::move_only_function<void(int) const> done_;
     bool timedOut_{false};
 };
 
 void ItmProcess::start(std::shared_ptr<bpv2::process> proc,
-                       std::shared_ptr<ProgressPoller> poller, int timeout_sec)
+                       std::shared_ptr<ProgressPoller> poller,
+                       std::shared_ptr<OutputTee> tee, int timeout_sec)
 {
     proc_ = std::move(proc);
     poller_ = std::move(poller);
+    tee_ = std::move(tee);
 
     deadline_.expires_after(std::chrono::seconds(timeout_sec));
     deadline_.async_wait([weak = weak_from_this(),
@@ -211,6 +281,11 @@ void ItmProcess::on_process_exit(const boost::system::error_code& ec,
     {
         poller_->stop();
         poller_.reset();
+    }
+    if (tee_)
+    {
+        tee_->stop();
+        tee_.reset();
     }
     deadline_.cancel();
     proc_.reset();
@@ -328,13 +403,39 @@ void ItmRunnerImpl::asyncRun(
 
     std::vector<std::string> args = build_itm_args(cfg, platform_cfg);
 
+    fs::path log_path = platform_cfg.storage.resultStoragePath /
+                        "execute_ist_IST_Package_Summary.log";
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
+    UniqueFd log_fd(::open(log_path.c_str(),
+                           O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644));
+    if (log_fd.get() < 0)
+    {
+        std::cerr << "Failed to open ITM log file '" << log_path
+                  << "': " << strerror(errno) << '\n';
+        done(false);
+        return;
+    }
+
+    int pipe_fds[2];
+    if (::pipe(pipe_fds) < 0)
+    {
+        std::cerr << "Failed to create pipe for ITM output: " << strerror(errno)
+                  << '\n';
+        done(false);
+        return;
+    }
+    UniqueFd pipe_read(pipe_fds[0]);
+    UniqueFd pipe_write(pipe_fds[1]);
+
     std::shared_ptr<bpv2::process> proc;
     try
     {
         proc = std::make_shared<bpv2::process>(
             io_, args[0],
             std::vector<std::string>(args.begin() + 1, args.end()),
-            bpv2::process_stdio{.in = nullptr, .out = stdout, .err = stderr});
+            bpv2::process_stdio{.in = nullptr,
+                                .out = pipe_write.get(),
+                                .err = pipe_write.get()});
     }
     catch (const std::exception& e)
     {
@@ -343,6 +444,13 @@ void ItmRunnerImpl::asyncRun(
         return;
     }
 
+    // Close write-end in parent so OutputTee sees EOF when kist_itm exits
+    pipe_write = UniqueFd();
+
+    auto tee = std::make_shared<OutputTee>(io_, pipe_read.release(),
+                                           std::move(log_fd));
+    tee->start();
+
     std::shared_ptr<ProgressPoller> poller = std::make_shared<ProgressPoller>(
         io_, progress_path, std::move(on_progress));
     poller->start();
@@ -350,7 +458,8 @@ void ItmRunnerImpl::asyncRun(
     int timeout_sec = cfg.swTimeoutSec.value_or(15 * 60);
 
     active_ = std::make_shared<ItmProcess>(io_, std::move(done));
-    active_->start(std::move(proc), std::move(poller), timeout_sec);
+    active_->start(std::move(proc), std::move(poller), std::move(tee),
+                   timeout_sec);
 }
 
 std::unique_ptr<ItmRunner> makeItmRunner(boost::asio::io_context& io)
