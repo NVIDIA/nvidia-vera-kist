@@ -1,6 +1,8 @@
 [Unit]
 Description=NVIDIA Vera IST Service
 StopWhenUnneeded=false
+Wants=nvidia-emmc-partition.service
+After=nvidia-emmc-partition.service
 
 [Service]
 Restart=always
