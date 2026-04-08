@@ -660,6 +660,8 @@ void IstService::startIST(const ParamMap& test_params)
     std::error_code ec;
     fs::remove_all(err_marker_dir, ec);
 
+    ensureMounted();
+
     transitionTo(IstStage::collateralVerification, IstStatus::inProgress);
 
     if (!collateralVerification(test_params))

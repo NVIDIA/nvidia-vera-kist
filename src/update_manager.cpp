@@ -930,3 +930,26 @@ void IstService::readAndPublishVersion()
     publisher_->publishVersion(version);
     std::cout << "IST vector version: " << version << '\n';
 }
+
+void IstService::ensureMounted()
+{
+    const fs::path& mount_path = platformCfg_.storage.vectorMountPath;
+    if (mount_path.empty())
+    {
+        return;
+    }
+
+    fs::path golden_mount = mount_path / "GOLDEN_RES";
+    std::error_code ec;
+    if (fs::exists(golden_mount, ec) && !ec &&
+        !fs::is_empty(golden_mount, ec) && !ec)
+    {
+        return;
+    }
+
+    std::cout << "Test vectors not mounted; attempting mount\n";
+    if (mountImages())
+    {
+        readAndPublishVersion();
+    }
+}

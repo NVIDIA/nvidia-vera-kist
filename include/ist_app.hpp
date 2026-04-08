@@ -362,6 +362,7 @@ class IstService : public std::enable_shared_from_this<IstService>
     void onTransferComplete(bool ok, const std::filesystem::path& imagePath);
     void onStripComplete(bool ok);
     bool mountImages();
+    void ensureMounted();
     void readAndPublishVersion();
 
     boost::asio::io_context& io_;
