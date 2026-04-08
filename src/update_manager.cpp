@@ -43,7 +43,6 @@
 namespace fs = std::filesystem;
 
 static constexpr std::string_view k_image_file_name = "CPU-IST.img";
-static constexpr std::string_view k_golden_res_file_name = "GOLDEN_RES.sqfs";
 static constexpr size_t k_transfer_buf_size = 65536;
 
 static constexpr std::string_view k_activation_activating =
@@ -52,13 +51,6 @@ static constexpr std::string_view k_activation_active =
     "xyz.openbmc_project.Software.Activation.Activations.Active";
 static constexpr std::string_view k_activation_failed =
     "xyz.openbmc_project.Software.Activation.Activations.Failed";
-
-// Image file names managed by this service; used to identify orphaned
-// loop devices that need cleanup before a new image is written.
-static constexpr std::array k_managed_image_names = {
-    k_image_file_name,
-    k_golden_res_file_name,
-};
 
 // ----------------------------------------------------------------
 // PLDM package helpers
@@ -222,89 +214,17 @@ static std::optional<PldmComponentInfo>
 // Loop-device / mount teardown helpers
 // ----------------------------------------------------------------
 
-static std::string strip_deleted_suffix(std::string path)
+struct LoopDevice
 {
-    constexpr std::string_view suffix = " (deleted)";
-    if (path.size() >= suffix.size() &&
-        path.compare(path.size() - suffix.size(), suffix.size(), suffix) == 0)
-    {
-        path.resize(path.size() - suffix.size());
-    }
-    return path;
-}
-
-// Detach a single loop device by path (e.g. "/dev/loop3").
-static void teardown_loop_device(const std::string& loop_dev)
-{
-    UniqueFd fd(::open(loop_dev.c_str(), O_RDWR | O_CLOEXEC));
-    if (fd.get() < 0)
-    {
-        std::cerr << "open(" << loop_dev << "): " << errno << '\n';
-        return;
-    }
-    if (::ioctl(fd.get(), LOOP_CLR_FD) != 0)
-    {
-        std::cerr << "ioctl(LOOP_CLR_FD) on " << loop_dev << ": " << errno
-                  << '\n';
-    }
-}
-
-// Scan sysfs for loop devices whose backing file is under `dir` and
-// matches one of kManagedImageNames, then detach them.
-static void teardown_loop_devices_under(const fs::path& dir)
-{
-    // The ec overload avoids throwing if /sys/block is unreadable;
-    // the iterator is simply empty and we skip teardown — best-effort cleanup.
-    std::error_code ec;
-    for (auto& entry : fs::directory_iterator("/sys/block", ec))
-    {
-        const std::string name = entry.path().filename().string();
-        if (name.compare(0, 4, "loop") != 0)
-        {
-            continue;
-        }
-        fs::path backing_path = entry.path() / "loop" / "backing_file";
-        std::ifstream backing(backing_path);
-        if (!backing)
-        {
-            continue;
-        }
-        std::string backing_file;
-        std::getline(backing, backing_file);
-        backing_file = strip_deleted_suffix(backing_file);
-
-        fs::path bp(backing_file);
-        if (bp.parent_path() != dir)
-        {
-            continue;
-        }
-        std::string fname = bp.filename().string();
-        bool managed = false;
-        for (auto& img : k_managed_image_names)
-        {
-            if (fname == img)
-            {
-                managed = true;
-                break;
-            }
-        }
-        if (!managed)
-        {
-            continue;
-        }
-
-        std::string dev_path = "/dev/" + name;
-        std::cout << "Tearing down orphaned loop device " << dev_path
-                  << " (backing " << backing_file << ")\n";
-        teardown_loop_device(dev_path);
-    }
-}
+    std::string path;
+    UniqueFd fd;
+};
 
 // Allocate a free loop device, attach `image_path` as its backing file,
-// and return the device path (e.g. "/dev/loop3").  Returns std::nullopt
-// on failure.
-static std::optional<std::string> setup_loop_device(const fs::path& image_path,
-                                                    int open_flags)
+// and return the device path + fd.  The caller must keep the fd alive
+// until after mount() so that LO_FLAGS_AUTOCLEAR does not fire early.
+static std::optional<LoopDevice> setup_loop_device(const fs::path& image_path,
+                                                   int open_flags)
 {
     UniqueFd ctl_fd(::open("/dev/loop-control", O_RDWR | O_CLOEXEC));
     if (ctl_fd.get() < 0)
@@ -338,7 +258,18 @@ static std::optional<std::string> setup_loop_device(const fs::path& image_path,
         std::cerr << "LOOP_SET_FD for " << image_path << ": " << errno << '\n';
         return std::nullopt;
     }
-    return loop_dev;
+
+    struct loop_info64 info = {};
+    info.lo_flags = LO_FLAGS_AUTOCLEAR;
+    if (::ioctl(loop_fd.get(), LOOP_SET_STATUS64, &info) < 0)
+    {
+        std::cerr << "LOOP_SET_STATUS64 for " << loop_dev << ": " << errno
+                  << '\n';
+        ::ioctl(loop_fd.get(), LOOP_CLR_FD);
+        return std::nullopt;
+    }
+
+    return LoopDevice{std::move(loop_dev), std::move(loop_fd)};
 }
 
 // ----------------------------------------------------------------
@@ -697,34 +628,6 @@ sdbusplus::message::unix_fd IstService::startUpdate()
     }
 
     const fs::path& storage_path = platformCfg_.storage.vectorStoragePath;
-    const fs::path& mount_path = platformCfg_.storage.vectorMountPath;
-
-    // Tear down loop devices first so lazy unmounts can fully release.
-    // Order matters: squashfs loop (under vectorMountPath) must go before
-    // the ext4 loop (under vectorStoragePath), because the squashfs backing
-    // file lives inside the ext4 mount.
-    if (!mount_path.empty())
-    {
-        teardown_loop_devices_under(mount_path);
-    }
-    teardown_loop_devices_under(storage_path);
-
-    if (!mount_path.empty())
-    {
-        fs::path golden_mount = mount_path / "GOLDEN_RES";
-        if (umount2(golden_mount.c_str(), MNT_DETACH) != 0 && errno != EINVAL &&
-            errno != ENOENT)
-        {
-            std::cerr << "Failed to unmount " << golden_mount << ": " << errno
-                      << '\n';
-        }
-        if (umount2(mount_path.c_str(), MNT_DETACH) != 0 && errno != EINVAL &&
-            errno != ENOENT)
-        {
-            std::cerr << "Failed to unmount " << mount_path << ": " << errno
-                      << '\n';
-        }
-    }
 
     // Create socketpair for the FD-based transfer.
     int fds[2];
@@ -734,6 +637,21 @@ sdbusplus::message::unix_fd IstService::startUpdate()
     }
     UniqueFd read_fd(fds[0]);
     UniqueFd write_fd(fds[1]);
+
+    // Unmount existing images before writing the new one.  On failure we
+    // still return a valid fd rather than throwing: a D-Bus exception while
+    // bmcweb is streaming the upload body causes a TCP RST ("Connection
+    // reset by peer") because the HTTP layer cannot send an error response
+    // mid-transfer.  Instead we close the read end so bmcweb gets EPIPE on
+    // its first write and stops immediately.
+    if (!teardownMounts())
+    {
+        std::cerr << "Failed to unmount existing images; "
+                     "rejecting update\n";
+        publisher_->publishActivation(k_activation_failed);
+        UniqueFd discard(std::move(read_fd));
+        return {write_fd.release()};
+    }
 
     fs::path image_path = storage_path / k_image_file_name;
     auto session = std::make_shared<TransferSession>(
@@ -833,6 +751,36 @@ void IstService::onStripComplete(bool ok)
     readAndPublishVersion();
 }
 
+bool IstService::teardownMounts()
+{
+    const fs::path& mount_path = platformCfg_.storage.vectorMountPath;
+
+    if (mount_path.empty())
+    {
+        return true;
+    }
+
+    bool ok = true;
+    fs::path golden_mount = mount_path / "GOLDEN_RES";
+    if (umount2(golden_mount.c_str(), 0) != 0 && errno != EINVAL &&
+        errno != ENOENT && errno != EPERM)
+    {
+        std::cerr << "Failed to unmount " << golden_mount << ": " << errno
+                  << '\n';
+        ok = false;
+    }
+
+    if (umount2(mount_path.c_str(), 0) != 0 && errno != EINVAL &&
+        errno != ENOENT && errno != EPERM)
+    {
+        std::cerr << "Failed to unmount " << mount_path << ": " << errno
+                  << '\n';
+        ok = false;
+    }
+
+    return ok;
+}
+
 bool IstService::mountImages()
 {
     const fs::path& storage_path = platformCfg_.storage.vectorStoragePath;
@@ -841,6 +789,12 @@ bool IstService::mountImages()
     if (storage_path.empty() || mount_path.empty())
     {
         std::cerr << "vectorStoragePath or vectorMountPath not configured\n";
+        return false;
+    }
+
+    if (!teardownMounts())
+    {
+        std::cerr << "Cannot mount: failed to unmount existing images\n";
         return false;
     }
 
@@ -867,30 +821,22 @@ bool IstService::mountImages()
         return false;
     }
 
-    std::optional<std::string> loop_dev =
+    std::optional<LoopDevice> ext4_loop =
         setup_loop_device(image_path, O_RDONLY);
-    if (!loop_dev)
+    if (!ext4_loop)
     {
         return false;
     }
 
-    if (::mount(loop_dev->c_str(), mount_path.c_str(), "ext4",
+    if (::mount(ext4_loop->path.c_str(), mount_path.c_str(), "ext4",
                 MS_RDONLY | MS_NOATIME, nullptr) != 0)
     {
-        if (errno == EBUSY)
-        {
-            // EBUSY means mount_path is already an active mount point.
-            // Detach the loop device we just created (it's unused) and
-            // return success — the existing mount is what we want.
-            std::cout << "Vectors already mounted at " << mount_path << '\n';
-            teardown_loop_device(*loop_dev);
-            return true;
-        }
         std::cerr << "mount ext4 at " << mount_path << ": " << errno << '\n';
-        teardown_loop_device(*loop_dev);
         return false;
     }
     std::cout << "Mounted ext4 image at " << mount_path << '\n';
+
+    auto undo_ext4 = [&mount_path]() { ::umount2(mount_path.c_str(), 0); };
 
     fs::path sqsh_path = mount_path / "GOLDEN_RES.sqfs";
     exists = fs::exists(sqsh_path, ec);
@@ -898,11 +844,13 @@ bool IstService::mountImages()
     {
         std::cerr << "Failed to stat " << sqsh_path << ": " << ec.message()
                   << '\n';
+        undo_ext4();
         return false;
     }
     if (!exists)
     {
         std::cerr << "Golden results image not found: " << sqsh_path << '\n';
+        undo_ext4();
         return false;
     }
 
@@ -912,23 +860,25 @@ bool IstService::mountImages()
     {
         std::cerr << "Failed to create " << golden_mount << ": " << ec.message()
                   << '\n';
+        undo_ext4();
         return false;
     }
 
-    std::optional<std::string> sqsh_loop =
+    std::optional<LoopDevice> sqsh_loop =
         setup_loop_device(sqsh_path, O_RDONLY);
     if (!sqsh_loop)
     {
         std::cerr << "Failed to set up loop device for squashfs\n";
+        undo_ext4();
         return false;
     }
 
-    if (::mount(sqsh_loop->c_str(), golden_mount.c_str(), "squashfs", MS_RDONLY,
-                nullptr) != 0)
+    if (::mount(sqsh_loop->path.c_str(), golden_mount.c_str(), "squashfs",
+                MS_RDONLY, nullptr) != 0)
     {
         std::cerr << "mount squashfs at " << golden_mount << ": " << errno
                   << '\n';
-        teardown_loop_device(*sqsh_loop);
+        undo_ext4();
         return false;
     }
     std::cout << "Mounted golden results at " << golden_mount << '\n';

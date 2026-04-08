@@ -377,4 +377,6 @@ class IstService : public std::enable_shared_from_this<IstService>
     std::unique_ptr<ItmRunner> itmRunner_;
     std::shared_ptr<TransferSession> activeTransfer_;
     std::shared_ptr<PldmStripper> activeStripper_;
+
+    bool teardownMounts();
 };
