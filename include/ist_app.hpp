@@ -317,6 +317,13 @@ bool parsePlatformConfig(IstPlatformConfig& out, const std::string& path);
 class TransferSession;
 class PldmStripper;
 
+struct PldmComponentInfo
+{
+    uint32_t offset;
+    uint32_t size;
+    uint32_t payloadCrc;
+};
+
 class IstService : public std::enable_shared_from_this<IstService>
 {
   public:
@@ -363,6 +370,9 @@ class IstService : public std::enable_shared_from_this<IstService>
     void onResetDone(int itmExit, bool okReset);
 
     void onTransferComplete(bool ok, const std::filesystem::path& imagePath);
+    void onPldmParseComplete(
+        bool ok, const std::shared_ptr<std::optional<PldmComponentInfo>>& comp,
+        const std::filesystem::path& imagePath);
     void onStripComplete(bool ok);
     void onTeardownComplete(bool ok, const std::shared_ptr<UniqueFd>& readFd,
                             const std::filesystem::path& imagePath);

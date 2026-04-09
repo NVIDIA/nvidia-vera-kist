@@ -87,13 +87,6 @@ static uint32_t compute_crc32(const uint8_t* data, size_t len)
     return ~crc32_update(0xFFFFFFFF, data, len);
 }
 
-struct PldmComponentInfo
-{
-    uint32_t offset;
-    uint32_t size;
-    uint32_t payloadCrc;
-};
-
 static constexpr size_t k_pldm_min_header_size = 36;
 
 static bool parse_pldm_header(const std::vector<uint8_t>& hdr, size_t file_size,
@@ -426,179 +419,6 @@ class TransferSession : public std::enable_shared_from_this<TransferSession>
 };
 
 // ----------------------------------------------------------------
-// PldmStripper — async in-place PLDM header removal
-//
-// Opens the image file O_RDWR, copies payload bytes forward using
-// pread/pwrite in 64 KiB chunks (each posted to the io_context),
-// verifies the payload CRC (revision >= 4), and ftruncates the file.
-// On destruction, removes the image file unless committed.
-// ----------------------------------------------------------------
-
-class PldmStripper : public std::enable_shared_from_this<PldmStripper>
-{
-  public:
-    PldmStripper(boost::asio::io_context& io, fs::path image_path,
-                 PldmComponentInfo comp,
-                 std::move_only_function<void(bool ok) const> on_complete,
-                 std::move_only_function<void(uint8_t pct) const> on_progress) :
-        io_(io), imagePath_(std::move(image_path)), comp_(comp),
-        onComplete_(std::move(on_complete)),
-        onProgress_(std::move(on_progress)),
-        fd_(::open(imagePath_.c_str(), O_RDWR | O_CLOEXEC))
-    {
-        if (fd_.get() < 0)
-        {
-            throw std::system_error(errno, std::generic_category(),
-                                    "Failed to open " + imagePath_.string());
-        }
-    }
-
-    ~PldmStripper()
-    {
-        if (!committed_)
-        {
-            std::error_code ec;
-            fs::remove(imagePath_, ec);
-        }
-    }
-
-    PldmStripper(const PldmStripper&) = delete;
-    PldmStripper& operator=(const PldmStripper&) = delete;
-
-    void start()
-    {
-        remaining_ = comp_.size;
-        readPos_ = comp_.offset;
-        writePos_ = 0;
-        crcState_ = 0xFFFFFFFF;
-        strip_next_chunk();
-    }
-
-  private:
-    // post() defers execution via the io_context event loop, not recursion.
-    // NOLINTNEXTLINE(misc-no-recursion)
-    void strip_next_chunk()
-    {
-        if (remaining_ == 0)
-        {
-            uint32_t computed = ~crcState_;
-            if (computed != comp_.payloadCrc)
-            {
-                std::cerr << "PLDM payload CRC mismatch: stored 0x" << std::hex
-                          << comp_.payloadCrc << " computed 0x" << computed
-                          << std::dec << '\n';
-                finish(false);
-                return;
-            }
-            std::cerr << "PLDM payload CRC verified OK\n";
-
-            if (::ftruncate(fd_.get(), static_cast<off_t>(comp_.size)) != 0)
-            {
-                std::cerr << "ftruncate failed: " << errno << '\n';
-                finish(false);
-                return;
-            }
-
-            std::cerr << "PLDM header stripped, image ready (" << comp_.size
-                      << " bytes)\n";
-            committed_ = true;
-            finish(true);
-            return;
-        }
-
-        size_t to_read =
-            std::min(static_cast<size_t>(remaining_), k_transfer_buf_size);
-        ssize_t nread = ::pread(fd_.get(), buf_.data(), to_read, readPos_);
-        if (nread < 0)
-        {
-            std::cerr << "pread failed during PLDM stripping: " << errno
-                      << '\n';
-            finish(false);
-            return;
-        }
-        if (nread == 0)
-        {
-            std::cerr << "Unexpected EOF during PLDM stripping"
-                         " (file truncated?)\n";
-            finish(false);
-            return;
-        }
-
-        crcState_ = crc32_update(crcState_,
-                                 reinterpret_cast<const uint8_t*>(buf_.data()),
-                                 static_cast<size_t>(nread));
-
-        ssize_t nwritten = ::pwrite(fd_.get(), buf_.data(),
-                                    static_cast<size_t>(nread), writePos_);
-        if (nwritten != nread)
-        {
-            std::cerr << "pwrite failed during PLDM stripping: " << errno
-                      << '\n';
-            finish(false);
-            return;
-        }
-
-        readPos_ += nread;
-        writePos_ += nread;
-        remaining_ -= static_cast<uint32_t>(nread);
-
-        uint8_t pct =
-            (comp_.size == 0)
-                ? 100
-                : static_cast<uint8_t>(100ULL * (comp_.size - remaining_) /
-                                       comp_.size);
-        if (pct >= lastPct_ + 20)
-        {
-            lastPct_ = pct;
-            if (onProgress_)
-            {
-                onProgress_(pct);
-            }
-        }
-
-        boost::asio::post(
-            io_,
-            [weak = weak_from_this()]() // NOLINT(misc-no-recursion)
-                                        // deferred, not recursive
-            {
-                if (auto self = weak.lock())
-                {
-                    self->strip_next_chunk();
-                }
-            });
-    }
-
-    void finish(bool ok)
-    {
-        if (finished_)
-        {
-            return;
-        }
-        finished_ = true;
-        auto cb = std::move(onComplete_);
-        if (cb)
-        {
-            cb(ok);
-        }
-    }
-
-    boost::asio::io_context& io_;
-    fs::path imagePath_;
-    PldmComponentInfo comp_;
-    std::move_only_function<void(bool ok) const> onComplete_;
-    std::move_only_function<void(uint8_t pct) const> onProgress_;
-    UniqueFd fd_;
-    std::array<char, k_transfer_buf_size> buf_{};
-    uint32_t remaining_{0};
-    off_t readPos_{0};
-    off_t writePos_{0};
-    uint32_t crcState_{0xFFFFFFFF};
-    uint8_t lastPct_{0};
-    bool finished_{false};
-    bool committed_{false};
-};
-
-// ----------------------------------------------------------------
 // Async helper: run blocking work on a detached thread, signal
 // the bool result back to the io_context via a pipe so the
 // callback executes on the event-loop thread.
@@ -632,6 +452,139 @@ static void run_off_thread(boost::asio::io_context& io,
         ::close(write_fd);
     }).detach();
 }
+
+// ----------------------------------------------------------------
+// PLDM header stripping — runs entirely on a worker thread
+// ----------------------------------------------------------------
+
+static bool strip_pldm_payload(int fd, const PldmComponentInfo& comp)
+{
+    uint32_t remaining = comp.size;
+    off_t read_pos = comp.offset;
+    off_t write_pos = 0;
+    uint32_t crc_state = 0xFFFFFFFF;
+    std::array<char, k_transfer_buf_size> buf{};
+
+    while (remaining > 0)
+    {
+        size_t to_read =
+            std::min(static_cast<size_t>(remaining), k_transfer_buf_size);
+        ssize_t nread = ::pread(fd, buf.data(), to_read, read_pos);
+        if (nread < 0)
+        {
+            std::cerr << "pread failed during PLDM stripping: " << errno
+                      << '\n';
+            return false;
+        }
+        if (nread == 0)
+        {
+            std::cerr << "Unexpected EOF during PLDM stripping"
+                         " (file truncated?)\n";
+            return false;
+        }
+
+        crc_state = crc32_update(crc_state,
+                                 reinterpret_cast<const uint8_t*>(buf.data()),
+                                 static_cast<size_t>(nread));
+
+        ssize_t nwritten =
+            ::pwrite(fd, buf.data(), static_cast<size_t>(nread), write_pos);
+        if (nwritten != nread)
+        {
+            std::cerr << "pwrite failed during PLDM stripping: " << errno
+                      << '\n';
+            return false;
+        }
+
+        read_pos += nread;
+        write_pos += nread;
+        remaining -= static_cast<uint32_t>(nread);
+    }
+
+    uint32_t computed = ~crc_state;
+    if (computed != comp.payloadCrc)
+    {
+        std::cerr << "PLDM payload CRC mismatch: stored 0x" << std::hex
+                  << comp.payloadCrc << " computed 0x" << computed << std::dec
+                  << '\n';
+        return false;
+    }
+    std::cerr << "PLDM payload CRC verified OK\n";
+
+    if (::ftruncate(fd, static_cast<off_t>(comp.size)) != 0)
+    {
+        std::cerr << "ftruncate failed: " << errno << '\n';
+        return false;
+    }
+
+    std::cerr << "PLDM header stripped, image ready (" << comp.size
+              << " bytes)\n";
+    return true;
+}
+
+class PldmStripper : public std::enable_shared_from_this<PldmStripper>
+{
+  public:
+    PldmStripper(boost::asio::io_context& io, fs::path image_path,
+                 PldmComponentInfo comp,
+                 std::move_only_function<void(bool ok) const> on_complete) :
+        io_(io), imagePath_(std::move(image_path)), comp_(comp),
+        onComplete_(std::move(on_complete)),
+        fd_(::open(imagePath_.c_str(), O_RDWR | O_CLOEXEC))
+    {
+        if (fd_.get() < 0)
+        {
+            throw std::system_error(errno, std::generic_category(),
+                                    "Failed to open " + imagePath_.string());
+        }
+    }
+
+    ~PldmStripper()
+    {
+        if (!committed_)
+        {
+            std::error_code ec;
+            fs::remove(imagePath_, ec);
+        }
+    }
+
+    PldmStripper(const PldmStripper&) = delete;
+    PldmStripper& operator=(const PldmStripper&) = delete;
+
+    void start()
+    {
+        std::shared_ptr<UniqueFd> fd_ptr =
+            std::make_shared<UniqueFd>(std::move(fd_));
+        PldmComponentInfo comp = comp_;
+
+        // shared_from_this is intentional: the callback must set
+        // committed_ before the destructor runs, otherwise it would
+        // delete the image file.
+        run_off_thread(
+            io_,
+            [fd_ptr, comp]() {
+                return strip_pldm_payload(fd_ptr->get(), comp);
+            },
+            [self = shared_from_this()](bool ok) {
+                if (ok)
+                {
+                    self->committed_ = true;
+                }
+                if (self->onComplete_)
+                {
+                    self->onComplete_(ok);
+                }
+            });
+    }
+
+  private:
+    boost::asio::io_context& io_;
+    fs::path imagePath_;
+    PldmComponentInfo comp_;
+    std::move_only_function<void(bool ok) const> onComplete_;
+    UniqueFd fd_;
+    bool committed_{false};
+};
 
 // ----------------------------------------------------------------
 // IstService::startUpdate
@@ -699,8 +652,28 @@ void IstService::onTransferComplete(bool ok, const fs::path& image_path)
     }
 
     std::cout << "Image transfer succeeded, processing PLDM package\n";
-    std::optional<PldmComponentInfo> comp = process_pldm_package(image_path);
-    if (!comp)
+
+    std::shared_ptr<std::optional<PldmComponentInfo>> comp =
+        std::make_shared<std::optional<PldmComponentInfo>>();
+    run_off_thread(
+        io_,
+        [comp, image_path]() {
+            *comp = process_pldm_package(image_path);
+            return comp->has_value();
+        },
+        [weak = weak_from_this(), comp, image_path](bool ok) {
+            if (auto self = weak.lock())
+            {
+                self->onPldmParseComplete(ok, comp, image_path);
+            }
+        });
+}
+
+void IstService::onPldmParseComplete(
+    bool ok, const std::shared_ptr<std::optional<PldmComponentInfo>>& comp,
+    const fs::path& image_path)
+{
+    if (!ok)
     {
         std::cerr << "PLDM processing failed, removing image\n";
         std::error_code ec;
@@ -708,21 +681,13 @@ void IstService::onTransferComplete(bool ok, const fs::path& image_path)
         finishUpdate(false);
         return;
     }
-
     try
     {
-        auto stripper = std::make_shared<PldmStripper>(
-            io_, image_path, *comp,
-            [weak = weak_from_this()](bool strip_ok) {
+        std::shared_ptr<PldmStripper> stripper = std::make_shared<PldmStripper>(
+            io_, image_path, **comp, [weak = weak_from_this()](bool strip_ok) {
                 if (auto self = weak.lock())
                 {
                     self->onStripComplete(strip_ok);
-                }
-            },
-            [weak = weak_from_this()](uint8_t pct) {
-                if (auto self = weak.lock())
-                {
-                    self->publisher_->publishActivationProgress(pct);
                 }
             });
         activeStripper_ = stripper;
@@ -748,6 +713,7 @@ void IstService::onStripComplete(bool ok)
     }
 
     std::cout << "PLDM strip succeeded\n";
+    publisher_->publishActivationProgress(100);
     publisher_->removeActivationProgress();
 
     asyncMountImages([weak = weak_from_this()](bool mount_ok) {
