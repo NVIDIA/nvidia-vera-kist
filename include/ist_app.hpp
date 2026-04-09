@@ -364,9 +364,16 @@ class IstService : public std::enable_shared_from_this<IstService>
 
     void onTransferComplete(bool ok, const std::filesystem::path& imagePath);
     void onStripComplete(bool ok);
+    void onTeardownComplete(bool ok, const std::shared_ptr<UniqueFd>& readFd,
+                            const std::filesystem::path& imagePath);
+    void onMountComplete(bool ok);
     bool mountImages();
+    bool teardownMounts();
+    void asyncMountImages(std::move_only_function<void(bool ok) const> done);
+    void asyncTeardownMounts(std::move_only_function<void(bool ok) const> done);
     void ensureMounted();
     void readAndPublishVersion();
+    void finishUpdate(bool ok);
 
     boost::asio::io_context& io_;
     std::unique_ptr<StatePublisher> publisher_;
@@ -375,12 +382,11 @@ class IstService : public std::enable_shared_from_this<IstService>
     IstTestConfig test_;
     IstState state_;
     bool initialized_{false};
+    bool updateInProgress_{false};
 
     std::unique_ptr<HookRunner> hookRunner_;
     std::shared_ptr<HostPowerMonitor> powerMonitor_;
     std::unique_ptr<ItmRunner> itmRunner_;
     std::shared_ptr<TransferSession> activeTransfer_;
     std::shared_ptr<PldmStripper> activeStripper_;
-
-    bool teardownMounts();
 };

@@ -38,6 +38,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -598,6 +599,41 @@ class PldmStripper : public std::enable_shared_from_this<PldmStripper>
 };
 
 // ----------------------------------------------------------------
+// Async helper: run blocking work on a detached thread, signal
+// the bool result back to the io_context via a pipe so the
+// callback executes on the event-loop thread.
+// ----------------------------------------------------------------
+
+static void run_off_thread(boost::asio::io_context& io,
+                           std::move_only_function<bool()> work,
+                           std::move_only_function<void(bool) const> done)
+{
+    int fds[2];
+    if (::pipe2(fds, O_CLOEXEC) < 0)
+    {
+        done(false);
+        return;
+    }
+
+    auto stream =
+        std::make_shared<boost::asio::posix::stream_descriptor>(io, fds[0]);
+    std::shared_ptr<uint8_t> result = std::make_shared<uint8_t>(0);
+
+    stream->async_read_some(boost::asio::buffer(result.get(), 1),
+                            [stream, result, done = std::move(done)](
+                                const boost::system::error_code& ec, size_t) {
+                                done(!ec && *result != 0);
+                            });
+
+    std::thread([work = std::move(work), write_fd = fds[1]]() mutable {
+        bool ok = work();
+        uint8_t val = ok ? 1 : 0;
+        std::ignore = ::write(write_fd, &val, 1);
+        ::close(write_fd);
+    }).detach();
+}
+
+// ----------------------------------------------------------------
 // IstService::startUpdate
 // ----------------------------------------------------------------
 
@@ -612,14 +648,10 @@ sdbusplus::message::unix_fd IstService::startUpdate()
         throw sdbusplus::exception::SdBusError(
             EBUSY, "Cannot update while IST is running");
     }
-    if (activeTransfer_)
+    if (updateInProgress_)
     {
         throw sdbusplus::exception::SdBusError(EBUSY,
-                                               "Transfer already in progress");
-    }
-    if (activeStripper_)
-    {
-        throw sdbusplus::exception::SdBusError(EBUSY, "PLDM strip in progress");
+                                               "Update already in progress");
     }
     if (platformCfg_.storage.vectorStoragePath.empty())
     {
@@ -628,48 +660,30 @@ sdbusplus::message::unix_fd IstService::startUpdate()
     }
 
     const fs::path& storage_path = platformCfg_.storage.vectorStoragePath;
+    fs::path image_path = storage_path / k_image_file_name;
 
-    // Create socketpair for the FD-based transfer.
     int fds[2];
     if (::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, fds) != 0)
     {
         throw sdbusplus::exception::SdBusError(errno, "socketpair failed");
     }
-    UniqueFd read_fd(fds[0]);
+    std::shared_ptr<UniqueFd> read_fd = std::make_shared<UniqueFd>(fds[0]);
     UniqueFd write_fd(fds[1]);
 
-    // Unmount existing images before writing the new one.  On failure we
-    // still return a valid fd rather than throwing: a D-Bus exception while
-    // bmcweb is streaming the upload body causes a TCP RST ("Connection
-    // reset by peer") because the HTTP layer cannot send an error response
-    // mid-transfer.  Instead we close the read end so bmcweb gets EPIPE on
-    // its first write and stops immediately.
-    if (!teardownMounts())
-    {
-        std::cerr << "Failed to unmount existing images; "
-                     "rejecting update\n";
-        publisher_->publishActivation(k_activation_failed);
-        UniqueFd discard(std::move(read_fd));
-        return {write_fd.release()};
-    }
+    updateInProgress_ = true;
 
-    fs::path image_path = storage_path / k_image_file_name;
-    auto session = std::make_shared<TransferSession>(
-        io_, std::move(read_fd), image_path,
-        platformCfg_.transferInactivityTimeout,
-        [weak = weak_from_this(), image_path](bool ok) {
+    // Teardown runs on a worker thread so it does not block the event
+    // loop.  The write_fd is returned to bmcweb immediately; any data it
+    // writes goes into the socketpair buffer until we start the
+    // TransferSession.  On teardown failure we close the read end so
+    // bmcweb gets EPIPE on its next write.
+    asyncTeardownMounts(
+        [weak = weak_from_this(), read_fd, image_path](bool ok) {
             if (auto self = weak.lock())
             {
-                self->onTransferComplete(ok, image_path);
+                self->onTeardownComplete(ok, read_fd, image_path);
             }
         });
-
-    publisher_->publishActivation(k_activation_activating);
-    publisher_->createActivationProgress();
-    publisher_->publishActivationProgress(0);
-
-    activeTransfer_ = session;
-    session->start();
 
     return {write_fd.release()};
 }
@@ -680,8 +694,7 @@ void IstService::onTransferComplete(bool ok, const fs::path& image_path)
     if (!ok)
     {
         std::cerr << "Image transfer failed\n";
-        publisher_->publishActivation(k_activation_failed);
-        publisher_->removeActivationProgress();
+        finishUpdate(false);
         return;
     }
 
@@ -692,8 +705,7 @@ void IstService::onTransferComplete(bool ok, const fs::path& image_path)
         std::cerr << "PLDM processing failed, removing image\n";
         std::error_code ec;
         fs::remove(image_path, ec);
-        publisher_->publishActivation(k_activation_failed);
-        publisher_->removeActivationProgress();
+        finishUpdate(false);
         return;
     }
 
@@ -721,8 +733,7 @@ void IstService::onTransferComplete(bool ok, const fs::path& image_path)
         std::cerr << "Failed to start PLDM strip: " << e.what() << '\n';
         std::error_code ec;
         fs::remove(image_path, ec);
-        publisher_->publishActivation(k_activation_failed);
-        publisher_->removeActivationProgress();
+        finishUpdate(false);
     }
 }
 
@@ -732,23 +743,19 @@ void IstService::onStripComplete(bool ok)
     if (!ok)
     {
         std::cerr << "PLDM strip failed\n";
-        publisher_->publishActivation(k_activation_failed);
-        publisher_->removeActivationProgress();
+        finishUpdate(false);
         return;
     }
 
     std::cout << "PLDM strip succeeded\n";
     publisher_->removeActivationProgress();
 
-    if (!mountImages())
-    {
-        std::cerr << "Failed to mount images after PLDM strip\n";
-        publisher_->publishActivation(k_activation_failed);
-        return;
-    }
-
-    publisher_->publishActivation(k_activation_active);
-    readAndPublishVersion();
+    asyncMountImages([weak = weak_from_this()](bool mount_ok) {
+        if (auto self = weak.lock())
+        {
+            self->onMountComplete(mount_ok);
+        }
+    });
 }
 
 bool IstService::teardownMounts()
@@ -929,6 +936,88 @@ void IstService::readAndPublishVersion()
 
     publisher_->publishVersion(version);
     std::cout << "IST vector version: " << version << '\n';
+}
+
+void IstService::finishUpdate(bool ok)
+{
+    publisher_->publishActivation(ok ? k_activation_active
+                                     : k_activation_failed);
+    publisher_->removeActivationProgress();
+    updateInProgress_ = false;
+}
+
+void IstService::onTeardownComplete(bool ok,
+                                    const std::shared_ptr<UniqueFd>& read_fd,
+                                    const fs::path& image_path)
+{
+    if (!ok)
+    {
+        std::cerr << "Failed to unmount existing images; rejecting update\n";
+        publisher_->publishActivation(k_activation_failed);
+        int fd = read_fd->release();
+        if (fd >= 0)
+        {
+            ::close(fd);
+        }
+        updateInProgress_ = false;
+        return;
+    }
+
+    try
+    {
+        std::shared_ptr<TransferSession> session =
+            std::make_shared<TransferSession>(
+                io_, UniqueFd(read_fd->release()), image_path,
+                platformCfg_.transferInactivityTimeout,
+                [weak = weak_from_this(), image_path](bool xfer_ok) {
+                    if (auto self = weak.lock())
+                    {
+                        self->onTransferComplete(xfer_ok, image_path);
+                    }
+                });
+
+        publisher_->publishActivation(k_activation_activating);
+        publisher_->createActivationProgress();
+        publisher_->publishActivationProgress(0);
+
+        activeTransfer_ = session;
+        session->start();
+    }
+    catch (const std::system_error& e)
+    {
+        std::cerr << "Failed to start transfer: " << e.what() << '\n';
+        publisher_->publishActivation(k_activation_failed);
+        updateInProgress_ = false;
+    }
+}
+
+void IstService::onMountComplete(bool ok)
+{
+    if (!ok)
+    {
+        std::cerr << "Failed to mount images after PLDM strip\n";
+        finishUpdate(false);
+        return;
+    }
+    publisher_->publishActivation(k_activation_active);
+    readAndPublishVersion();
+    updateInProgress_ = false;
+}
+
+void IstService::asyncTeardownMounts(
+    std::move_only_function<void(bool) const> done)
+{
+    auto self = shared_from_this();
+    run_off_thread(
+        io_, [self]() { return self->teardownMounts(); }, std::move(done));
+}
+
+void IstService::asyncMountImages(
+    std::move_only_function<void(bool) const> done)
+{
+    auto self = shared_from_this();
+    run_off_thread(
+        io_, [self]() { return self->mountImages(); }, std::move(done));
 }
 
 void IstService::ensureMounted()
