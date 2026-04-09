@@ -164,11 +164,6 @@ bool parsePlatformConfig(IstPlatformConfig& out, const std::string& path)
         return false;
     }
 
-    if (d.contains("itmBinaryPath") && d["itmBinaryPath"].is_string())
-    {
-        out.itmBinaryPath = d["itmBinaryPath"].get<std::string>();
-    }
-
     if (!d.contains("softwareInventoryId") ||
         !d["softwareInventoryId"].is_string())
     {
@@ -196,6 +191,11 @@ bool parsePlatformConfig(IstPlatformConfig& out, const std::string& path)
     out.storage.vectorMountPath = json_path(sc, "vectorMountPath");
     out.storage.vectorStoragePath = json_path(sc, "vectorStoragePath");
     out.storage.resultStoragePath = json_path(sc, "resultStoragePath");
+
+    if (!out.storage.vectorMountPath.empty())
+    {
+        out.itmBinaryPath = out.storage.vectorMountPath / "kist_itm";
+    }
 
     // Validate hook paths: reject explicitly-set-but-empty values,
     // and ensure non-empty paths are within hookDirectory.
