@@ -246,10 +246,13 @@ struct IstState
 class HookRunner
 {
   public:
+    static constexpr std::chrono::seconds defaultTimeout{120};
+
     virtual ~HookRunner() = default;
     virtual void asyncRun(const std::string& cmd, std::string what,
                           std::move_only_function<void(bool ok) const> done,
-                          std::vector<std::string> args = {}) = 0;
+                          std::vector<std::string> args = {},
+                          std::chrono::seconds timeout = defaultTimeout) = 0;
 };
 
 class HostPowerMonitor

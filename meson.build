@@ -189,5 +189,20 @@ if get_option('build_ist')
         )
 
         test('ist_app_test', ist_app_test, protocol: 'gtest')
+
+        hook_runner_test = executable(
+            'hook-runner-test',
+            'test/hook_runner_test.cpp',
+            dependencies: [boost, sdbusplus, nlohmann_json_dep, gtest_dep],
+            include_directories: ['include'],
+            link_with: [ist_app_a],
+        )
+
+        test(
+            'hook_runner_test',
+            hook_runner_test,
+            protocol: 'gtest',
+            timeout: 60,
+        )
     endif
 endif
