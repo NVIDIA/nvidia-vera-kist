@@ -455,7 +455,7 @@ void ItmRunnerImpl::asyncRun(
         io_, progress_path, std::move(on_progress));
     poller->start();
 
-    int timeout_sec = cfg.swTimeoutSec.value_or(15 * 60);
+    int timeout_sec = cfg.swTimeoutSec.value_or(45 * 60);
 
     active_ = std::make_shared<ItmProcess>(io_, std::move(done));
     active_->start(std::move(proc), std::move(poller), std::move(tee),
