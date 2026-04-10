@@ -14,11 +14,16 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include <fcntl.h>
+#include <unistd.h>
+
+#include <boost/asio/posix/stream_descriptor.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/process/v2/process.hpp>
 #include <boost/process/v2/stdio.hpp>
 #include <ist_app.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <filesystem>
@@ -26,6 +31,7 @@
 #include <iostream>
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace bpv2 = boost::process::v2;
@@ -33,12 +39,17 @@ namespace fs = std::filesystem;
 
 // Lifetime note: ProgressPoller is stopped in the proc->async_wait
 // callback which fires before io.run() returns.
+//
+// Each poll() reads the progress file on a detached worker thread
+// and sends the percentage byte back via a pipe so the main
+// io_context thread is never blocked by filesystem I/O.
 class ProgressPoller final : public std::enable_shared_from_this<ProgressPoller>
 {
   public:
     ProgressPoller(boost::asio::io_context& io, std::string path,
                    std::move_only_function<void(uint8_t) const> on_progress) :
-        timer_(io), path_(std::move(path)), onProgress_(std::move(on_progress))
+        io_(io), timer_(io), path_(std::move(path)),
+        onProgress_(std::move(on_progress))
     {}
 
     ~ProgressPoller()
@@ -55,83 +66,125 @@ class ProgressPoller final : public std::enable_shared_from_this<ProgressPoller>
     {
         stopped_ = true;
         timer_.cancel();
-        read_progress();
+        read_progress_sync();
     }
 
   private:
+    static constexpr uint8_t k_no_update = 0xFF;
+
     // Progress file format: "<completed> <total>\n" (two decimal integers).
-    void read_progress()
+    static uint8_t parse_progress_file(const std::string& path)
     {
-        std::ifstream input_file(path_);
+        std::ifstream input_file(path);
         if (!input_file.is_open())
         {
-            return; // File not yet created; normal during early IST stages
+            return k_no_update;
         }
 
         std::string line;
         if (!std::getline(input_file, line))
         {
-            std::cerr << "Failed to read progress file '" << path_ << "'\n";
-            return;
+            return k_no_update;
         }
 
-        int completed = 0;
-        int total = 0;
         try
         {
             std::size_t pos = 0;
-            completed = std::stoi(line, &pos);
-            total = std::stoi(line.substr(pos));
+            int completed = std::stoi(line, &pos);
+            int total = std::stoi(line.substr(pos));
+            if (total <= 0)
+            {
+                return k_no_update;
+            }
+            return static_cast<uint8_t>(std::clamp(
+                static_cast<int>(100.0 * completed / total), 0, 100));
         }
-        catch (const std::exception& e)
+        catch (const std::exception&)
         {
-            std::cerr << "Failed to parse progress file '" << path_
-                      << "': " << e.what() << '\n';
-            return;
+            return k_no_update;
         }
+    }
 
-        if (total <= 0)
+    void report(uint8_t pct)
+    {
+        if (pct != k_no_update && pct != lastProgress_)
         {
-            std::cerr << "Invalid total in progress file: " << total << '\n';
-            return;
+            lastProgress_ = pct;
+            onProgress_(pct);
         }
+    }
 
-        int pct =
-            std::clamp(static_cast<int>(100.0 * completed / total), 0, 100);
-        uint8_t new_progress = static_cast<uint8_t>(pct);
-        if (new_progress != lastProgress_)
-        {
-            lastProgress_ = new_progress;
-            onProgress_(new_progress);
-        }
+    // Synchronous final read — used only in stop()
+    void read_progress_sync()
+    {
+        report(parse_progress_file(path_));
     }
 
     void poll()
     {
+        if (stopped_)
+        {
+            return;
+        }
+
+        int fds[2];
+        if (::pipe2(fds, O_CLOEXEC) < 0)
+        {
+            schedule_next_poll();
+            return;
+        }
+
+        auto stream = std::make_shared<boost::asio::posix::stream_descriptor>(
+            io_, fds[0]);
+        std::shared_ptr<uint8_t> result =
+            std::make_shared<uint8_t>(k_no_update);
+
+        stream->async_read_some(
+            boost::asio::buffer(result.get(), 1),
+            [weak = weak_from_this(), stream,
+             result](const boost::system::error_code& ec, size_t) {
+                std::shared_ptr<ProgressPoller> self = weak.lock();
+                if (!self || ec || self->stopped_)
+                {
+                    return;
+                }
+                self->report(*result);
+                self->schedule_next_poll();
+            });
+
+        std::string path = path_;
+        std::thread([path, write_fd = fds[1]]() {
+            uint8_t pct = parse_progress_file(path);
+            std::ignore = ::write(write_fd, &pct, 1);
+            ::close(write_fd);
+        }).detach();
+    }
+
+    void schedule_next_poll()
+    {
         using namespace std::chrono_literals;
         if (stopped_)
         {
-            return; // Poller was stopped; normal shutdown path
+            return;
         }
-
-        read_progress();
 
         timer_.expires_after(1s);
         timer_.async_wait(
             [weak = weak_from_this()](const boost::system::error_code& ec) {
-                if (ec) // Timer cancelled — poller stopped
+                if (ec)
                 {
                     return;
                 }
                 std::shared_ptr<ProgressPoller> self = weak.lock();
                 if (!self)
                 {
-                    return; // Poller was destroyed; normal during shutdown
+                    return;
                 }
                 self->poll();
             });
     }
 
+    boost::asio::io_context& io_;
     boost::asio::steady_timer timer_;
     std::string path_;
     std::move_only_function<void(uint8_t) const> onProgress_;
