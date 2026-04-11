@@ -204,5 +204,15 @@ if get_option('build_ist')
             protocol: 'gtest',
             timeout: 60,
         )
+
+        itm_runner_test = executable(
+            'itm-runner-test',
+            'test/itm_runner_test.cpp',
+            dependencies: [boost, sdbusplus, nlohmann_json_dep, gtest_dep],
+            include_directories: ['include'],
+            link_with: [ist_app_a],
+        )
+
+        test('itm_runner_test', itm_runner_test, protocol: 'gtest', timeout: 60)
     endif
 endif

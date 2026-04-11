@@ -82,6 +82,34 @@ TEST_F(HookRunnerTest, NonZeroExitReportsFailure)
     EXPECT_FALSE(result);
 }
 
+TEST_F(HookRunnerTest, BadCommandReportsFailure)
+{
+    bool result = true;
+    bool called = false;
+    runner_->asyncRun("/nonexistent/command", "test-bad-cmd", [&](bool ok) {
+        result = ok;
+        called = true;
+    });
+    io_.run();
+    ASSERT_TRUE(called);
+    EXPECT_FALSE(result);
+}
+
+TEST_F(HookRunnerTest, ArgsArePassedToProcess)
+{
+    bool result = false;
+    bool called = false;
+    runner_->asyncRun("/bin/bash", "test-args",
+                      [&](bool ok) {
+                          result = ok;
+                          called = true;
+                      },
+                      {"-c", "test \"$0\" = hello", "hello"});
+    io_.run();
+    ASSERT_TRUE(called);
+    EXPECT_TRUE(result);
+}
+
 TEST_F(HookRunnerTest, TimeoutKillsProcess)
 {
     bool result = true;
