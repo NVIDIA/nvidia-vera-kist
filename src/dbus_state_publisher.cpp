@@ -111,17 +111,7 @@ class DbusStatePublisher final : public StatePublisher
     {
         if (progIface_)
         {
-            // Defer interface removal so the final PropertiesChanged signal
-            // (e.g. Status=Failed) is flushed to the bus before the interface
-            // is torn down.  Without this, clients may never see the terminal
-            // status because sd-bus discards pending signals for destroyed
-            // interfaces.
-            auto iface = std::move(progIface_);
-            boost::asio::post(conn_->get_io_context(),
-                              [this, iface = std::move(iface)]() mutable {
-                                  server_.remove_interface(iface);
-                                  iface.reset();
-                              });
+            defer_remove_interface(std::move(progIface_));
         }
     }
 
@@ -157,8 +147,7 @@ class DbusStatePublisher final : public StatePublisher
     {
         if (activationProgressIface_)
         {
-            server_.remove_interface(activationProgressIface_);
-            activationProgressIface_.reset();
+            defer_remove_interface(std::move(activationProgressIface_));
         }
     }
 
@@ -206,13 +195,11 @@ class DbusStatePublisher final : public StatePublisher
         return std::string(prefix) + "InProgress";
     }
 
-<<<<<<< Updated upstream
-=======
     // Remove the interface from the server's tracking list immediately, but
     // keep the shared_ptr alive for one more event-loop iteration so that
     // any pending PropertiesChanged signal (e.g. Status=Failed) is flushed
     // before the dbus_interface destructor unregisters from the bus.
-    void deferRemoveInterface(
+    void defer_remove_interface(
         std::shared_ptr<sdbusplus::asio::dbus_interface> iface)
     {
         server_.remove_interface(iface);
@@ -220,7 +207,6 @@ class DbusStatePublisher final : public StatePublisher
                           [iface = std::move(iface)]() {});
     }
 
->>>>>>> Stashed changes
     static constexpr std::string_view k_activation_active =
         "xyz.openbmc_project.Software.Activation.Activations.Active";
 
