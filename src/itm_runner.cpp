@@ -412,7 +412,7 @@ void ItmRunnerImpl::asyncRun(
     {
         std::cerr << "Failed to open ITM log file '" << log_path
                   << "': " << strerror(errno) << '\n';
-        done(false);
+        done(-1);
         return;
     }
 
@@ -421,7 +421,7 @@ void ItmRunnerImpl::asyncRun(
     {
         std::cerr << "Failed to create pipe for ITM output: " << strerror(errno)
                   << '\n';
-        done(false);
+        done(-1);
         return;
     }
     UniqueFd pipe_read(pipe_fds[0]);
