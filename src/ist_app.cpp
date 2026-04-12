@@ -14,6 +14,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include <async_utils.hpp>
 #include <ist_app.hpp>
 #include <nlohmann/json.hpp>
 #include <sdbusplus/exception.hpp>
@@ -519,6 +520,23 @@ void IstService::runIstCleanup(int itm_exit)
     emitIstEventLog(itm_exit);
     transitionTo(IstStage::cleanup);
 
+    fs::path results_dir = platformCfg_.storage.resultStoragePath;
+    runOffThread(
+        io_, [results_dir]() { return archiveResults(results_dir); },
+        [weak = weak_from_this(), itm_exit](bool ok) {
+            if (!ok)
+            {
+                std::cerr << "IST: results archiving failed\n";
+            }
+            if (auto self = weak.lock())
+            {
+                self->onArchiveDone(itm_exit);
+            }
+        });
+}
+
+void IstService::onArchiveDone(int itm_exit)
+{
     const fs::path& hook_cmd = platformCfg_.hooks.istBootDeassert;
     if (hook_cmd.empty())
     {
@@ -658,6 +676,11 @@ std::string IstService::startIST(const ParamMap& test_params)
 
     std::error_code ec;
     fs::remove_all(err_marker_dir, ec);
+    for (const auto& entry :
+         fs::directory_iterator(platformCfg_.storage.resultStoragePath, ec))
+    {
+        fs::remove_all(entry.path(), ec);
+    }
 
     ensureMounted();
 

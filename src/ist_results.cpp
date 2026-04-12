@@ -14,28 +14,161 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <boost/process/v2/process.hpp>
-#include <boost/process/v2/stdio.hpp>
+#include <archive.h>
+#include <archive_entry.h>
+#include <fcntl.h>
+
 #include <ist_app.hpp>
 
+#include <array>
 #include <cerrno>
+#include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
-#include <memory>
-#include <string>
-#include <vector>
 
-namespace bpv2 = boost::process::v2;
 namespace fs = std::filesystem;
 
-static void on_tar_exit(const std::shared_ptr<bpv2::process>& /*proc*/,
-                        const boost::system::error_code& ec, int exit_code)
+inline constexpr std::string_view k_archive_name = "ist_results.tar.gz";
+static constexpr size_t k_archive_buf_size = 65536;
+
+static bool add_file_to_archive(struct archive* ar, const fs::path& file_path,
+                                const fs::path& entry_name)
 {
-    if (ec || exit_code != 0)
+    struct stat st;
+    if (::stat(file_path.c_str(), &st) != 0)
     {
-        std::cerr << "IST: tar exited: ec=" << ec.message()
-                  << " exit=" << exit_code << '\n';
+        std::cerr << "IST: stat failed for " << file_path << ": " << errno
+                  << '\n';
+        return false;
     }
+
+    struct archive_entry* entry = archive_entry_new();
+    archive_entry_set_pathname(entry, entry_name.c_str());
+    archive_entry_copy_stat(entry, &st);
+    archive_entry_set_filetype(entry, AE_IFREG);
+    archive_entry_set_perm(entry, st.st_mode & 0777);
+
+    if (archive_write_header(ar, entry) != ARCHIVE_OK)
+    {
+        std::cerr << "IST: archive_write_header failed: "
+                  << archive_error_string(ar) << '\n';
+        archive_entry_free(entry);
+        return false;
+    }
+
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
+    int fd = ::open(file_path.c_str(), O_RDONLY | O_CLOEXEC);
+    if (fd < 0)
+    {
+        std::cerr << "IST: open failed for " << file_path << ": " << errno
+                  << '\n';
+        archive_entry_free(entry);
+        return false;
+    }
+
+    std::array<char, k_archive_buf_size> buf{};
+    bool ok = true;
+    while (true)
+    {
+        ssize_t nread = ::read(fd, buf.data(), buf.size());
+        if (nread < 0)
+        {
+            std::cerr << "IST: read failed for " << file_path << ": " << errno
+                      << '\n';
+            ok = false;
+            break;
+        }
+        if (nread == 0)
+        {
+            break;
+        }
+        if (archive_write_data(ar, buf.data(), static_cast<size_t>(nread)) < 0)
+        {
+            std::cerr << "IST: archive_write_data failed: "
+                      << archive_error_string(ar) << '\n';
+            ok = false;
+            break;
+        }
+    }
+
+    ::close(fd);
+    archive_entry_free(entry);
+    return ok;
+}
+
+bool archiveResults(const fs::path& results_dir)
+{
+    fs::path archive_path = results_dir / k_archive_name;
+    std::error_code ec;
+
+    // Collect files first so we don't iterate while modifying the directory.
+    std::vector<fs::path> files;
+    for (const fs::directory_entry& entry :
+         fs::directory_iterator(results_dir, ec))
+    {
+        if (entry.path().filename() == k_archive_name)
+        {
+            continue;
+        }
+        if (!entry.is_regular_file(ec))
+        {
+            continue;
+        }
+        files.push_back(entry.path());
+    }
+
+    if (files.empty())
+    {
+        std::cerr << "IST: no result files to archive in " << results_dir
+                  << '\n';
+        return false;
+    }
+
+    struct archive* ar = archive_write_new();
+    archive_write_add_filter_gzip(ar);
+    archive_write_set_format_pax_restricted(ar);
+
+    if (archive_write_open_filename(ar, archive_path.c_str()) != ARCHIVE_OK)
+    {
+        std::cerr << "IST: archive_write_open_filename failed: "
+                  << archive_error_string(ar) << '\n';
+        archive_write_free(ar);
+        return false;
+    }
+
+    bool all_ok = true;
+    for (const fs::path& file : files)
+    {
+        if (!add_file_to_archive(ar, file, file.filename()))
+        {
+            all_ok = false;
+            break;
+        }
+        // Delete each file immediately after archiving to stay within
+        // XMC storage limits.
+        fs::remove(file, ec);
+        if (ec)
+        {
+            std::cerr << "IST: failed to remove " << file << ": "
+                      << ec.message() << '\n';
+        }
+    }
+
+    if (archive_write_close(ar) != ARCHIVE_OK)
+    {
+        std::cerr << "IST: archive_write_close failed: "
+                  << archive_error_string(ar) << '\n';
+        all_ok = false;
+    }
+    archive_write_free(ar);
+
+    if (!all_ok)
+    {
+        fs::remove(archive_path, ec);
+    }
+
+    return all_ok;
 }
 
 sdbusplus::message::unix_fd IstService::getResultsFd()
@@ -48,58 +181,17 @@ sdbusplus::message::unix_fd IstService::getResultsFd()
             ENOENT, "resultStoragePath not configured");
     }
 
-    std::error_code ec;
-    bool dir_exists = fs::exists(results_dir, ec);
-    if (ec)
+    fs::path archive_path = results_dir / k_archive_name;
+
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
+    int fd = ::open(archive_path.c_str(), O_RDONLY | O_CLOEXEC);
+    if (fd < 0)
     {
-        std::cerr << "IST: cannot stat " << results_dir << ": " << ec.message()
-                  << '\n';
-        throw sdbusplus::exception::SdBusError(EIO, ec.message().c_str());
-    }
-    if (!dir_exists)
-    {
-        std::cerr << "IST: no results available in " << results_dir << '\n';
+        std::cerr << "IST: no results archive at " << archive_path << ": "
+                  << errno << '\n';
         throw sdbusplus::exception::SdBusError(ENOENT,
                                                "No IST results available");
     }
 
-    bool dir_empty = fs::is_empty(results_dir, ec);
-    if (ec)
-    {
-        std::cerr << "IST: cannot check " << results_dir << ": " << ec.message()
-                  << '\n';
-        throw sdbusplus::exception::SdBusError(EIO, ec.message().c_str());
-    }
-    if (dir_empty)
-    {
-        std::cerr << "IST: no results available in " << results_dir << '\n';
-        throw sdbusplus::exception::SdBusError(ENOENT,
-                                               "No IST results available");
-    }
-
-    int pipe_fds[2];
-    if (::pipe(pipe_fds) < 0)
-    {
-        std::cerr << "IST: pipe() failed: " << errno << '\n';
-        throw sdbusplus::exception::SdBusError(errno, "pipe failed");
-    }
-
-    UniqueFd read_end(pipe_fds[0]);
-    UniqueFd write_end(pipe_fds[1]);
-
-    std::shared_ptr<bpv2::process> proc = std::make_shared<bpv2::process>(
-        io_, "/bin/tar",
-        std::vector<std::string>{"czf", "-", "-C", results_dir, "."},
-        bpv2::process_stdio{
-            .in = nullptr, .out = write_end.get(), .err = stderr});
-
-    // tar owns a dup of writeEnd; close ours so bmcweb sees EOF when tar exits.
-    write_end = UniqueFd();
-
-    proc->async_wait(
-        [proc](const boost::system::error_code& ec, int exit_code) {
-            on_tar_exit(proc, ec, exit_code);
-        });
-
-    return {read_end.release()};
+    return {fd};
 }

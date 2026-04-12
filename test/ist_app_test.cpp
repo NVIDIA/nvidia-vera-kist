@@ -665,6 +665,8 @@ TEST_F(IstServiceTest, PowerCycleFailureRunsDeassertThenFails)
 
     // Simulate power cycle failure → should trigger cleanup/deassert
     power_done(false);
+    io_.run();
+    io_.restart();
 
     EXPECT_EQ(service_->state().stage, IstStage::cleanup);
     ASSERT_TRUE(deassert_done);
@@ -798,6 +800,8 @@ TEST_F(IstServiceTest, CakBypassFailureAbortsIst)
     ASSERT_TRUE(cak_done);
 
     cak_done(false);
+    io_.run();
+    io_.restart();
 
     EXPECT_EQ(service_->state().stage, IstStage::cleanup);
     ASSERT_TRUE(deassert_done);
@@ -881,6 +885,8 @@ TEST_F(IstServiceTest, AutoRebootPassesSkipCakToResetHook)
     ParamMap params;
     params["autoRebootOnComplete"] = true;
     service_->startIST(params);
+    io_.run();
+    io_.restart();
 
     ASSERT_THAT(captured_args,
                 ::testing::ElementsAre(std::string("--skip-cak")));
@@ -925,6 +931,8 @@ TEST_F(IstServiceTest, ItmSuccessCompletesWithCleanup)
     assert_done(true);
     power_done(true);
     itm_done(0); // ITM succeeded
+    io_.run();
+    io_.restart();
 
     EXPECT_EQ(service_->state().stage, IstStage::cleanup);
 
@@ -971,6 +979,8 @@ TEST_F(IstServiceTest, ItmFailureResultsInFailedStatus)
     assert_done(true);
     power_done(true);
     itm_done(1); // ITM failed (infra error)
+    io_.run();
+    io_.restart();
 
     EXPECT_EQ(service_->state().stage, IstStage::cleanup);
 
@@ -1017,6 +1027,8 @@ TEST_F(IstServiceTest, CleanupDeassertFailureStaysInFailed)
     assert_done(true);
     power_done(true);
     itm_done(0);
+    io_.run();
+    io_.restart();
 
     // Deassert hook fails
     deassert_done(false);
@@ -1072,6 +1084,8 @@ TEST_F(IstServiceTest, AutoRebootCallsResetHook)
     assert_done(true);
     power_done(true);
     itm_done(0);
+    io_.run();
+    io_.restart();
     deassert_done(true);
 
     // Reset hook should have been called
@@ -1123,6 +1137,8 @@ TEST_F(IstServiceTest, StartIstPassesTestParams)
     params["istSwTimeoutSec"] = 600;
     params["autoRebootOnComplete"] = false;
     service_->startIST(params);
+    io_.run();
+    io_.restart();
 
     ASSERT_TRUE(captured_cfg.customTestList.has_value());
     EXPECT_EQ(*captured_cfg.customTestList, "test1,test2");
@@ -1170,6 +1186,8 @@ TEST_F(IstServiceTest, SwTimeoutClampedToRange)
     ParamMap params;
     params["istSwTimeoutSec"] = 5;
     service_->startIST(params);
+    io_.run();
+    io_.restart();
 
     ASSERT_TRUE(captured_cfg.swTimeoutSec.has_value());
     EXPECT_EQ(*captured_cfg.swTimeoutSec, 60); // clamped to min
@@ -1257,6 +1275,8 @@ TEST_F(IstServiceTest, SwTimeoutClampedToMax)
     ParamMap params;
     params["istSwTimeoutSec"] = 99999;
     service_->startIST(params);
+    io_.run();
+    io_.restart();
 
     ASSERT_TRUE(captured_cfg.swTimeoutSec.has_value());
     EXPECT_EQ(*captured_cfg.swTimeoutSec, 7200); // clamped to max
@@ -1308,6 +1328,8 @@ TEST_F(IstServiceTest, CleanupFailsWhenDeassertHookMissing)
     assert_done(true);
     power_done(true);
     itm_done(0);
+    io_.run();
+    io_.restart();
 
     // Cleanup should fail because istBootDeassert is missing
     EXPECT_EQ(service_->state().status, IstStatus::failed);
@@ -1360,6 +1382,8 @@ TEST_F(IstServiceTest, AutoRebootResetFailureTransitionsToFailed)
     assert_done(true);
     power_done(true);
     itm_done(0);
+    io_.run();
+    io_.restart();
     deassert_done(true);
 
     // Reset hook fails
@@ -1415,6 +1439,8 @@ TEST_F(IstServiceTest, AutoRebootWithItmFailureStillFailed)
     assert_done(true);
     power_done(true);
     itm_done(1); // ITM failed (infra error)
+    io_.run();
+    io_.restart();
 
     deassert_done(true);
 
@@ -1483,6 +1509,8 @@ TEST_F(IstServiceTest, AutoRebootFailsWhenResetHookMissing)
     assert_done(true);
     power_done(true);
     itm_done(0);
+    io_.run();
+    io_.restart();
     deassert_done(true);
 
     // resetSystem hook is missing -> should fail in cleanup
@@ -1541,6 +1569,8 @@ TEST_F(IstServiceTest, EachRunGetsUniqueObjectPath)
 
     ParamMap params1;
     std::string path1 = service_->startIST(params1);
+    io_.run();
+    io_.restart();
 
     // --- Second run ---
     EXPECT_CALL(*hookRunner_,
@@ -1564,6 +1594,8 @@ TEST_F(IstServiceTest, EachRunGetsUniqueObjectPath)
 
     ParamMap params2;
     std::string path2 = service_->startIST(params2);
+    io_.run();
+    io_.restart();
 
     EXPECT_NE(path1, path2);
     EXPECT_EQ(path1, "/com/nvidia/vera/ist/runs/0");
@@ -1610,6 +1642,8 @@ TEST_F(IstServiceTest, SecondRunAfterCompletionWorks)
     assert_done1(true);
     power_done1(true);
     itm_done1(0);
+    io_.run();
+    io_.restart();
     deassert_done1(true);
 
     EXPECT_EQ(service_->state().status, IstStatus::completed);
@@ -1657,6 +1691,8 @@ TEST_F(IstServiceTest, SecondRunAfterCompletionWorks)
     assert_done2(true);
     power_done2(true);
     itm_done2(0);
+    io_.run();
+    io_.restart();
     deassert_done2(true);
 
     EXPECT_EQ(service_->state().status, IstStatus::completed);
@@ -1692,6 +1728,8 @@ TEST_F(IstServiceTest, RunObjectCreatedWithCorrectPath)
 
     ParamMap params;
     std::string path = service_->startIST(params);
+    io_.run();
+    io_.restart();
 
     EXPECT_EQ(path, "/com/nvidia/vera/ist/runs/0");
     EXPECT_EQ(service_->currentRunPath(), path);
@@ -1880,6 +1918,8 @@ TEST_F(IstServiceTest, SecondRunAfterFailureWorks)
     assert_done2(true);
     power_done2(true);
     itm_done2(0);
+    io_.run();
+    io_.restart();
     deassert_done2(true);
 
     EXPECT_EQ(service_->state().status, IstStatus::completed);
@@ -2379,6 +2419,8 @@ TEST_F(IstServiceTest, ItmMismatchEmitsEventLog)
     assert_done(true);
     power_done(true);
     itm_done(8); // IST_MISMATCH
+    io_.run();
+    io_.restart();
 
     deassert_done(true);
 
@@ -2436,6 +2478,8 @@ TEST_F(IstServiceTest, ItmPlatformErrorEmitsEventLog)
     assert_done(true);
     power_done(true);
     itm_done(14); // IST_PLATFORM_ERROR
+    io_.run();
+    io_.restart();
 
     deassert_done(true);
 
@@ -2496,6 +2540,8 @@ TEST_F(IstServiceTest, PlatformErrorIncludesMarkerFiles)
     std::ofstream marker2("/tmp/ist/err_marker/THERMAL_FAULT");
 
     itm_done(14);
+    io_.run();
+    io_.restart();
     deassert_done(true);
 
     fs::remove_all("/tmp/ist/err_marker");
@@ -2555,6 +2601,8 @@ TEST_F(IstServiceTest, ItmSuccessDoesNotEmitEventLog)
     assert_done(true);
     power_done(true);
     itm_done(0); // Success
+    io_.run();
+    io_.restart();
 
     deassert_done(true);
 
@@ -2603,9 +2651,108 @@ TEST_F(IstServiceTest, ItmInfraFailureDoesNotEmitEventLog)
     assert_done(true);
     power_done(true);
     itm_done(-1); // Infra failure (e.g. timeout, spawn error)
+    io_.run();
+    io_.restart();
 
     deassert_done(true);
 
     EXPECT_EQ(service_->state().status, IstStatus::failed);
     EXPECT_EQ(service_->state().stage, IstStage::idle);
+}
+
+// ----------------
+// archiveResults tests
+// ----------------
+
+TEST(ArchiveResultsTest, ArchivesFilesAndDeletesOriginals)
+{
+    fs::path tmp_dir = fs::temp_directory_path() /
+                       ("archive_test_" + std::to_string(getpid()));
+    fs::create_directories(tmp_dir);
+
+    std::ofstream(tmp_dir / "file1.txt") << "hello";
+    std::ofstream(tmp_dir / "file2.gz") << std::string(1024, 'X');
+
+    EXPECT_TRUE(archiveResults(tmp_dir));
+
+    EXPECT_TRUE(fs::exists(tmp_dir / "ist_results.tar.gz"));
+    EXPECT_FALSE(fs::exists(tmp_dir / "file1.txt"));
+    EXPECT_FALSE(fs::exists(tmp_dir / "file2.gz"));
+    EXPECT_GT(fs::file_size(tmp_dir / "ist_results.tar.gz"), 0u);
+
+    fs::remove_all(tmp_dir);
+}
+
+TEST(ArchiveResultsTest, ReturnsFalseOnEmptyDirectory)
+{
+    fs::path tmp_dir = fs::temp_directory_path() /
+                       ("archive_empty_" + std::to_string(getpid()));
+    fs::create_directories(tmp_dir);
+
+    EXPECT_FALSE(archiveResults(tmp_dir));
+    EXPECT_FALSE(fs::exists(tmp_dir / "ist_results.tar.gz"));
+
+    fs::remove_all(tmp_dir);
+}
+
+TEST(ArchiveResultsTest, SkipsExistingArchiveFile)
+{
+    fs::path tmp_dir = fs::temp_directory_path() /
+                       ("archive_skip_" + std::to_string(getpid()));
+    fs::create_directories(tmp_dir);
+
+    std::ofstream(tmp_dir / "ist_results.tar.gz") << "old archive";
+    std::ofstream(tmp_dir / "data.txt") << "new data";
+
+    EXPECT_TRUE(archiveResults(tmp_dir));
+
+    EXPECT_TRUE(fs::exists(tmp_dir / "ist_results.tar.gz"));
+    EXPECT_FALSE(fs::exists(tmp_dir / "data.txt"));
+
+    fs::remove_all(tmp_dir);
+}
+
+// ----------------
+// getResultsFd tests
+// ----------------
+
+TEST_F(IstServiceTest, GetResultsFdReturnsValidFdWhenArchiveExists)
+{
+    init_from_file(configPath_);
+
+    fs::path results_dir = tmpDir_ / "results";
+    std::ofstream(results_dir / "ist_results.tar.gz") << "archive data";
+
+    int fd = static_cast<int>(service_->getResultsFd());
+    EXPECT_GE(fd, 0);
+
+    char buf[64] = {};
+    ssize_t n = ::read(fd, buf, sizeof(buf));
+    EXPECT_EQ(std::string(buf, static_cast<size_t>(n)), "archive data");
+    ::close(fd);
+}
+
+TEST_F(IstServiceTest, GetResultsFdThrowsWhenNoArchive)
+{
+    init_from_file(configPath_);
+
+    EXPECT_THROW(service_->getResultsFd(), sdbusplus::exception::SdBusError);
+}
+
+TEST_F(IstServiceTest, StartIstCleansUpOldResults)
+{
+    init_from_file(configPath_);
+
+    fs::path results_dir = tmpDir_ / "results";
+    std::ofstream(results_dir / "ist_results.tar.gz") << "stale archive";
+    std::ofstream(results_dir / "leftover.gz") << "stale data";
+    EXPECT_TRUE(fs::exists(results_dir / "ist_results.tar.gz"));
+    EXPECT_TRUE(fs::exists(results_dir / "leftover.gz"));
+
+    ParamMap params;
+    service_->startIST(params);
+
+    EXPECT_FALSE(fs::exists(results_dir / "ist_results.tar.gz"));
+    EXPECT_FALSE(fs::exists(results_dir / "leftover.gz"));
+    EXPECT_TRUE(fs::exists(results_dir));
 }

@@ -124,9 +124,6 @@ int main(int, char**)
                 auto_reboot_on_complete, test_list, socket_list,
                 save_result_on_pass, save_result_on_fail);
         });
-    control_iface->register_method("GetResultsFd", [service, &io]() {
-        return return_and_post_close(service->getResultsFd(), io);
-    });
     control_iface->initialize();
 
     // Software update interface

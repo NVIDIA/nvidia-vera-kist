@@ -315,6 +315,9 @@ std::unique_ptr<StatePublisher>
 
 bool parsePlatformConfig(IstPlatformConfig& out, const std::string& path);
 
+bool archiveResults(const std::filesystem::path& resultsDir);
+
+struct PldmComponentInfo;
 class TransferSession;
 class PldmStripper;
 
@@ -370,6 +373,7 @@ class IstService : public std::enable_shared_from_this<IstService>
     void onPowerCycleDone(bool ok);
     void startItmRun();
     void runIstCleanup(int itmExit);
+    void onArchiveDone(int itmExit);
     void emitIstEventLog(int itmExit);
     void onDeassertDone(int itmExit, bool okDeassert);
     void onResetDone(int itmExit, bool okReset);

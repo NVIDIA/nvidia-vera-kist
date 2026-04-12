@@ -37,7 +37,14 @@ if get_option('cpp_std') != 'c++23'
     error('This project requires c++23 support')
 endif
 
-add_global_arguments(['-Wno-gnu-zero-variadic-macro-arguments'], language: 'c')
+# -Wno-error=overflow: libarchive 3.8.6 archive_string.c assigns values >127 to
+# char[]. GCC 15 treats this as an error under -Werror. The CI passes
+# -Dwerror=true on the command line which overrides subproject default_options,
+# so we must suppress this globally for C code.
+add_global_arguments(
+    ['-Wno-gnu-zero-variadic-macro-arguments', '-Wno-error=overflow'],
+    language: 'c',
+)
 
 # Prefer system Boost (for Yocto/OpenBMC and normal distros)
 boost_deps = []
@@ -119,6 +126,27 @@ if get_option('build_ist')
         nlohmann_json_dep = nlohmann_json_proj.get_variable('nlohmann_json_dep')
     endif
 
+    libarchive_dep = dependency(
+        'libarchive',
+        required: false,
+        include_type: 'system',
+    )
+    if not libarchive_dep.found()
+        # Disable werror and tests for this third-party subproject.
+        # werror=false: GCC 15 flags several issues in libarchive 3.8.6
+        #   (overflow in archive_string.c, unused-result in test_main.c).
+        #   Note: CI's -Dwerror=true overrides this, so the overflow case
+        #   is also handled via -Wno-error=overflow in add_global_arguments.
+        # tests=disabled: we don't need libarchive's own test suite, and it
+        #   has additional GCC 15 warnings (unused-result on setegid/seteuid).
+        libarchive_proj = subproject(
+            'libarchive',
+            required: true,
+            default_options: ['werror=false', 'tests=disabled'],
+        )
+        libarchive_dep = libarchive_proj.get_variable('libarchive_dep')
+    endif
+
     ist_app_a = static_library(
         'ist_app_a',
         'src/ist_app.cpp',
@@ -128,14 +156,14 @@ if get_option('build_ist')
         'src/host_power_monitor.cpp',
         'src/itm_runner.cpp',
         'src/dbus_state_publisher.cpp',
-        dependencies: [boost, sdbusplus, nlohmann_json_dep],
+        dependencies: [boost, sdbusplus, nlohmann_json_dep, libarchive_dep],
         include_directories: 'include',
     )
 
     executable(
         'ist',
         'src/ist_main.cpp',
-        dependencies: [boost, sdbusplus, nlohmann_json_dep],
+        dependencies: [boost, sdbusplus, nlohmann_json_dep, libarchive_dep],
         include_directories: 'include',
         install: true,
         link_with: [ist_app_a],
