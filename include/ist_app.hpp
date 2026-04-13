@@ -303,7 +303,8 @@ std::unique_ptr<ItmRunner> makeItmRunner(boost::asio::io_context& io);
 std::unique_ptr<StatePublisher>
     makeDbusStatePublisher(sdbusplus::asio::object_server& server,
                            std::shared_ptr<sdbusplus::asio::connection> conn,
-                           const std::string& swPath);
+                           const std::string& swPath,
+                           const std::string& istPath);
 
 // ----------------
 // IstService

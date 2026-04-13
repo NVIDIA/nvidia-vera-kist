@@ -31,9 +31,15 @@ class DbusStatePublisher final : public StatePublisher
   public:
     DbusStatePublisher(sdbusplus::asio::object_server& server,
                        std::shared_ptr<sdbusplus::asio::connection> conn,
-                       const std::string& sw_path) :
+                       const std::string& sw_path,
+                       const std::string& ist_path) :
         server_(server), conn_(std::move(conn)), swPath_(sw_path)
     {
+        globalStateIface_ =
+            server_.add_interface(ist_path, "com.nvidia.vera.ist.State");
+        globalStateIface_->register_property("IstInProgress", false);
+        globalStateIface_->initialize();
+
         swVersionIface_ = server_.add_interface(
             sw_path, "xyz.openbmc_project.Software.Version");
         swVersionIface_->register_property("Version", std::string("Unknown"));
@@ -51,10 +57,9 @@ class DbusStatePublisher final : public StatePublisher
         removeRunObject();
 
         runStateIface_ =
-            server_.add_interface(run_path, "com.nvidia.vera.ist.State");
+            server_.add_interface(run_path, "com.nvidia.vera.ist.run.State");
         runStateIface_->register_property("Stage",
                                           istStageToString(IstStage::idle));
-        runStateIface_->register_property("IstInProgress", false);
         runStateIface_->initialize();
 
         runProgIface_ = server_.add_interface(
@@ -81,12 +86,15 @@ class DbusStatePublisher final : public StatePublisher
 
     void publish(const IstState& state) override
     {
+        if (globalStateIface_)
+        {
+            globalStateIface_->set_property("IstInProgress",
+                                            state.stage != IstStage::idle);
+        }
         if (runStateIface_)
         {
             runStateIface_->set_property("Stage",
                                          istStageToString(state.stage));
-            runStateIface_->set_property("IstInProgress",
-                                         state.stage != IstStage::idle);
         }
         if (runProgIface_)
         {
@@ -215,6 +223,7 @@ class DbusStatePublisher final : public StatePublisher
     sdbusplus::asio::object_server& server_;
     std::shared_ptr<sdbusplus::asio::connection> conn_;
     std::string swPath_;
+    std::shared_ptr<sdbusplus::asio::dbus_interface> globalStateIface_;
     std::shared_ptr<sdbusplus::asio::dbus_interface> runStateIface_;
     std::shared_ptr<sdbusplus::asio::dbus_interface> runProgIface_;
     std::shared_ptr<sdbusplus::asio::dbus_interface> swVersionIface_;
@@ -225,8 +234,9 @@ class DbusStatePublisher final : public StatePublisher
 std::unique_ptr<StatePublisher>
     makeDbusStatePublisher(sdbusplus::asio::object_server& server,
                            std::shared_ptr<sdbusplus::asio::connection> conn,
-                           const std::string& sw_path)
+                           const std::string& sw_path,
+                           const std::string& ist_path)
 {
     return std::make_unique<DbusStatePublisher>(server, std::move(conn),
-                                                sw_path);
+                                                sw_path, ist_path);
 }

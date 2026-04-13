@@ -97,9 +97,11 @@ int main(int, char**)
 
     std::string sw_path = sw_path_prefix + platform_cfg.softwareInventoryId;
 
+    static constexpr const char* ist_path = "/com/nvidia/vera/ist";
+
     std::shared_ptr<IstService> service = IstService::create(
-        io, makeDbusStatePublisher(server, conn, sw_path), makeHookRunner(io),
-        makeHostPowerMonitor(io, conn), makeItmRunner(io));
+        io, makeDbusStatePublisher(server, conn, sw_path, ist_path),
+        makeHookRunner(io), makeHostPowerMonitor(io, conn), makeItmRunner(io));
 
     if (!service->initialize(std::move(platform_cfg)))
     {
@@ -109,8 +111,7 @@ int main(int, char**)
 
     // D-Bus control interface
     std::shared_ptr<sdbusplus::asio::dbus_interface> control_iface =
-        server.add_interface("/com/nvidia/vera/ist",
-                             "xyz.openbmc_project.ist.Control");
+        server.add_interface(ist_path, "xyz.openbmc_project.ist.Control");
     control_iface->register_method(
         "StartIST",
         [service](int32_t sw_timeout_sec, const std::string& continue_on_fail,
