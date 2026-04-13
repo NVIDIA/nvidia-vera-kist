@@ -52,7 +52,8 @@ class DbusStatePublisher final : public StatePublisher
         activationIface_->initialize();
     }
 
-    void createRunObject(const std::string& run_path) override
+    void createRunObject(const std::string& run_path,
+                         ResultsFdCb results_fd_cb) override
     {
         removeRunObject();
 
@@ -70,10 +71,23 @@ class DbusStatePublisher final : public StatePublisher
         runProgIface_->register_property("StartTime", epoch_now());
         runProgIface_->register_property("CompletedTime", uint64_t{0});
         runProgIface_->initialize();
+
+        if (results_fd_cb)
+        {
+            runResultsIface_ = server_.add_interface(
+                run_path, "com.nvidia.vera.ist.run.Results");
+            runResultsIface_->register_method("GetResultsFd",
+                                              std::move(results_fd_cb));
+            runResultsIface_->initialize();
+        }
     }
 
     void removeRunObject() override
     {
+        if (runResultsIface_)
+        {
+            defer_remove_interface(std::move(runResultsIface_));
+        }
         if (runProgIface_)
         {
             defer_remove_interface(std::move(runProgIface_));
@@ -226,6 +240,7 @@ class DbusStatePublisher final : public StatePublisher
     std::shared_ptr<sdbusplus::asio::dbus_interface> globalStateIface_;
     std::shared_ptr<sdbusplus::asio::dbus_interface> runStateIface_;
     std::shared_ptr<sdbusplus::asio::dbus_interface> runProgIface_;
+    std::shared_ptr<sdbusplus::asio::dbus_interface> runResultsIface_;
     std::shared_ptr<sdbusplus::asio::dbus_interface> swVersionIface_;
     std::shared_ptr<sdbusplus::asio::dbus_interface> activationIface_;
     std::shared_ptr<sdbusplus::asio::dbus_interface> activationProgressIface_;

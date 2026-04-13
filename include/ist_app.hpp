@@ -273,11 +273,14 @@ class ItmRunner
                  std::move_only_function<void(uint8_t) const> onProgress) = 0;
 };
 
+using ResultsFdCb = std::function<sdbusplus::message::unix_fd()>;
+
 class StatePublisher
 {
   public:
     virtual ~StatePublisher() = default;
-    virtual void createRunObject(const std::string& run_path) = 0;
+    virtual void createRunObject(const std::string& run_path,
+                                 ResultsFdCb results_fd_cb) = 0;
     virtual void removeRunObject() = 0;
     virtual void publish(const IstState& state) = 0;
     virtual void publishProgress(uint8_t progress) = 0;
@@ -352,6 +355,7 @@ class IstService : public std::enable_shared_from_this<IstService>
     {
         return currentRunPath_;
     }
+    void setResultsFdCallback(ResultsFdCb cb);
     std::string startIST(const ParamMap& testParams);
     sdbusplus::message::unix_fd startUpdate();
     sdbusplus::message::unix_fd getResultsFd();
@@ -404,6 +408,7 @@ class IstService : public std::enable_shared_from_this<IstService>
     bool updateInProgress_{false};
     uint64_t runCounter_{0};
     std::string currentRunPath_;
+    ResultsFdCb resultsFdCb_;
 
     std::unique_ptr<HookRunner> hookRunner_;
     std::shared_ptr<HostPowerMonitor> powerMonitor_;

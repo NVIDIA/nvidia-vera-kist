@@ -100,6 +100,11 @@ IstService::IstService(boost::asio::io_context& io,
     powerMonitor_(std::move(power_monitor)), itmRunner_(std::move(itm_runner))
 {}
 
+void IstService::setResultsFdCallback(ResultsFdCb cb)
+{
+    resultsFdCb_ = std::move(cb);
+}
+
 // ----------------
 // D-Bus state helpers
 // ----------------
@@ -670,7 +675,7 @@ std::string IstService::startIST(const ParamMap& test_params)
 
     currentRunPath_ =
         "/com/nvidia/vera/ist/runs/" + std::to_string(runCounter_++);
-    publisher_->createRunObject(currentRunPath_);
+    publisher_->createRunObject(currentRunPath_, resultsFdCb_);
 
     state_.progress = 0;
 

@@ -73,7 +73,8 @@ class MockItmRunner : public ItmRunner
 class MockStatePublisher : public StatePublisher
 {
   public:
-    MOCK_METHOD(void, createRunObject, (const std::string& run_path),
+    MOCK_METHOD(void, createRunObject,
+                (const std::string& run_path, ResultsFdCb results_fd_cb),
                 (override));
     MOCK_METHOD(void, removeRunObject, (), (override));
     MOCK_METHOD(void, publish, (const IstState& state), (override));
@@ -1703,8 +1704,9 @@ TEST_F(IstServiceTest, RunObjectCreatedWithCorrectPath)
 {
     init_from_file(configPath_);
 
-    EXPECT_CALL(*publisher_,
-                createRunObject(StrEq("/com/nvidia/vera/ist/runs/0")))
+    EXPECT_CALL(
+        *publisher_,
+        createRunObject(StrEq("/com/nvidia/vera/ist/runs/0"), ::testing::_))
         .Times(1);
 
     EXPECT_CALL(*hookRunner_,
@@ -1741,8 +1743,9 @@ TEST_F(IstServiceTest, RunObjectCreatedOnAbort)
     fs::remove_all(tmpDir_ / "vectors");
     init_from_file(configPath_);
 
-    EXPECT_CALL(*publisher_,
-                createRunObject(StrEq("/com/nvidia/vera/ist/runs/0")))
+    EXPECT_CALL(
+        *publisher_,
+        createRunObject(StrEq("/com/nvidia/vera/ist/runs/0"), ::testing::_))
         .Times(1);
 
     ParamMap params;
@@ -1754,8 +1757,9 @@ TEST_F(IstServiceTest, RunObjectCreatedOnFailure)
 {
     init_from_file(configPath_);
 
-    EXPECT_CALL(*publisher_,
-                createRunObject(StrEq("/com/nvidia/vera/ist/runs/0")))
+    EXPECT_CALL(
+        *publisher_,
+        createRunObject(StrEq("/com/nvidia/vera/ist/runs/0"), ::testing::_))
         .Times(1);
 
     DoneCb assert_done;

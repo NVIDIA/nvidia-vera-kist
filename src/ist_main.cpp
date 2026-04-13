@@ -109,6 +109,17 @@ int main(int, char**)
         return 1;
     }
 
+    service->setResultsFdCallback(
+        [weak = std::weak_ptr<IstService>(service), &io]() {
+            auto svc = weak.lock();
+            if (!svc)
+            {
+                throw sdbusplus::exception::SdBusError(ENOENT,
+                                                       "Service unavailable");
+            }
+            return return_and_post_close(svc->getResultsFd(), io);
+        });
+
     // D-Bus control interface
     std::shared_ptr<sdbusplus::asio::dbus_interface> control_iface =
         server.add_interface(ist_path, "xyz.openbmc_project.ist.Control");
