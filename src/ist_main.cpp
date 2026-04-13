@@ -45,14 +45,12 @@ static sdbusplus::message::unix_fd
     return fd;
 }
 
-static void start_ist_from_dbus(const std::shared_ptr<IstService>& service,
-                                int32_t sw_timeout_sec,
-                                const std::string& continue_on_fail,
-                                bool auto_reboot_on_complete,
-                                const std::string& test_list,
-                                const std::string& socket_list,
-                                const std::string& save_result_on_pass,
-                                const std::string& save_result_on_fail)
+static sdbusplus::message::object_path start_ist_from_dbus(
+    const std::shared_ptr<IstService>& service, int32_t sw_timeout_sec,
+    const std::string& continue_on_fail, bool auto_reboot_on_complete,
+    const std::string& test_list, const std::string& socket_list,
+    const std::string& save_result_on_pass,
+    const std::string& save_result_on_fail)
 {
     ParamMap params;
     if (sw_timeout_sec > 0)
@@ -80,7 +78,7 @@ static void start_ist_from_dbus(const std::shared_ptr<IstService>& service,
     {
         params["istSaveResOnFail"] = (save_result_on_fail == "Enable");
     }
-    service->startIST(params);
+    return {service->startIST(params)};
 }
 
 int main(int, char**)
@@ -120,9 +118,10 @@ int main(int, char**)
                   const std::string& socket_list,
                   const std::string& save_result_on_pass,
                   const std::string& save_result_on_fail) {
-            start_ist_from_dbus(service, sw_timeout_sec, continue_on_fail,
-                                auto_reboot_on_complete, test_list, socket_list,
-                                save_result_on_pass, save_result_on_fail);
+            return start_ist_from_dbus(
+                service, sw_timeout_sec, continue_on_fail,
+                auto_reboot_on_complete, test_list, socket_list,
+                save_result_on_pass, save_result_on_fail);
         });
     control_iface->register_method("GetResultsFd", [service, &io]() {
         return return_and_post_close(service->getResultsFd(), io);

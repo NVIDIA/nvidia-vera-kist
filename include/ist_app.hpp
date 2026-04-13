@@ -277,11 +277,11 @@ class StatePublisher
 {
   public:
     virtual ~StatePublisher() = default;
+    virtual void createRunObject(const std::string& run_path) = 0;
+    virtual void removeRunObject() = 0;
     virtual void publish(const IstState& state) = 0;
     virtual void publishProgress(uint8_t progress) = 0;
     virtual void publishVersion(const std::string& version) = 0;
-    virtual void createProgress() = 0;
-    virtual void removeProgress() = 0;
     virtual void publishActivation(std::string_view state) = 0;
     virtual void createActivationProgress() = 0;
     virtual void publishActivationProgress(uint8_t progress) = 0;
@@ -344,7 +344,11 @@ class IstService : public std::enable_shared_from_this<IstService>
     {
         return platformCfg_.softwareInventoryId;
     }
-    void startIST(const ParamMap& testParams);
+    const std::string& currentRunPath() const
+    {
+        return currentRunPath_;
+    }
+    std::string startIST(const ParamMap& testParams);
     sdbusplus::message::unix_fd startUpdate();
     sdbusplus::message::unix_fd getResultsFd();
 
@@ -393,6 +397,8 @@ class IstService : public std::enable_shared_from_this<IstService>
     IstState state_;
     bool initialized_{false};
     bool updateInProgress_{false};
+    uint64_t runCounter_{0};
+    std::string currentRunPath_;
 
     std::unique_ptr<HookRunner> hookRunner_;
     std::shared_ptr<HostPowerMonitor> powerMonitor_;

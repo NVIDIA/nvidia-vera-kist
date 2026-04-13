@@ -119,10 +119,6 @@ void IstService::transitionTo(IstStage stage, IstStatus status)
     state_.stage = stage;
     state_.status = status;
     updateDbusState();
-    if (status != IstStatus::inProgress)
-    {
-        publisher_->removeProgress();
-    }
 }
 
 // ----------------
@@ -646,7 +642,7 @@ void IstService::onResetDone(int itm_exit, bool ok_reset)
 // StartIST entry point
 // ----------------
 
-void IstService::startIST(const ParamMap& test_params)
+std::string IstService::startIST(const ParamMap& test_params)
 {
     if (state_.stage != IstStage::idle)
     {
@@ -654,8 +650,11 @@ void IstService::startIST(const ParamMap& test_params)
         throw sdbusplus::exception::SdBusError(EBUSY, "IST already running");
     }
 
+    currentRunPath_ =
+        "/com/nvidia/vera/ist/runs/" + std::to_string(runCounter_++);
+    publisher_->createRunObject(currentRunPath_);
+
     state_.progress = 0;
-    publisher_->createProgress();
 
     std::error_code ec;
     fs::remove_all(err_marker_dir, ec);
@@ -685,4 +684,6 @@ void IstService::startIST(const ParamMap& test_params)
                           [self = shared_from_this()](bool ok) {
                               self->onIstBootAssertDone(ok);
                           });
+
+    return currentRunPath_;
 }

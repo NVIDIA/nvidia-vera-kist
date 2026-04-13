@@ -34,13 +34,6 @@ class DbusStatePublisher final : public StatePublisher
                        const std::string& sw_path) :
         server_(server), conn_(std::move(conn)), swPath_(sw_path)
     {
-        stateIface_ = server_.add_interface("/com/nvidia/vera/ist",
-                                            "com.nvidia.vera.ist.State");
-        stateIface_->register_property("Stage",
-                                       istStageToString(IstStage::idle));
-        stateIface_->register_property("IstInProgress", false);
-        stateIface_->initialize();
-
         swVersionIface_ = server_.add_interface(
             sw_path, "xyz.openbmc_project.Software.Version");
         swVersionIface_->register_property("Version", std::string("Unknown"));
@@ -53,28 +46,65 @@ class DbusStatePublisher final : public StatePublisher
         activationIface_->initialize();
     }
 
+    void createRunObject(const std::string& run_path) override
+    {
+        removeRunObject();
+
+        runStateIface_ =
+            server_.add_interface(run_path, "com.nvidia.vera.ist.State");
+        runStateIface_->register_property("Stage",
+                                          istStageToString(IstStage::idle));
+        runStateIface_->register_property("IstInProgress", false);
+        runStateIface_->initialize();
+
+        runProgIface_ = server_.add_interface(
+            run_path, "xyz.openbmc_project.Common.Progress");
+        runProgIface_->register_property(
+            "Status", status_to_dbus_string(IstStatus::inProgress));
+        runProgIface_->register_property("Progress", uint8_t{0});
+        runProgIface_->register_property("StartTime", epoch_now());
+        runProgIface_->register_property("CompletedTime", uint64_t{0});
+        runProgIface_->initialize();
+    }
+
+    void removeRunObject() override
+    {
+        if (runProgIface_)
+        {
+            defer_remove_interface(std::move(runProgIface_));
+        }
+        if (runStateIface_)
+        {
+            defer_remove_interface(std::move(runStateIface_));
+        }
+    }
+
     void publish(const IstState& state) override
     {
-        stateIface_->set_property("Stage", istStageToString(state.stage));
-        stateIface_->set_property("IstInProgress",
-                                  state.stage != IstStage::idle);
-        if (progIface_)
+        if (runStateIface_)
         {
-            progIface_->set_property("Status",
-                                     status_to_dbus_string(state.status));
-            progIface_->set_property("Progress", state.progress);
+            runStateIface_->set_property("Stage",
+                                         istStageToString(state.stage));
+            runStateIface_->set_property("IstInProgress",
+                                         state.stage != IstStage::idle);
+        }
+        if (runProgIface_)
+        {
+            runProgIface_->set_property("Status",
+                                        status_to_dbus_string(state.status));
+            runProgIface_->set_property("Progress", state.progress);
             if (state.status != IstStatus::inProgress)
             {
-                progIface_->set_property("CompletedTime", epoch_now());
+                runProgIface_->set_property("CompletedTime", epoch_now());
             }
         }
     }
 
     void publishProgress(uint8_t progress) override
     {
-        if (progIface_)
+        if (runProgIface_)
         {
-            progIface_->set_property("Progress", progress);
+            runProgIface_->set_property("Progress", progress);
         }
     }
 
@@ -88,30 +118,6 @@ class DbusStatePublisher final : public StatePublisher
         {
             std::cerr << "publishVersion: swVersionIface_ is null, version="
                       << version << '\n';
-        }
-    }
-
-    void createProgress() override
-    {
-        if (progIface_)
-        {
-            server_.remove_interface(progIface_);
-        }
-        progIface_ = server_.add_interface(
-            "/com/nvidia/vera/ist", "xyz.openbmc_project.Common.Progress");
-        progIface_->register_property(
-            "Status", status_to_dbus_string(IstStatus::inProgress));
-        progIface_->register_property("Progress", uint8_t{0});
-        progIface_->register_property("StartTime", epoch_now());
-        progIface_->register_property("CompletedTime", uint64_t{0});
-        progIface_->initialize();
-    }
-
-    void removeProgress() override
-    {
-        if (progIface_)
-        {
-            defer_remove_interface(std::move(progIface_));
         }
     }
 
@@ -195,10 +201,6 @@ class DbusStatePublisher final : public StatePublisher
         return std::string(prefix) + "InProgress";
     }
 
-    // Remove the interface from the server's tracking list immediately, but
-    // keep the shared_ptr alive for one more event-loop iteration so that
-    // any pending PropertiesChanged signal (e.g. Status=Failed) is flushed
-    // before the dbus_interface destructor unregisters from the bus.
     void defer_remove_interface(
         std::shared_ptr<sdbusplus::asio::dbus_interface> iface)
     {
@@ -213,8 +215,8 @@ class DbusStatePublisher final : public StatePublisher
     sdbusplus::asio::object_server& server_;
     std::shared_ptr<sdbusplus::asio::connection> conn_;
     std::string swPath_;
-    std::shared_ptr<sdbusplus::asio::dbus_interface> progIface_;
-    std::shared_ptr<sdbusplus::asio::dbus_interface> stateIface_;
+    std::shared_ptr<sdbusplus::asio::dbus_interface> runStateIface_;
+    std::shared_ptr<sdbusplus::asio::dbus_interface> runProgIface_;
     std::shared_ptr<sdbusplus::asio::dbus_interface> swVersionIface_;
     std::shared_ptr<sdbusplus::asio::dbus_interface> activationIface_;
     std::shared_ptr<sdbusplus::asio::dbus_interface> activationProgressIface_;

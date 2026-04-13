@@ -73,11 +73,12 @@ class MockItmRunner : public ItmRunner
 class MockStatePublisher : public StatePublisher
 {
   public:
+    MOCK_METHOD(void, createRunObject, (const std::string& run_path),
+                (override));
+    MOCK_METHOD(void, removeRunObject, (), (override));
     MOCK_METHOD(void, publish, (const IstState& state), (override));
     MOCK_METHOD(void, publishProgress, (uint8_t progress), (override));
     MOCK_METHOD(void, publishVersion, (const std::string& version), (override));
-    MOCK_METHOD(void, createProgress, (), (override));
-    MOCK_METHOD(void, removeProgress, (), (override));
     MOCK_METHOD(void, publishActivation, (std::string_view state), (override));
     MOCK_METHOD(void, createActivationProgress, (), (override));
     MOCK_METHOD(void, publishActivationProgress, (uint8_t progress),
@@ -520,12 +521,11 @@ TEST_F(IstServiceTest, StartIstRejectsWhenInProgress)
 {
     init_from_file(configPath_);
 
-    // First call should succeed
     ParamMap params;
-    EXPECT_NO_THROW(service_->startIST(params));
+    std::string run_path = service_->startIST(params);
+    EXPECT_FALSE(run_path.empty());
     EXPECT_EQ(service_->state().status, IstStatus::inProgress);
 
-    // Second call while in progress should throw EBUSY
     ParamMap params2;
     EXPECT_THROW(service_->startIST(params2), sdbusplus::exception::SdBusError);
 }
@@ -1515,6 +1515,61 @@ TEST_F(IstServiceTest, StartIstAbortsOnMissingResultStorageConfig)
     EXPECT_EQ(service_->state().status, IstStatus::aborted);
 }
 
+TEST_F(IstServiceTest, EachRunGetsUniqueObjectPath)
+{
+    init_from_file(configPath_);
+
+    // --- First run ---
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootAssert hook"),
+                         ::testing::_, ::testing::_, ::testing::_))
+        .WillOnce([](const std::string&, const std::string&, DoneCb done,
+                     const std::vector<std::string>&,
+                     std::chrono::seconds) { done(true); });
+    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+        .WillOnce([](DoneCb done) { done(true); });
+    EXPECT_CALL(*itmRunner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
+                                      ::testing::_))
+        .WillOnce([](const IstTestConfig&, const IstPlatformConfig&,
+                     ItmDoneCb done, ProgressCb) { done(0); });
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootDeassert hook"),
+                         ::testing::_, ::testing::_, ::testing::_))
+        .WillOnce([](const std::string&, const std::string&, DoneCb done,
+                     const std::vector<std::string>&,
+                     std::chrono::seconds) { done(true); });
+
+    ParamMap params1;
+    std::string path1 = service_->startIST(params1);
+
+    // --- Second run ---
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootAssert hook"),
+                         ::testing::_, ::testing::_, ::testing::_))
+        .WillOnce([](const std::string&, const std::string&, DoneCb done,
+                     const std::vector<std::string>&,
+                     std::chrono::seconds) { done(true); });
+    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+        .WillOnce([](DoneCb done) { done(true); });
+    EXPECT_CALL(*itmRunner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
+                                      ::testing::_))
+        .WillOnce([](const IstTestConfig&, const IstPlatformConfig&,
+                     ItmDoneCb done, ProgressCb) { done(0); });
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootDeassert hook"),
+                         ::testing::_, ::testing::_, ::testing::_))
+        .WillOnce([](const std::string&, const std::string&, DoneCb done,
+                     const std::vector<std::string>&,
+                     std::chrono::seconds) { done(true); });
+
+    ParamMap params2;
+    std::string path2 = service_->startIST(params2);
+
+    EXPECT_NE(path1, path2);
+    EXPECT_EQ(path1, "/com/nvidia/vera/ist/runs/0");
+    EXPECT_EQ(path2, "/com/nvidia/vera/ist/runs/1");
+}
+
 TEST_F(IstServiceTest, SecondRunAfterCompletionWorks)
 {
     init_from_file(configPath_);
@@ -1608,13 +1663,13 @@ TEST_F(IstServiceTest, SecondRunAfterCompletionWorks)
     EXPECT_EQ(service_->state().stage, IstStage::idle);
 }
 
-TEST_F(IstServiceTest, ProgressInterfaceCreatedOnStartAndRemovedOnComplete)
+TEST_F(IstServiceTest, RunObjectCreatedWithCorrectPath)
 {
     init_from_file(configPath_);
 
-    ::testing::InSequence seq;
-
-    EXPECT_CALL(*publisher_, createProgress()).Times(1);
+    EXPECT_CALL(*publisher_,
+                createRunObject(StrEq("/com/nvidia/vera/ist/runs/0")))
+        .Times(1);
 
     EXPECT_CALL(*hookRunner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
@@ -1635,32 +1690,35 @@ TEST_F(IstServiceTest, ProgressInterfaceCreatedOnStartAndRemovedOnComplete)
                      const std::vector<std::string>&,
                      std::chrono::seconds) { done(true); });
 
-    EXPECT_CALL(*publisher_, removeProgress()).Times(1);
-
     ParamMap params;
-    service_->startIST(params);
+    std::string path = service_->startIST(params);
 
+    EXPECT_EQ(path, "/com/nvidia/vera/ist/runs/0");
+    EXPECT_EQ(service_->currentRunPath(), path);
     EXPECT_EQ(service_->state().status, IstStatus::completed);
 }
 
-TEST_F(IstServiceTest, ProgressInterfaceRemovedOnAbort)
+TEST_F(IstServiceTest, RunObjectCreatedOnAbort)
 {
     fs::remove_all(tmpDir_ / "vectors");
     init_from_file(configPath_);
 
-    EXPECT_CALL(*publisher_, createProgress()).Times(1);
-    EXPECT_CALL(*publisher_, removeProgress()).Times(1);
+    EXPECT_CALL(*publisher_,
+                createRunObject(StrEq("/com/nvidia/vera/ist/runs/0")))
+        .Times(1);
 
     ParamMap params;
     EXPECT_THROW(service_->startIST(params), sdbusplus::exception::SdBusError);
     EXPECT_EQ(service_->state().status, IstStatus::aborted);
 }
 
-TEST_F(IstServiceTest, ProgressInterfaceRemovedOnFailure)
+TEST_F(IstServiceTest, RunObjectCreatedOnFailure)
 {
     init_from_file(configPath_);
 
-    EXPECT_CALL(*publisher_, createProgress()).Times(1);
+    EXPECT_CALL(*publisher_,
+                createRunObject(StrEq("/com/nvidia/vera/ist/runs/0")))
+        .Times(1);
 
     DoneCb assert_done;
     EXPECT_CALL(*hookRunner_,
@@ -1670,13 +1728,45 @@ TEST_F(IstServiceTest, ProgressInterfaceRemovedOnFailure)
                       const std::vector<std::string>&,
                       std::chrono::seconds) { assert_done = std::move(done); });
 
-    EXPECT_CALL(*publisher_, removeProgress()).Times(1);
-
     ParamMap params;
     service_->startIST(params);
     assert_done(false);
 
     EXPECT_EQ(service_->state().status, IstStatus::failed);
+}
+
+TEST_F(IstServiceTest, RunCounterIncrementsAfterFailure)
+{
+    init_from_file(configPath_);
+
+    // First run: fails at assert hook
+    DoneCb assert_done1;
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootAssert hook"),
+                         ::testing::_, ::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::string&, DoneCb done,
+                      const std::vector<std::string>&, std::chrono::seconds) {
+            assert_done1 = std::move(done);
+        });
+
+    ParamMap params1;
+    std::string path1 = service_->startIST(params1);
+    assert_done1(false);
+    EXPECT_EQ(path1, "/com/nvidia/vera/ist/runs/0");
+
+    // Second run: counter should still be 1, not reset
+    DoneCb assert_done2;
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootAssert hook"),
+                         ::testing::_, ::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::string&, DoneCb done,
+                      const std::vector<std::string>&, std::chrono::seconds) {
+            assert_done2 = std::move(done);
+        });
+
+    ParamMap params2;
+    std::string path2 = service_->startIST(params2);
+    EXPECT_EQ(path2, "/com/nvidia/vera/ist/runs/1");
 }
 
 TEST_F(IstServiceTest, ProgressCallbackUpdatesStateAndPublishes)
