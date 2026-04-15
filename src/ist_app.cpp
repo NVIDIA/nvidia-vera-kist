@@ -641,9 +641,8 @@ void IstService::onDeassertDone(int itm_exit, bool ok_deassert)
     }
     else
     {
-        bool itm_ok = (itm_exit == 0 || itm_exit == itm_exit_mismatch);
         transitionTo(IstStage::idle,
-                     itm_ok ? IstStatus::completed : IstStatus::failed);
+                     itm_exit == 0 ? IstStatus::completed : IstStatus::failed);
     }
 }
 
@@ -655,9 +654,8 @@ void IstService::onResetDone(int itm_exit, bool ok_reset)
     }
     else
     {
-        bool itm_ok = (itm_exit == 0 || itm_exit == itm_exit_mismatch);
         transitionTo(IstStage::idle,
-                     itm_ok ? IstStatus::completed : IstStatus::failed);
+                     itm_exit == 0 ? IstStatus::completed : IstStatus::failed);
     }
 }
 

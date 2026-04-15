@@ -2428,7 +2428,7 @@ TEST_F(IstServiceTest, ItmMismatchEmitsEventLog)
 
     deassert_done(true);
 
-    EXPECT_EQ(service_->state().status, IstStatus::completed);
+    EXPECT_EQ(service_->state().status, IstStatus::failed);
     EXPECT_EQ(service_->state().stage, IstStage::idle);
 }
 
