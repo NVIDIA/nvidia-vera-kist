@@ -15,6 +15,7 @@
  * limitations under the License.
  */
 #include <async_utils.hpp>
+#include <boost/asio/post.hpp>
 #include <ist_app.hpp>
 #include <nlohmann/json.hpp>
 #include <sdbusplus/exception.hpp>
@@ -706,10 +707,15 @@ std::string IstService::startIST(const ParamMap& test_params)
 
     transitionTo(IstStage::pendingIstBoot);
 
-    hookRunner_->asyncRun(hook_cmd, "istBootAssert hook",
-                          [self = shared_from_this()](bool ok) {
-                              self->onIstBootAssertDone(ok);
-                          });
+    // Defer the hook start to the next event-loop iteration so the D-Bus
+    // method return is sent first.  This gives callers time to register
+    // PropertiesChanged matches on the returned run object before any
+    // stage transitions fire.
+    boost::asio::post(io_, [self = shared_from_this(), hook_cmd]() {
+        self->hookRunner_->asyncRun(
+            hook_cmd, "istBootAssert hook",
+            [self](bool ok) { self->onIstBootAssertDone(ok); });
+    });
 
     return currentRunPath_;
 }

@@ -251,6 +251,14 @@ class IstServiceTest : public ::testing::Test
     fs::path tmpDir_;
     std::string configPath_;
 
+    std::string start_ist(const ParamMap& params = {})
+    {
+        auto path = service_->startIST(params);
+        io_.poll();
+        io_.restart();
+        return path;
+    }
+
     static inline int counter = 0;
 };
 
@@ -523,7 +531,7 @@ TEST_F(IstServiceTest, StartIstRejectsWhenInProgress)
     init_from_file(configPath_);
 
     ParamMap params;
-    std::string run_path = service_->startIST(params);
+    std::string run_path = start_ist(params);
     EXPECT_FALSE(run_path.empty());
     EXPECT_EQ(service_->state().status, IstStatus::inProgress);
 
@@ -578,7 +586,7 @@ TEST_F(IstServiceTest, StartIstCallsAssertHook)
                       std::chrono::seconds) { assert_done = std::move(done); });
 
     ParamMap params;
-    service_->startIST(params);
+    start_ist(params);
 
     EXPECT_EQ(service_->state().status, IstStatus::inProgress);
     EXPECT_EQ(service_->state().stage, IstStage::pendingIstBoot);
@@ -600,7 +608,7 @@ TEST_F(IstServiceTest, AssertHookFailureTransitionsToFailed)
                       std::chrono::seconds) { assert_done = std::move(done); });
 
     ParamMap params;
-    service_->startIST(params);
+    start_ist(params);
 
     // Simulate hook failure
     assert_done(false);
@@ -626,7 +634,7 @@ TEST_F(IstServiceTest, AssertHookSuccessWaitsForPowerCycle)
         .WillOnce([&](DoneCb done) { power_done = std::move(done); });
 
     ParamMap params;
-    service_->startIST(params);
+    start_ist(params);
 
     // Simulate hook success → should start power cycle wait
     assert_done(true);
@@ -661,7 +669,7 @@ TEST_F(IstServiceTest, PowerCycleFailureRunsDeassertThenFails)
         });
 
     ParamMap params;
-    service_->startIST(params);
+    start_ist(params);
     assert_done(true);
 
     // Simulate power cycle failure → should trigger cleanup/deassert
@@ -702,7 +710,7 @@ TEST_F(IstServiceTest, PowerCycleSuccessStartsItm)
                       ProgressCb) { itm_done = std::move(done); });
 
     ParamMap params;
-    service_->startIST(params);
+    start_ist(params);
     assert_done(true);
     power_done(true);
 
@@ -743,7 +751,7 @@ TEST_F(IstServiceTest, CakBypassScriptRunsWhenPresent)
                       ProgressCb) { itm_done = std::move(done); });
 
     ParamMap params;
-    service_->startIST(params);
+    start_ist(params);
     assert_done(true);
     power_done(true);
 
@@ -795,7 +803,7 @@ TEST_F(IstServiceTest, CakBypassFailureAbortsIst)
         });
 
     ParamMap params;
-    service_->startIST(params);
+    start_ist(params);
     assert_done(true);
     power_done(true);
     ASSERT_TRUE(cak_done);
@@ -842,7 +850,7 @@ TEST_F(IstServiceTest, CakBypassSkippedWhenScriptMissing)
                       ProgressCb) { itm_done = std::move(done); });
 
     ParamMap params;
-    service_->startIST(params);
+    start_ist(params);
     assert_done(true);
     power_done(true);
 
@@ -885,7 +893,7 @@ TEST_F(IstServiceTest, AutoRebootPassesSkipCakToResetHook)
 
     ParamMap params;
     params["autoRebootOnComplete"] = true;
-    service_->startIST(params);
+    start_ist(params);
     io_.run();
     io_.restart();
 
@@ -928,7 +936,7 @@ TEST_F(IstServiceTest, ItmSuccessCompletesWithCleanup)
         });
 
     ParamMap params;
-    service_->startIST(params);
+    start_ist(params);
     assert_done(true);
     power_done(true);
     itm_done(0); // ITM succeeded
@@ -976,7 +984,7 @@ TEST_F(IstServiceTest, ItmFailureResultsInFailedStatus)
         });
 
     ParamMap params;
-    service_->startIST(params);
+    start_ist(params);
     assert_done(true);
     power_done(true);
     itm_done(1); // ITM failed (infra error)
@@ -1024,7 +1032,7 @@ TEST_F(IstServiceTest, CleanupDeassertFailureStaysInFailed)
         });
 
     ParamMap params;
-    service_->startIST(params);
+    start_ist(params);
     assert_done(true);
     power_done(true);
     itm_done(0);
@@ -1081,7 +1089,7 @@ TEST_F(IstServiceTest, AutoRebootCallsResetHook)
     // Enable auto-reboot
     ParamMap params;
     params["autoRebootOnComplete"] = true;
-    service_->startIST(params);
+    start_ist(params);
     assert_done(true);
     power_done(true);
     itm_done(0);
@@ -1137,7 +1145,7 @@ TEST_F(IstServiceTest, StartIstPassesTestParams)
     params["istSaveResOnFail"] = false;
     params["istSwTimeoutSec"] = 600;
     params["autoRebootOnComplete"] = false;
-    service_->startIST(params);
+    start_ist(params);
     io_.run();
     io_.restart();
 
@@ -1186,7 +1194,7 @@ TEST_F(IstServiceTest, SwTimeoutClampedToRange)
     // Pass a timeout below minimum (60s)
     ParamMap params;
     params["istSwTimeoutSec"] = 5;
-    service_->startIST(params);
+    start_ist(params);
     io_.run();
     io_.restart();
 
@@ -1275,7 +1283,7 @@ TEST_F(IstServiceTest, SwTimeoutClampedToMax)
 
     ParamMap params;
     params["istSwTimeoutSec"] = 99999;
-    service_->startIST(params);
+    start_ist(params);
     io_.run();
     io_.restart();
 
@@ -1325,7 +1333,7 @@ TEST_F(IstServiceTest, CleanupFailsWhenDeassertHookMissing)
                       ProgressCb) { itm_done = std::move(done); });
 
     ParamMap params;
-    service_->startIST(params);
+    start_ist(params);
     assert_done(true);
     power_done(true);
     itm_done(0);
@@ -1379,7 +1387,7 @@ TEST_F(IstServiceTest, AutoRebootResetFailureTransitionsToFailed)
 
     ParamMap params;
     params["autoRebootOnComplete"] = true;
-    service_->startIST(params);
+    start_ist(params);
     assert_done(true);
     power_done(true);
     itm_done(0);
@@ -1436,7 +1444,7 @@ TEST_F(IstServiceTest, AutoRebootWithItmFailureStillFailed)
 
     ParamMap params;
     params["autoRebootOnComplete"] = true;
-    service_->startIST(params);
+    start_ist(params);
     assert_done(true);
     power_done(true);
     itm_done(1); // ITM failed (infra error)
@@ -1506,7 +1514,7 @@ TEST_F(IstServiceTest, AutoRebootFailsWhenResetHookMissing)
 
     ParamMap params;
     params["autoRebootOnComplete"] = true;
-    service_->startIST(params);
+    start_ist(params);
     assert_done(true);
     power_done(true);
     itm_done(0);
@@ -1569,7 +1577,7 @@ TEST_F(IstServiceTest, EachRunGetsUniqueObjectPath)
                      std::chrono::seconds) { done(true); });
 
     ParamMap params1;
-    std::string path1 = service_->startIST(params1);
+    std::string path1 = start_ist(params1);
     io_.run();
     io_.restart();
 
@@ -1594,7 +1602,7 @@ TEST_F(IstServiceTest, EachRunGetsUniqueObjectPath)
                      std::chrono::seconds) { done(true); });
 
     ParamMap params2;
-    std::string path2 = service_->startIST(params2);
+    std::string path2 = start_ist(params2);
     io_.run();
     io_.restart();
 
@@ -1639,7 +1647,7 @@ TEST_F(IstServiceTest, SecondRunAfterCompletionWorks)
 
     ParamMap params1;
     params1["customTestList"] = std::string("testA");
-    service_->startIST(params1);
+    start_ist(params1);
     assert_done1(true);
     power_done1(true);
     itm_done1(0);
@@ -1685,7 +1693,7 @@ TEST_F(IstServiceTest, SecondRunAfterCompletionWorks)
         });
 
     ParamMap params2; // no customTestList this time
-    EXPECT_NO_THROW(service_->startIST(params2));
+    EXPECT_NO_THROW(start_ist(params2));
     EXPECT_EQ(service_->state().progress, 0);
     EXPECT_EQ(service_->state().status, IstStatus::inProgress);
 
@@ -1729,7 +1737,7 @@ TEST_F(IstServiceTest, RunObjectCreatedWithCorrectPath)
                      std::chrono::seconds) { done(true); });
 
     ParamMap params;
-    std::string path = service_->startIST(params);
+    std::string path = start_ist(params);
     io_.run();
     io_.restart();
 
@@ -1771,7 +1779,7 @@ TEST_F(IstServiceTest, RunObjectCreatedOnFailure)
                       std::chrono::seconds) { assert_done = std::move(done); });
 
     ParamMap params;
-    service_->startIST(params);
+    start_ist(params);
     assert_done(false);
 
     EXPECT_EQ(service_->state().status, IstStatus::failed);
@@ -1792,7 +1800,7 @@ TEST_F(IstServiceTest, RunCounterIncrementsAfterFailure)
         });
 
     ParamMap params1;
-    std::string path1 = service_->startIST(params1);
+    std::string path1 = start_ist(params1);
     assert_done1(false);
     EXPECT_EQ(path1, "/com/nvidia/vera/ist/runs/0");
 
@@ -1807,7 +1815,7 @@ TEST_F(IstServiceTest, RunCounterIncrementsAfterFailure)
         });
 
     ParamMap params2;
-    std::string path2 = service_->startIST(params2);
+    std::string path2 = start_ist(params2);
     EXPECT_EQ(path2, "/com/nvidia/vera/ist/runs/1");
 }
 
@@ -1838,7 +1846,7 @@ TEST_F(IstServiceTest, ProgressCallbackUpdatesStateAndPublishes)
         });
 
     ParamMap params;
-    service_->startIST(params);
+    start_ist(params);
     assert_done(true);
     power_done(true);
 
@@ -1878,7 +1886,7 @@ TEST_F(IstServiceTest, SecondRunAfterFailureWorks)
         });
 
     ParamMap params1;
-    service_->startIST(params1);
+    start_ist(params1);
     assert_done1(false);
 
     EXPECT_EQ(service_->state().status, IstStatus::failed);
@@ -1915,7 +1923,7 @@ TEST_F(IstServiceTest, SecondRunAfterFailureWorks)
         });
 
     ParamMap params2;
-    EXPECT_NO_THROW(service_->startIST(params2));
+    EXPECT_NO_THROW(start_ist(params2));
     EXPECT_EQ(service_->state().status, IstStatus::inProgress);
     EXPECT_EQ(service_->state().progress, 0);
 
@@ -2060,7 +2068,7 @@ TEST_F(IstServiceTest, StartUpdateRejectsWhileIstRunning)
                       std::chrono::seconds) { assert_done = std::move(done); });
 
     ParamMap params;
-    service_->startIST(params);
+    start_ist(params);
 
     EXPECT_THROW(service_->startUpdate(), sdbusplus::exception::SdBusError);
 }
@@ -2419,7 +2427,7 @@ TEST_F(IstServiceTest, ItmMismatchEmitsEventLog)
         });
 
     ParamMap params;
-    service_->startIST(params);
+    start_ist(params);
     assert_done(true);
     power_done(true);
     itm_done(8); // IST_MISMATCH
@@ -2478,7 +2486,7 @@ TEST_F(IstServiceTest, ItmPlatformErrorEmitsEventLog)
         });
 
     ParamMap params;
-    service_->startIST(params);
+    start_ist(params);
     assert_done(true);
     power_done(true);
     itm_done(14); // IST_PLATFORM_ERROR
@@ -2533,7 +2541,7 @@ TEST_F(IstServiceTest, PlatformErrorIncludesMarkerFiles)
         });
 
     ParamMap params;
-    service_->startIST(params);
+    start_ist(params);
     assert_done(true);
     power_done(true);
 
@@ -2559,7 +2567,7 @@ TEST_F(IstServiceTest, StartIstClearsMarkerDir)
     init_from_file(configPath_);
 
     ParamMap params;
-    service_->startIST(params);
+    start_ist(params);
 
     EXPECT_FALSE(fs::exists("/tmp/ist/err_marker"));
 }
@@ -2601,7 +2609,7 @@ TEST_F(IstServiceTest, ItmSuccessDoesNotEmitEventLog)
         .Times(0);
 
     ParamMap params;
-    service_->startIST(params);
+    start_ist(params);
     assert_done(true);
     power_done(true);
     itm_done(0); // Success
@@ -2651,7 +2659,7 @@ TEST_F(IstServiceTest, ItmInfraFailureDoesNotEmitEventLog)
         .Times(0);
 
     ParamMap params;
-    service_->startIST(params);
+    start_ist(params);
     assert_done(true);
     power_done(true);
     itm_done(-1); // Infra failure (e.g. timeout, spawn error)
@@ -2754,7 +2762,7 @@ TEST_F(IstServiceTest, StartIstCleansUpOldResults)
     EXPECT_TRUE(fs::exists(results_dir / "leftover.gz"));
 
     ParamMap params;
-    service_->startIST(params);
+    start_ist(params);
 
     EXPECT_FALSE(fs::exists(results_dir / "ist_results.tar.gz"));
     EXPECT_FALSE(fs::exists(results_dir / "leftover.gz"));
