@@ -18,6 +18,7 @@
 
 #include <unistd.h>
 
+#include <boost/asio/steady_timer.hpp>
 #include <sdbusplus/asio/object_server.hpp>
 
 #include <chrono>
@@ -283,6 +284,7 @@ class StatePublisher
                                  ResultsFdCb results_fd_cb) = 0;
     virtual void removeRunObject() = 0;
     virtual void publish(const IstState& state) = 0;
+    virtual void reSignalStage() = 0;
     virtual void publishProgress(uint8_t progress) = 0;
     virtual void publishVersion(const std::string& version) = 0;
     virtual void publishActivation(std::string_view state) = 0;
@@ -415,4 +417,5 @@ class IstService : public std::enable_shared_from_this<IstService>
     std::unique_ptr<ItmRunner> itmRunner_;
     std::shared_ptr<TransferSession> activeTransfer_;
     std::shared_ptr<PldmStripper> activeStripper_;
+    boost::asio::steady_timer reSignalTimer_;
 };

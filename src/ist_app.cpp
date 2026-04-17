@@ -98,7 +98,8 @@ IstService::IstService(boost::asio::io_context& io,
                        std::unique_ptr<ItmRunner> itm_runner) :
     io_(io), publisher_(std::move(publisher)),
     hookRunner_(std::move(hook_runner)),
-    powerMonitor_(std::move(power_monitor)), itmRunner_(std::move(itm_runner))
+    powerMonitor_(std::move(power_monitor)), itmRunner_(std::move(itm_runner)),
+    reSignalTimer_(io)
 {}
 
 void IstService::setResultsFdCallback(ResultsFdCb cb)
@@ -117,12 +118,14 @@ void IstService::updateDbusState()
 
 void IstService::transitionTo(IstStage stage)
 {
+    reSignalTimer_.cancel();
     state_.stage = stage;
     updateDbusState();
 }
 
 void IstService::transitionTo(IstStage stage, IstStatus status)
 {
+    reSignalTimer_.cancel();
     state_.stage = stage;
     state_.status = status;
     updateDbusState();
@@ -459,6 +462,21 @@ void IstService::onIstBootAssertDone(bool ok)
     }
 
     transitionTo(IstStage::pendingPowerCycle);
+
+    // Re-emit the Stage PropertiesChanged signal after a short delay.
+    // The D-Bus client (bmcweb) registers its PropertiesChanged match only
+    // after it receives the StartIST method reply, so there is a window
+    // where the initial signal from transitionTo() is missed.
+    // signal_property() forces a new emission of the current value.
+    reSignalTimer_.expires_after(std::chrono::seconds(2));
+    reSignalTimer_.async_wait(
+        [self = shared_from_this()](const boost::system::error_code& ec) {
+            if (ec)
+            {
+                return;
+            }
+            self->publisher_->reSignalStage();
+        });
 
     powerMonitor_->asyncWaitForPowerCycle(
         [self = shared_from_this()](bool ok_power) {

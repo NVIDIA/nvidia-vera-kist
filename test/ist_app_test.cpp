@@ -78,6 +78,7 @@ class MockStatePublisher : public StatePublisher
                 (override));
     MOCK_METHOD(void, removeRunObject, (), (override));
     MOCK_METHOD(void, publish, (const IstState& state), (override));
+    MOCK_METHOD(void, reSignalStage, (), (override));
     MOCK_METHOD(void, publishProgress, (uint8_t progress), (override));
     MOCK_METHOD(void, publishVersion, (const std::string& version), (override));
     MOCK_METHOD(void, publishActivation, (std::string_view state), (override));
@@ -641,6 +642,56 @@ TEST_F(IstServiceTest, AssertHookSuccessWaitsForPowerCycle)
 
     EXPECT_EQ(service_->state().stage, IstStage::pendingPowerCycle);
     ASSERT_TRUE(power_done);
+}
+
+TEST_F(IstServiceTest, PendingPowerCycleReSignalsStageAfterDelay)
+{
+    init_from_file(configPath_);
+
+    std::move_only_function<void(bool) const> assert_done;
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootAssert hook"),
+                         ::testing::_, ::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::string&, DoneCb done,
+                      const std::vector<std::string>&,
+                      std::chrono::seconds) { assert_done = std::move(done); });
+
+    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+        .WillOnce([](DoneCb) {});
+
+    ParamMap params;
+    start_ist(params);
+
+    EXPECT_CALL(*publisher_, reSignalStage()).Times(1);
+
+    assert_done(true);
+    EXPECT_EQ(service_->state().stage, IstStage::pendingPowerCycle);
+
+    // Advance past the 2-second re-signal timer
+    io_.run_for(std::chrono::seconds(3));
+}
+
+TEST_F(IstServiceTest, ReSignalTimerCancelledOnAssertFailure)
+{
+    init_from_file(configPath_);
+
+    std::move_only_function<void(bool) const> assert_done;
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootAssert hook"),
+                         ::testing::_, ::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::string&, DoneCb done,
+                      const std::vector<std::string>&,
+                      std::chrono::seconds) { assert_done = std::move(done); });
+
+    ParamMap params;
+    start_ist(params);
+
+    EXPECT_CALL(*publisher_, reSignalStage()).Times(0);
+
+    assert_done(false);
+    EXPECT_EQ(service_->state().stage, IstStage::idle);
+
+    io_.run_for(std::chrono::seconds(3));
 }
 
 TEST_F(IstServiceTest, PowerCycleFailureRunsDeassertThenFails)

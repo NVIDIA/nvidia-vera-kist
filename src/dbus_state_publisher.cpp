@@ -122,6 +122,14 @@ class DbusStatePublisher final : public StatePublisher
         }
     }
 
+    void reSignalStage() override
+    {
+        if (runStateIface_)
+        {
+            runStateIface_->signal_property("Stage");
+        }
+    }
+
     void publishProgress(uint8_t progress) override
     {
         if (runProgIface_)
