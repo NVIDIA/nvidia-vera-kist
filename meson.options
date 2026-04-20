@@ -14,9 +14,3 @@
 # limitations under the License.
 
 option('tests', type: 'feature', value: 'enabled', description: 'Build tests.')
-option(
-    'build_ist',
-    type: 'boolean',
-    value: true,
-    description: 'Build the IST Service',
-)

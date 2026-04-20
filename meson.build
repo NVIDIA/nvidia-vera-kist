@@ -90,157 +90,146 @@ add_project_arguments(
 )
 
 
-if get_option('build_ist')
-    systemd = dependency('systemd')
-    sdbusplus = dependency('sdbusplus', required: false, include_type: 'system')
-    if not sdbusplus.found()
-        sdbusplus_proj = subproject('sdbusplus', required: true)
-        sdbusplus = sdbusplus_proj.get_variable('sdbusplus_dep')
-        sdbusplus = sdbusplus.as_system('system')
-    endif
+systemd = dependency('systemd')
+sdbusplus = dependency('sdbusplus', required: false, include_type: 'system')
+if not sdbusplus.found()
+    sdbusplus_proj = subproject('sdbusplus', required: true)
+    sdbusplus = sdbusplus_proj.get_variable('sdbusplus_dep')
+    sdbusplus = sdbusplus.as_system('system')
+endif
 
-    cxx = meson.get_compiler('cpp')
+systemd_system_unit_dir = systemd.get_variable(pkgconfig: 'systemdsystemunitdir')
 
-    systemd_system_unit_dir = systemd.get_variable(
-        pkgconfig: 'systemdsystemunitdir',
-    )
+systemd_unit_configuration = configuration_data()
+systemd_unit_configuration.set('INSTALL_PREFIX', get_option('prefix'))
 
-    systemd_unit_configuration = configuration_data()
-    systemd_unit_configuration.set('INSTALL_PREFIX', get_option('prefix'))
+configure_file(
+    input: 'com.nvidia.vera.ist.service',
+    output: 'com.nvidia.vera.ist.service',
+    configuration: systemd_unit_configuration,
+    install_dir: systemd_system_unit_dir,
+    install: true,
+)
 
-    configure_file(
-        input: 'com.nvidia.vera.ist.service',
-        output: 'com.nvidia.vera.ist.service',
-        configuration: systemd_unit_configuration,
-        install_dir: systemd_system_unit_dir,
-        install: true,
-    )
+nlohmann_json_dep = dependency(
+    'nlohmann_json',
+    required: false,
+    include_type: 'system',
+)
+if not nlohmann_json_dep.found()
+    nlohmann_json_proj = subproject('nlohmann_json', required: true)
+    nlohmann_json_dep = nlohmann_json_proj.get_variable('nlohmann_json_dep')
+endif
 
-    nlohmann_json_dep = dependency(
-        'nlohmann_json',
-        required: false,
-        include_type: 'system',
-    )
-    if not nlohmann_json_dep.found()
-        nlohmann_json_proj = subproject('nlohmann_json', required: true)
-        nlohmann_json_dep = nlohmann_json_proj.get_variable('nlohmann_json_dep')
-    endif
-
-    libarchive_dep = dependency(
+libarchive_dep = dependency(
+    'libarchive',
+    required: false,
+    include_type: 'system',
+)
+if not libarchive_dep.found()
+    # Disable werror and tests for this third-party subproject.
+    # werror=false: GCC 15 flags several issues in libarchive 3.8.6
+    #   (overflow in archive_string.c, unused-result in test_main.c).
+    #   Note: CI's -Dwerror=true overrides this, so the overflow case
+    #   is also handled via -Wno-error=overflow in add_global_arguments.
+    # tests=disabled: we don't need libarchive's own test suite, and it
+    #   has additional GCC 15 warnings (unused-result on setegid/seteuid).
+    libarchive_proj = subproject(
         'libarchive',
+        required: true,
+        default_options: ['werror=false', 'tests=disabled'],
+    )
+    libarchive_dep = libarchive_proj.get_variable('libarchive_dep')
+endif
+
+ist_app_a = static_library(
+    'ist_app_a',
+    'src/ist_app.cpp',
+    'src/update_manager.cpp',
+    'src/ist_results.cpp',
+    'src/hook_runner.cpp',
+    'src/host_power_monitor.cpp',
+    'src/itm_runner.cpp',
+    'src/dbus_state_publisher.cpp',
+    dependencies: [boost, sdbusplus, nlohmann_json_dep, libarchive_dep],
+    include_directories: 'include',
+)
+
+executable(
+    'ist',
+    'src/ist_main.cpp',
+    dependencies: [boost, sdbusplus, nlohmann_json_dep, libarchive_dep],
+    include_directories: 'include',
+    install: true,
+    link_with: [ist_app_a],
+)
+
+if get_option('tests').enabled()
+    gtest_dep = dependency(
+        'gtest',
+        main: true,
+        disabler: true,
         required: false,
         include_type: 'system',
     )
-    if not libarchive_dep.found()
-        # Disable werror and tests for this third-party subproject.
-        # werror=false: GCC 15 flags several issues in libarchive 3.8.6
-        #   (overflow in archive_string.c, unused-result in test_main.c).
-        #   Note: CI's -Dwerror=true overrides this, so the overflow case
-        #   is also handled via -Wno-error=overflow in add_global_arguments.
-        # tests=disabled: we don't need libarchive's own test suite, and it
-        #   has additional GCC 15 warnings (unused-result on setegid/seteuid).
-        libarchive_proj = subproject(
-            'libarchive',
-            required: true,
-            default_options: ['werror=false', 'tests=disabled'],
-        )
-        libarchive_dep = libarchive_proj.get_variable('libarchive_dep')
+    gmock_dep = dependency(
+        'gmock',
+        disabler: true,
+        required: false,
+        include_type: 'system',
+    )
+    if not gtest_dep.found() or not gmock_dep.found()
+        gtest_proj = import('cmake').subproject('gtest', required: false)
+        if gtest_proj.found()
+            gtest_dep = declare_dependency(
+                dependencies: [
+                    dependency('threads'),
+                    gtest_proj.dependency('gtest'),
+                    gtest_proj.dependency('gtest_main'),
+                ],
+            )
+            gmock_dep = gtest_proj.dependency('gmock')
+        else
+            assert(
+                not get_option('tests').enabled(),
+                'Googletest is required if tests are enabled',
+            )
+        endif
     endif
 
-    ist_app_a = static_library(
-        'ist_app_a',
-        'src/ist_app.cpp',
-        'src/update_manager.cpp',
-        'src/ist_results.cpp',
-        'src/hook_runner.cpp',
-        'src/host_power_monitor.cpp',
-        'src/itm_runner.cpp',
-        'src/dbus_state_publisher.cpp',
-        dependencies: [boost, sdbusplus, nlohmann_json_dep, libarchive_dep],
-        include_directories: 'include',
-    )
-
-    executable(
-        'ist',
-        'src/ist_main.cpp',
-        dependencies: [boost, sdbusplus, nlohmann_json_dep, libarchive_dep],
-        include_directories: 'include',
-        install: true,
+    ist_app_test = executable(
+        'ist-app-test',
+        'test/ist_app_test.cpp',
+        dependencies: [
+            boost,
+            sdbusplus,
+            nlohmann_json_dep,
+            gmock_dep,
+            gtest_dep,
+        ],
+        include_directories: ['include'],
         link_with: [ist_app_a],
     )
 
-    if get_option('tests').enabled()
-        gtest_dep = dependency(
-            'gtest',
-            main: true,
-            disabler: true,
-            required: false,
-            include_type: 'system',
-        )
-        gmock_dep = dependency(
-            'gmock',
-            disabler: true,
-            required: false,
-            include_type: 'system',
-        )
-        if not gtest_dep.found() or not gmock_dep.found()
-            gtest_proj = import('cmake').subproject('gtest', required: false)
-            if gtest_proj.found()
-                gtest_dep = declare_dependency(
-                    dependencies: [
-                        dependency('threads'),
-                        gtest_proj.dependency('gtest'),
-                        gtest_proj.dependency('gtest_main'),
-                    ],
-                )
-                gmock_dep = gtest_proj.dependency('gmock')
-            else
-                assert(
-                    not get_option('tests').enabled(),
-                    'Googletest is required if tests are enabled',
-                )
-            endif
-        endif
+    test('ist_app_test', ist_app_test, protocol: 'gtest')
 
-        ist_app_test = executable(
-            'ist-app-test',
-            'test/ist_app_test.cpp',
-            dependencies: [
-                boost,
-                sdbusplus,
-                nlohmann_json_dep,
-                gmock_dep,
-                gtest_dep,
-            ],
-            include_directories: ['include'],
-            link_with: [ist_app_a],
-        )
+    hook_runner_test = executable(
+        'hook-runner-test',
+        'test/hook_runner_test.cpp',
+        dependencies: [boost, sdbusplus, nlohmann_json_dep, gtest_dep],
+        include_directories: ['include'],
+        link_with: [ist_app_a],
+    )
 
-        test('ist_app_test', ist_app_test, protocol: 'gtest')
+    test('hook_runner_test', hook_runner_test, protocol: 'gtest', timeout: 60)
 
-        hook_runner_test = executable(
-            'hook-runner-test',
-            'test/hook_runner_test.cpp',
-            dependencies: [boost, sdbusplus, nlohmann_json_dep, gtest_dep],
-            include_directories: ['include'],
-            link_with: [ist_app_a],
-        )
+    itm_runner_test = executable(
+        'itm-runner-test',
+        'test/itm_runner_test.cpp',
+        dependencies: [boost, sdbusplus, nlohmann_json_dep, gtest_dep],
+        include_directories: ['include'],
+        link_with: [ist_app_a],
+    )
 
-        test(
-            'hook_runner_test',
-            hook_runner_test,
-            protocol: 'gtest',
-            timeout: 60,
-        )
-
-        itm_runner_test = executable(
-            'itm-runner-test',
-            'test/itm_runner_test.cpp',
-            dependencies: [boost, sdbusplus, nlohmann_json_dep, gtest_dep],
-            include_directories: ['include'],
-            link_with: [ist_app_a],
-        )
-
-        test('itm_runner_test', itm_runner_test, protocol: 'gtest', timeout: 60)
-    endif
+    test('itm_runner_test', itm_runner_test, protocol: 'gtest', timeout: 60)
 endif
