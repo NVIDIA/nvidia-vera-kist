@@ -1852,15 +1852,13 @@ TEST_F(IstServiceTest, RunObjectCreatedWithCorrectPath)
     EXPECT_EQ(service_->state().status, IstStatus::completed);
 }
 
-TEST_F(IstServiceTest, RunObjectCreatedOnAbort)
+TEST_F(IstServiceTest, RunObjectNotCreatedOnCollateralAbort)
 {
     fs::remove_all(tmpDir_ / "vectors");
     init_from_file(configPath_);
 
-    EXPECT_CALL(
-        *publisher_,
-        createRunObject(StrEq("/com/nvidia/vera/ist/runs/0"), ::testing::_))
-        .Times(1);
+    EXPECT_CALL(*publisher_, createRunObject(::testing::_, ::testing::_))
+        .Times(0);
 
     ParamMap params;
     EXPECT_THROW(service_->startIST(params), sdbusplus::exception::SdBusError);
@@ -2676,6 +2674,29 @@ TEST_F(IstServiceTest, StartIstClearsMarkerDir)
     start_ist(params);
 
     EXPECT_FALSE(fs::exists("/tmp/ist/err_marker"));
+}
+
+TEST_F(IstServiceTest, ResultsPreservedWhenCollateralVerificationFails)
+{
+    init_from_file(configPath_);
+
+    // Create a fake result from a previous run
+    std::ofstream(tmpDir_ / "results" / "prev_result.txt") << "data";
+    fs::create_directories("/tmp/ist/err_marker");
+    std::ofstream("/tmp/ist/err_marker/PWR_BRAKE") << "1";
+
+    // Remove vectors so collateral verification fails
+    fs::remove_all(tmpDir_ / "vectors");
+
+    ParamMap params;
+    EXPECT_THROW(service_->startIST(params), sdbusplus::exception::SdBusError);
+    EXPECT_EQ(service_->state().status, IstStatus::aborted);
+
+    // Previous results and markers should still be intact
+    EXPECT_TRUE(fs::exists(tmpDir_ / "results" / "prev_result.txt"));
+    EXPECT_TRUE(fs::exists("/tmp/ist/err_marker/PWR_BRAKE"));
+
+    fs::remove_all("/tmp/ist/err_marker");
 }
 
 TEST_F(IstServiceTest, ItmSuccessDoesNotEmitEventLog)

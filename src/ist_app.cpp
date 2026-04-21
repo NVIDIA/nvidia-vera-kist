@@ -713,20 +713,6 @@ std::string IstService::startIST(const ParamMap& test_params)
             EBUSY, "Cannot start IST while update is in progress");
     }
 
-    currentRunPath_ =
-        "/com/nvidia/vera/ist/runs/" + std::to_string(runCounter_++);
-    publisher_->createRunObject(currentRunPath_, resultsFdCb_);
-
-    state_.progress = 0;
-
-    std::error_code ec;
-    fs::remove_all(err_marker_dir, ec);
-    for (const auto& entry :
-         fs::directory_iterator(platformCfg_.storage.resultStoragePath, ec))
-    {
-        fs::remove_all(entry.path(), ec);
-    }
-
     ensureMounted();
 
     transitionTo(IstStage::collateralVerification, IstStatus::inProgress);
@@ -744,6 +730,20 @@ std::string IstService::startIST(const ParamMap& test_params)
         transitionTo(IstStage::idle, IstStatus::failed);
         throw sdbusplus::exception::SdBusError(ENOENT,
                                                "istBootAssert hook not found");
+    }
+
+    currentRunPath_ =
+        "/com/nvidia/vera/ist/runs/" + std::to_string(runCounter_++);
+    publisher_->createRunObject(currentRunPath_, resultsFdCb_);
+
+    state_.progress = 0;
+
+    std::error_code ec;
+    fs::remove_all(err_marker_dir, ec);
+    for (const auto& entry :
+         fs::directory_iterator(platformCfg_.storage.resultStoragePath, ec))
+    {
+        fs::remove_all(entry.path(), ec);
     }
 
     transitionTo(IstStage::pendingIstBoot);
