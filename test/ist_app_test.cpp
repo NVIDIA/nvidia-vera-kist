@@ -164,10 +164,15 @@ class IstServiceTest : public ::testing::Test
         tmpDir_ = fs::temp_directory_path() /
                   ("ist_test_" + std::to_string(getpid()) + "_" +
                    std::to_string(counter++));
-        fs::create_directories(tmpDir_ / "vectors");
+        fs::create_directories(tmpDir_ / "vectors" / "GOLDEN_RES");
         fs::create_directories(tmpDir_ / "storage");
         fs::create_directories(tmpDir_ / "results");
         fs::create_directories(tmpDir_ / "hooks");
+
+        // Create expected collateral so startIST() passes verification
+        std::ofstream itm_stub(tmpDir_ / "vectors" / "kist_itm");
+        std::ofstream golden_stub(tmpDir_ / "vectors" / "GOLDEN_RES" /
+                                  "placeholder");
 
         // Create hook files so canonical() can resolve them
         for (const auto& name : {"assert.sh", "deassert.sh", "reset.sh"})
@@ -557,6 +562,43 @@ TEST_F(IstServiceTest, StartIstAbortsOnMissingVectorStorage)
 {
     // Remove the vectors directory so collateral verification fails
     fs::remove_all(tmpDir_ / "vectors");
+
+    init_from_file(configPath_);
+
+    ParamMap params;
+    EXPECT_THROW(service_->startIST(params), sdbusplus::exception::SdBusError);
+    EXPECT_EQ(service_->state().status, IstStatus::aborted);
+    EXPECT_EQ(service_->state().stage, IstStage::idle);
+}
+
+TEST_F(IstServiceTest, StartIstAbortsOnMissingItmBinary)
+{
+    fs::remove(tmpDir_ / "vectors" / "kist_itm");
+
+    init_from_file(configPath_);
+
+    ParamMap params;
+    EXPECT_THROW(service_->startIST(params), sdbusplus::exception::SdBusError);
+    EXPECT_EQ(service_->state().status, IstStatus::aborted);
+    EXPECT_EQ(service_->state().stage, IstStage::idle);
+}
+
+TEST_F(IstServiceTest, StartIstAbortsOnMissingGoldenRes)
+{
+    fs::remove_all(tmpDir_ / "vectors" / "GOLDEN_RES");
+
+    init_from_file(configPath_);
+
+    ParamMap params;
+    EXPECT_THROW(service_->startIST(params), sdbusplus::exception::SdBusError);
+    EXPECT_EQ(service_->state().status, IstStatus::aborted);
+    EXPECT_EQ(service_->state().stage, IstStage::idle);
+}
+
+TEST_F(IstServiceTest, StartIstAbortsOnEmptyGoldenRes)
+{
+    fs::remove_all(tmpDir_ / "vectors" / "GOLDEN_RES");
+    fs::create_directories(tmpDir_ / "vectors" / "GOLDEN_RES");
 
     init_from_file(configPath_);
 

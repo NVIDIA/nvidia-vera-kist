@@ -431,6 +431,23 @@ bool IstService::collateralVerification(const ParamMap& test_params)
         return false;
     }
 
+    if (!fs::exists(platformCfg_.itmBinaryPath, fs_ec) || fs_ec)
+    {
+        std::cerr << "IST binary '" << platformCfg_.itmBinaryPath
+                  << "' not found; test vectors may not be mounted\n";
+        return false;
+    }
+
+    fs::path golden_res = platformCfg_.storage.vectorMountPath / "GOLDEN_RES";
+    if (!fs::exists(golden_res, fs_ec) || fs_ec ||
+        fs::is_empty(golden_res, fs_ec) || fs_ec)
+    {
+        std::cerr << "GOLDEN_RES not found or empty under '"
+                  << platformCfg_.storage.vectorMountPath
+                  << "'; test vectors may not be mounted\n";
+        return false;
+    }
+
     if (platformCfg_.storage.resultStoragePath.empty())
     {
         std::cerr << "resultStoragePath not configured in platform config!\n";
