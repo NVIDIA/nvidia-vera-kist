@@ -49,6 +49,7 @@ class DbusStatePublisher final : public StatePublisher
             sw_path, "xyz.openbmc_project.Software.Activation");
         activationIface_->register_property("Activation",
                                             std::string(k_activation_active));
+        activationIface_->register_property("Functional", true);
         activationIface_->initialize();
     }
 
@@ -156,6 +157,8 @@ class DbusStatePublisher final : public StatePublisher
         if (activationIface_)
         {
             activationIface_->set_property("Activation", std::string(state));
+            activationIface_->set_property("Functional",
+                                           state == k_activation_active);
         }
     }
 
@@ -238,9 +241,6 @@ class DbusStatePublisher final : public StatePublisher
         boost::asio::post(conn_->get_io_context(),
                           [iface = std::move(iface)]() {});
     }
-
-    static constexpr std::string_view k_activation_active =
-        "xyz.openbmc_project.Software.Activation.Activations.Active";
 
     sdbusplus::asio::object_server& server_;
     std::shared_ptr<sdbusplus::asio::connection> conn_;

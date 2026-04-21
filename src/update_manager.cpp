@@ -47,13 +47,6 @@ namespace fs = std::filesystem;
 static constexpr std::string_view k_image_file_name = "CPU-IST.img";
 static constexpr size_t k_transfer_buf_size = 65536;
 
-static constexpr std::string_view k_activation_activating =
-    "xyz.openbmc_project.Software.Activation.Activations.Activating";
-static constexpr std::string_view k_activation_active =
-    "xyz.openbmc_project.Software.Activation.Activations.Active";
-static constexpr std::string_view k_activation_failed =
-    "xyz.openbmc_project.Software.Activation.Activations.Failed";
-
 // ----------------------------------------------------------------
 // PLDM package helpers
 // ----------------------------------------------------------------

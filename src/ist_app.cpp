@@ -278,7 +278,10 @@ bool IstService::initialize(IstPlatformConfig cfg)
 
     initialized_ = true;
 
-    mountImages();
+    if (!mountImages())
+    {
+        publisher_->publishActivation(k_activation_failed);
+    }
     readAndPublishVersion();
     return true;
 }

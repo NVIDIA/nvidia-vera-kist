@@ -2482,6 +2482,52 @@ TEST_F(IstServiceTest, ReadAndPublishVersionVeryLongString)
 }
 
 // ----------------
+// Activation state on initialization tests
+// ----------------
+
+TEST_F(IstServiceTest, InitNoImagePublishesActivationFailed)
+{
+    EXPECT_CALL(*publisher_, publishActivation(StrEq(k_activation_failed)))
+        .Times(1);
+    ASSERT_TRUE(init_from_file(configPath_));
+}
+
+TEST_F(IstServiceTest, InitNoStoragePathPublishesActivationFailed)
+{
+    write_config(R"({
+        "hookDirectory": ")" +
+                 (tmpDir_ / "hooks").string() + R"(",
+        "hookPaths": {
+            "istBootAssert": ")" +
+                 (tmpDir_ / "hooks/assert.sh").string() + R"(",
+            "istBootDeassert": ")" +
+                 (tmpDir_ / "hooks/deassert.sh").string() + R"(",
+            "resetSystem": ")" +
+                 (tmpDir_ / "hooks/reset.sh").string() + R"("
+        },
+        "storageConfig": {
+            "vectorMountPath": "",
+            "vectorStoragePath": "",
+            "resultStoragePath": ")" +
+                 (tmpDir_ / "results").string() + R"("
+        },
+        "softwareInventoryId": "IST_Vectors"
+    })");
+
+    EXPECT_CALL(*publisher_, publishActivation(StrEq(k_activation_failed)))
+        .Times(1);
+    ASSERT_TRUE(init_from_file(configPath_));
+}
+
+TEST_F(IstServiceTest, InitNoImageDoesNotPublishActivationActive)
+{
+    EXPECT_CALL(*publisher_, publishActivation(StrEq(k_activation_failed)));
+    EXPECT_CALL(*publisher_, publishActivation(StrEq(k_activation_active)))
+        .Times(0);
+    ASSERT_TRUE(init_from_file(configPath_));
+}
+
+// ----------------
 // Event log emission tests
 // ----------------
 

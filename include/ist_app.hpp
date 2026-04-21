@@ -29,6 +29,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <variant>
 
@@ -96,6 +97,17 @@ using ParamMap = std::unordered_map<std::string, IstParamVariant>;
 inline constexpr char err_marker_dir[] = "/tmp/ist/err_marker";
 inline constexpr int itm_exit_mismatch = 8;
 inline constexpr int itm_exit_platform_error = 14;
+
+// ----------------
+// Software activation states (D-Bus enum values)
+// ----------------
+
+inline constexpr std::string_view k_activation_activating =
+    "xyz.openbmc_project.Software.Activation.Activations.Activating";
+inline constexpr std::string_view k_activation_active =
+    "xyz.openbmc_project.Software.Activation.Activations.Active";
+inline constexpr std::string_view k_activation_failed =
+    "xyz.openbmc_project.Software.Activation.Activations.Failed";
 
 // ----------------
 // Configuration
