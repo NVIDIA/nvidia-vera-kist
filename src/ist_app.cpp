@@ -689,6 +689,12 @@ std::string IstService::startIST(const ParamMap& test_params)
         std::cerr << "Another IST run is in progress\n";
         throw sdbusplus::exception::SdBusError(EBUSY, "IST already running");
     }
+    if (updateInProgress_)
+    {
+        std::cerr << "Cannot start IST while update is in progress\n";
+        throw sdbusplus::exception::SdBusError(
+            EBUSY, "Cannot start IST while update is in progress");
+    }
 
     currentRunPath_ =
         "/com/nvidia/vera/ist/runs/" + std::to_string(runCounter_++);

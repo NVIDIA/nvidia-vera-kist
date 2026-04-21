@@ -540,6 +540,19 @@ TEST_F(IstServiceTest, StartIstRejectsWhenInProgress)
     EXPECT_THROW(service_->startIST(params2), sdbusplus::exception::SdBusError);
 }
 
+TEST_F(IstServiceTest, StartIstRejectsWhileUpdateInProgress)
+{
+    init_from_file(configPath_);
+    int fd = static_cast<int>(service_->startUpdate());
+
+    ParamMap params;
+    EXPECT_THROW(service_->startIST(params), sdbusplus::exception::SdBusError);
+    EXPECT_EQ(service_->state().stage, IstStage::idle);
+
+    ::close(fd);
+    io_.run();
+}
+
 TEST_F(IstServiceTest, StartIstAbortsOnMissingVectorStorage)
 {
     // Remove the vectors directory so collateral verification fails
