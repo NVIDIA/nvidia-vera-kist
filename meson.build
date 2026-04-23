@@ -81,11 +81,14 @@ else
 endif
 boost = boost_deps
 
+kist_arch_subdir = get_option('kist_arch_subdir')
+
 add_project_arguments(
     '-DBOOST_ASIO_DISABLE_THREADS',
     '-DBOOST_NO_RTTI',
     '-DBOOST_NO_TYPEID',
     '-DSDBUSPLUS_DISABLE_BOOST_COROUTINES',
+    '-DKIST_ARCH_SUBDIR="' + kist_arch_subdir + '"',
     language: 'cpp',
 )
 

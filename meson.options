@@ -14,3 +14,9 @@
 # limitations under the License.
 
 option('tests', type: 'feature', value: 'enabled', description: 'Build tests.')
+option(
+    'kist_arch_subdir',
+    type: 'string',
+    value: '',
+    description: 'Architecture subdirectory for kist_itm (e.g. aarch64, armhf)',
+)

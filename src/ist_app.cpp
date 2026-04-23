@@ -135,6 +135,30 @@ void IstService::transitionTo(IstStage stage, IstStatus status)
 // Platform config
 // ----------------
 
+void resolveItmPaths(IstPlatformConfig& cfg)
+{
+    if (cfg.storage.vectorMountPath.empty())
+    {
+        return;
+    }
+
+    if (!cfg.archSubDir.empty())
+    {
+        fs::path arch_dir =
+            cfg.storage.vectorMountPath / "kist_itm" / cfg.archSubDir;
+        std::error_code ec;
+        if (fs::is_directory(arch_dir, ec) && !ec)
+        {
+            cfg.itmBinaryPath = arch_dir / "bin" / "kist_itm";
+            cfg.itmLibDir = arch_dir / "lib";
+            return;
+        }
+    }
+
+    cfg.itmBinaryPath = cfg.storage.vectorMountPath / "kist_itm";
+    cfg.itmLibDir.clear();
+}
+
 bool parsePlatformConfig(IstPlatformConfig& out, const std::string& path)
 {
     std::ifstream f(path);
@@ -198,10 +222,7 @@ bool parsePlatformConfig(IstPlatformConfig& out, const std::string& path)
     out.storage.vectorStoragePath = json_path(sc, "vectorStoragePath");
     out.storage.resultStoragePath = json_path(sc, "resultStoragePath");
 
-    if (!out.storage.vectorMountPath.empty())
-    {
-        out.itmBinaryPath = out.storage.vectorMountPath / "kist_itm";
-    }
+    resolveItmPaths(out);
 
     // Validate hook paths: reject explicitly-set-but-empty values,
     // and ensure non-empty paths are within hookDirectory.
@@ -235,6 +256,8 @@ bool parsePlatformConfig(IstPlatformConfig& out, const std::string& path)
 void IstService::printIstPlatformConfig() const
 {
     std::cout << "istHookPath:    " << platformCfg_.hookDir << '\n';
+    std::cout << "itmBinaryPath:  " << platformCfg_.itmBinaryPath << '\n';
+    std::cout << "itmLibDir:      " << platformCfg_.itmLibDir << '\n';
     std::cout << "hooks:\n";
     std::cout << "  istBootAssert = " << platformCfg_.hooks.istBootAssert
               << '\n';
@@ -433,6 +456,8 @@ bool IstService::collateralVerification(const ParamMap& test_params)
         std::cerr << '\n';
         return false;
     }
+
+    resolveItmPaths(platformCfg_);
 
     if (!fs::exists(platformCfg_.itmBinaryPath, fs_ec) || fs_ec)
     {

@@ -387,6 +387,13 @@ static std::vector<std::string>
                    const IstPlatformConfig& platform_cfg)
 {
     std::vector<std::string> args;
+
+    if (!platform_cfg.itmLibDir.empty())
+    {
+        args.emplace_back("/usr/bin/env");
+        args.emplace_back("LD_LIBRARY_PATH=" + platform_cfg.itmLibDir.string());
+    }
+
     args.emplace_back(platform_cfg.itmBinaryPath);
 
     if (!platform_cfg.storage.vectorMountPath.empty())

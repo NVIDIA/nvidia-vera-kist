@@ -148,7 +148,102 @@ TEST(IstPlatformConfigTest, DefaultValues)
     EXPECT_TRUE(cfg.storage.vectorMountPath.empty());
     EXPECT_TRUE(cfg.storage.vectorStoragePath.empty());
     EXPECT_TRUE(cfg.storage.resultStoragePath.empty());
+    EXPECT_TRUE(cfg.itmLibDir.empty());
     EXPECT_EQ(cfg.transferInactivityTimeout, std::chrono::seconds(300));
+}
+
+// ----------------
+// resolveItmPaths tests
+// ----------------
+
+TEST(ResolveItmPathsTest, EmptyVectorMountPathIsNoop)
+{
+    IstPlatformConfig cfg;
+    cfg.archSubDir = "aarch64";
+    fs::path original = cfg.itmBinaryPath;
+    resolveItmPaths(cfg);
+    EXPECT_EQ(cfg.itmBinaryPath, original);
+    EXPECT_TRUE(cfg.itmLibDir.empty());
+}
+
+TEST(ResolveItmPathsTest, FallsBackToFlatLayoutWhenNoArchSubDir)
+{
+    auto tmp_dir = fs::temp_directory_path() /
+                   ("resolve_test_flat_" + std::to_string(getpid()));
+    fs::create_directories(tmp_dir / "vectors");
+
+    IstPlatformConfig cfg;
+    cfg.storage.vectorMountPath = tmp_dir / "vectors";
+    resolveItmPaths(cfg);
+
+    EXPECT_EQ(cfg.itmBinaryPath, tmp_dir / "vectors" / "kist_itm");
+    EXPECT_TRUE(cfg.itmLibDir.empty());
+
+    fs::remove_all(tmp_dir);
+}
+
+TEST(ResolveItmPathsTest, FallsBackToFlatLayoutWhenArchDirMissing)
+{
+    auto tmp_dir = fs::temp_directory_path() /
+                   ("resolve_test_missing_" + std::to_string(getpid()));
+    fs::create_directories(tmp_dir / "vectors");
+
+    IstPlatformConfig cfg;
+    cfg.storage.vectorMountPath = tmp_dir / "vectors";
+    cfg.archSubDir = "aarch64";
+    resolveItmPaths(cfg);
+
+    EXPECT_EQ(cfg.itmBinaryPath, tmp_dir / "vectors" / "kist_itm");
+    EXPECT_TRUE(cfg.itmLibDir.empty());
+
+    fs::remove_all(tmp_dir);
+}
+
+TEST(ResolveItmPathsTest, UsesArchSpecificPathsWhenArchDirExists)
+{
+    auto tmp_dir = fs::temp_directory_path() /
+                   ("resolve_test_arch_" + std::to_string(getpid()));
+    fs::create_directories(tmp_dir / "vectors" / "kist_itm" / "aarch64" /
+                           "bin");
+    fs::create_directories(tmp_dir / "vectors" / "kist_itm" / "aarch64" /
+                           "lib");
+
+    IstPlatformConfig cfg;
+    cfg.storage.vectorMountPath = tmp_dir / "vectors";
+    cfg.archSubDir = "aarch64";
+    resolveItmPaths(cfg);
+
+    EXPECT_EQ(cfg.itmBinaryPath, tmp_dir / "vectors" / "kist_itm" / "aarch64" /
+                                     "bin" / "kist_itm");
+    EXPECT_EQ(cfg.itmLibDir,
+              tmp_dir / "vectors" / "kist_itm" / "aarch64" / "lib");
+
+    fs::remove_all(tmp_dir);
+}
+
+TEST(ResolveItmPathsTest, ClearsLibDirOnFallback)
+{
+    auto tmp_dir = fs::temp_directory_path() /
+                   ("resolve_test_clear_" + std::to_string(getpid()));
+    fs::create_directories(tmp_dir / "vectors" / "kist_itm" / "aarch64" /
+                           "bin");
+    fs::create_directories(tmp_dir / "vectors" / "kist_itm" / "aarch64" /
+                           "lib");
+
+    IstPlatformConfig cfg;
+    cfg.storage.vectorMountPath = tmp_dir / "vectors";
+    cfg.archSubDir = "aarch64";
+    resolveItmPaths(cfg);
+    EXPECT_FALSE(cfg.itmLibDir.empty());
+
+    // Simulate fallback by removing the arch dir and re-resolving
+    fs::remove_all(tmp_dir / "vectors" / "kist_itm" / "aarch64");
+    resolveItmPaths(cfg);
+
+    EXPECT_EQ(cfg.itmBinaryPath, tmp_dir / "vectors" / "kist_itm");
+    EXPECT_TRUE(cfg.itmLibDir.empty());
+
+    fs::remove_all(tmp_dir);
 }
 
 // ----------------

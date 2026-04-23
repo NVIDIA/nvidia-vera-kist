@@ -133,6 +133,8 @@ struct IstPlatformConfig
     std::string softwareInventoryId;
     std::filesystem::path hookDir;
     std::filesystem::path itmBinaryPath{"/bin/kist_itm"};
+    std::filesystem::path itmLibDir;
+    std::string archSubDir{KIST_ARCH_SUBDIR};
     HookPaths hooks;
     StoragePaths storage;
     std::chrono::seconds transferInactivityTimeout{300};
@@ -331,6 +333,7 @@ std::unique_ptr<StatePublisher>
 // ----------------
 
 bool parsePlatformConfig(IstPlatformConfig& out, const std::string& path);
+void resolveItmPaths(IstPlatformConfig& cfg);
 
 bool archiveResults(const std::filesystem::path& resultsDir);
 
