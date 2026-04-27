@@ -17,6 +17,7 @@
 #include <archive.h>
 #include <archive_entry.h>
 #include <fcntl.h>
+#include <sys/stat.h>
 
 #include <ist_app.hpp>
 
@@ -31,6 +32,7 @@ namespace fs = std::filesystem;
 
 inline constexpr std::string_view k_archive_name = "ist_results.tar.gz";
 static constexpr size_t k_archive_buf_size = 65536;
+static constexpr off_t k_max_result_size = 50LL * 1024 * 1024;
 
 static bool add_file_to_archive(struct archive* ar, const fs::path& file_path,
                                 const fs::path& entry_name)
@@ -191,6 +193,24 @@ sdbusplus::message::unix_fd IstService::getResultsFd()
                   << errno << '\n';
         throw sdbusplus::exception::SdBusError(ENOENT,
                                                "No IST results available");
+    }
+
+    struct stat st{};
+    if (::fstat(fd, &st) < 0)
+    {
+        int err = errno;
+        std::cerr << "IST: fstat failed on results archive: " << err << '\n';
+        ::close(fd);
+        throw sdbusplus::exception::SdBusError(
+            err, "Failed to stat IST results archive");
+    }
+    if (st.st_size > k_max_result_size)
+    {
+        std::cerr << "IST: results archive too large (" << st.st_size
+                  << " bytes, max " << k_max_result_size << ")\n";
+        ::close(fd);
+        throw sdbusplus::exception::SdBusError(
+            EFBIG, "IST results archive exceeds size limit");
     }
 
     return {fd};

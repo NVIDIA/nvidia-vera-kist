@@ -3079,6 +3079,22 @@ TEST_F(IstServiceTest, GetResultsFdThrowsWhenNoArchive)
     EXPECT_THROW(service_->getResultsFd(), sdbusplus::exception::SdBusError);
 }
 
+TEST_F(IstServiceTest, GetResultsFdThrowsWhenArchiveTooLarge)
+{
+    init_from_file(configPath_);
+
+    fs::path results_dir = tmpDir_ / "results";
+    fs::path archive = results_dir / "ist_results.tar.gz";
+
+    // Create a file just over the 50MB limit via truncate
+    std::ofstream ofs(archive, std::ios::binary);
+    ofs.seekp(50LL * 1024 * 1024);
+    ofs.put('\0');
+    ofs.close();
+
+    EXPECT_THROW(service_->getResultsFd(), sdbusplus::exception::SdBusError);
+}
+
 TEST_F(IstServiceTest, StartIstCleansUpOldResults)
 {
     init_from_file(configPath_);
