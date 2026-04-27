@@ -506,6 +506,42 @@ void IstService::onIstBootAssertDone(bool ok)
         return;
     }
 
+    std::error_code ec;
+    bool has_active_markers = false;
+    if (fs::is_directory(err_marker_dir, ec))
+    {
+        for (const auto& entry : fs::directory_iterator(err_marker_dir, ec))
+        {
+            std::ifstream marker_file(entry.path());
+            std::string content;
+            if (marker_file)
+            {
+                std::getline(marker_file, content);
+            }
+
+            if (content == "deasserted")
+            {
+                fs::remove(entry.path(), ec);
+                if (ec)
+                {
+                    std::cerr << "Failed to remove marker '"
+                              << entry.path().string() << "': " << ec.message()
+                              << "\n";
+                }
+                continue;
+            }
+
+            std::cerr << "Pre-existing error marker: "
+                      << entry.path().filename().string() << "\n";
+            has_active_markers = true;
+        }
+    }
+    if (has_active_markers)
+    {
+        runIstCleanup(itm_exit_platform_error);
+        return;
+    }
+
     transitionTo(IstStage::pendingPowerCycle);
 
     // Re-emit the Stage PropertiesChanged signal after a short delay.
@@ -767,7 +803,6 @@ std::string IstService::startIST(const ParamMap& test_params)
     state_.progress = 0;
 
     std::error_code ec;
-    fs::remove_all(err_marker_dir, ec);
     for (const auto& entry :
          fs::directory_iterator(platformCfg_.storage.resultStoragePath, ec))
     {

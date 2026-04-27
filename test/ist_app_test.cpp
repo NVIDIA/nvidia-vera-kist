@@ -2790,11 +2790,9 @@ TEST_F(IstServiceTest, PlatformErrorIncludesMarkerFiles)
     assert_done(true);
     power_done(true);
 
-    // Create markers after startIST clears the dir (simulating ITM creating
-    // them during its run)
     fs::create_directories("/tmp/ist/err_marker");
-    std::ofstream marker1("/tmp/ist/err_marker/PWR_BRAKE");
-    std::ofstream marker2("/tmp/ist/err_marker/THERMAL_FAULT");
+    std::ofstream("/tmp/ist/err_marker/PWR_BRAKE") << "asserted";
+    std::ofstream("/tmp/ist/err_marker/THERMAL_FAULT") << "asserted";
 
     itm_done(14);
     io_.run();
@@ -2804,17 +2802,79 @@ TEST_F(IstServiceTest, PlatformErrorIncludesMarkerFiles)
     fs::remove_all("/tmp/ist/err_marker");
 }
 
-TEST_F(IstServiceTest, StartIstClearsMarkerDir)
+TEST_F(IstServiceTest, PreExistingMarkersAbortBeforePowerCycle)
 {
-    fs::create_directories("/tmp/ist/err_marker");
-    std::ofstream stale("/tmp/ist/err_marker/STALE_MARKER");
-
     init_from_file(configPath_);
+
+    DoneCb assert_done;
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootAssert hook"),
+                         ::testing::_, ::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::string&, DoneCb done,
+                      const std::vector<std::string>&,
+                      std::chrono::seconds) { assert_done = std::move(done); });
+
+    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_)).Times(0);
+
+    DoneCb deassert_done;
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootDeassert hook"),
+                         ::testing::_, ::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::string&, DoneCb done,
+                      const std::vector<std::string>&, std::chrono::seconds) {
+            deassert_done = std::move(done);
+        });
+
+    EXPECT_CALL(*publisher_,
+                emitEventLog(::testing::_, ::testing::_, ::testing::_))
+        .WillOnce([](const std::string&, const std::string&,
+                     const std::map<std::string, std::string>& data) {
+            EXPECT_THAT(data.at("IST_MESSAGE"),
+                        ::testing::HasSubstr("PWR_BRAKE"));
+        });
+
+    fs::create_directories("/tmp/ist/err_marker");
+    std::ofstream("/tmp/ist/err_marker/PWR_BRAKE") << "asserted";
 
     ParamMap params;
     start_ist(params);
+    assert_done(true);
+    io_.run();
+    io_.restart();
+    deassert_done(true);
 
-    EXPECT_FALSE(fs::exists("/tmp/ist/err_marker"));
+    EXPECT_EQ(service_->state().status, IstStatus::failed);
+
+    fs::remove_all("/tmp/ist/err_marker");
+}
+
+TEST_F(IstServiceTest, DeassertedMarkersCleanedUpAtStart)
+{
+    init_from_file(configPath_);
+
+    DoneCb assert_done;
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootAssert hook"),
+                         ::testing::_, ::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::string&, DoneCb done,
+                      const std::vector<std::string>&,
+                      std::chrono::seconds) { assert_done = std::move(done); });
+
+    DoneCb power_done;
+    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+        .WillOnce([&](DoneCb done) { power_done = std::move(done); });
+
+    fs::create_directories("/tmp/ist/err_marker");
+    std::ofstream("/tmp/ist/err_marker/PWR_BRAKE") << "deasserted";
+
+    ParamMap params;
+    start_ist(params);
+    assert_done(true);
+
+    EXPECT_EQ(service_->state().stage, IstStage::pendingPowerCycle);
+    EXPECT_FALSE(fs::exists("/tmp/ist/err_marker/PWR_BRAKE"));
+
+    fs::remove_all("/tmp/ist/err_marker");
 }
 
 TEST_F(IstServiceTest, ResultsPreservedWhenCollateralVerificationFails)
@@ -2824,7 +2884,7 @@ TEST_F(IstServiceTest, ResultsPreservedWhenCollateralVerificationFails)
     // Create a fake result from a previous run
     std::ofstream(tmpDir_ / "results" / "prev_result.txt") << "data";
     fs::create_directories("/tmp/ist/err_marker");
-    std::ofstream("/tmp/ist/err_marker/PWR_BRAKE") << "1";
+    std::ofstream("/tmp/ist/err_marker/PWR_BRAKE") << "asserted";
 
     // Remove vectors so collateral verification fails
     fs::remove_all(tmpDir_ / "vectors");
