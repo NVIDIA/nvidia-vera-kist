@@ -175,6 +175,12 @@ bool archiveResults(const fs::path& results_dir)
 
 sdbusplus::message::unix_fd IstService::getResultsFd()
 {
+    if (state_.stage != IstStage::idle)
+    {
+        throw sdbusplus::exception::SdBusError(
+            EBUSY, "Cannot retrieve results while IST is in progress");
+    }
+
     const fs::path& results_dir = platformCfg_.storage.resultStoragePath;
     if (results_dir.empty())
     {
