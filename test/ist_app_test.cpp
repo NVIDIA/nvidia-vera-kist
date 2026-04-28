@@ -326,6 +326,8 @@ class IstServiceTest : public ::testing::Test
         {
             return false;
         }
+        service_->setSignatureVerifier(
+            [](const IstPlatformConfig&) { return true; });
         return service_->initialize(std::move(cfg));
     }
 
@@ -355,7 +357,7 @@ class IstServiceTest : public ::testing::Test
     std::string start_ist(const ParamMap& params = {})
     {
         auto path = service_->startIST(params);
-        io_.poll();
+        io_.run();
         io_.restart();
         return path;
     }

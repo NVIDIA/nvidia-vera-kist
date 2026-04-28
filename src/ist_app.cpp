@@ -19,6 +19,7 @@
 #include <ist_app.hpp>
 #include <nlohmann/json.hpp>
 #include <sdbusplus/exception.hpp>
+#include <signature_verify.hpp>
 
 #include <algorithm>
 #include <cstdint>
@@ -99,8 +100,13 @@ IstService::IstService(boost::asio::io_context& io,
     io_(io), publisher_(std::move(publisher)),
     hookRunner_(std::move(hook_runner)),
     powerMonitor_(std::move(power_monitor)), itmRunner_(std::move(itm_runner)),
-    reSignalTimer_(io)
+    signatureVerifier_(verifyItmSignatures), reSignalTimer_(io)
 {}
+
+void IstService::setSignatureVerifier(SignatureVerifier fn)
+{
+    signatureVerifier_ = std::move(fn);
+}
 
 void IstService::setResultsFdCallback(ResultsFdCb cb)
 {
@@ -815,17 +821,31 @@ std::string IstService::startIST(const ParamMap& test_params)
         }
     }
 
-    transitionTo(IstStage::pendingIstBoot);
-
-    // Defer the hook start to the next event-loop iteration so the D-Bus
-    // method return is sent first.  This gives callers time to register
-    // PropertiesChanged matches on the returned run object before any
-    // stage transitions fire.
-    boost::asio::post(io_, [self = shared_from_this(), hook_cmd]() {
-        self->hookRunner_->asyncRun(
-            hook_cmd, "istBootAssert hook",
-            [self](bool ok) { self->onIstBootAssertDone(ok); });
-    });
+    IstPlatformConfig cfg_snapshot = platformCfg_;
+    SignatureVerifier verifier = signatureVerifier_;
+    runOffThread(
+        io_, [cfg_snapshot, verifier]() { return verifier(cfg_snapshot); },
+        [self = shared_from_this()](bool ok) {
+            self->onSignatureVerifyDone(ok);
+        });
 
     return currentRunPath_;
+}
+
+void IstService::onSignatureVerifyDone(bool ok)
+{
+    if (!ok)
+    {
+        std::cerr << "IST binary/library signature verification failed\n";
+        transitionTo(IstStage::idle, IstStatus::failed);
+        return;
+    }
+
+    transitionTo(IstStage::pendingIstBoot);
+
+    const fs::path& hook_cmd = platformCfg_.hooks.istBootAssert;
+    hookRunner_->asyncRun(hook_cmd, "istBootAssert hook",
+                          [self = shared_from_this()](bool hook_ok) {
+                              self->onIstBootAssertDone(hook_ok);
+                          });
 }

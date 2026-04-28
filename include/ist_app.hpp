@@ -135,6 +135,7 @@ struct IstPlatformConfig
     std::filesystem::path itmBinaryPath{"/bin/kist_itm"};
     std::filesystem::path itmLibDir;
     std::string archSubDir{KIST_ARCH_SUBDIR};
+    std::filesystem::path signingKeyPath{"/etc/ist/kist_itm_verify_key.pem"};
     HookPaths hooks;
     StoragePaths storage;
     std::chrono::seconds transferInactivityTimeout{300};
@@ -372,6 +373,14 @@ class IstService : public std::enable_shared_from_this<IstService>
     {
         return currentRunPath_;
     }
+    /**
+     * Override the function used to verify kist_itm binary and library
+     * signatures before execution.  Defaults to verifyItmSignatures.
+     * Exposed so unit tests can bypass crypto without real signing keys.
+     */
+    using SignatureVerifier = std::function<bool(const IstPlatformConfig&)>;
+    void setSignatureVerifier(SignatureVerifier fn);
+
     void setResultsFdCallback(ResultsFdCb cb);
     std::string startIST(const ParamMap& testParams);
     sdbusplus::message::unix_fd startUpdate();
@@ -390,6 +399,7 @@ class IstService : public std::enable_shared_from_this<IstService>
     void transitionTo(IstStage stage);
     void transitionTo(IstStage stage, IstStatus status);
 
+    void onSignatureVerifyDone(bool ok);
     void onIstBootAssertDone(bool ok);
     void onPowerCycleDone(bool ok);
     void startItmRun();
@@ -430,6 +440,7 @@ class IstService : public std::enable_shared_from_this<IstService>
     std::unique_ptr<HookRunner> hookRunner_;
     std::shared_ptr<HostPowerMonitor> powerMonitor_;
     std::unique_ptr<ItmRunner> itmRunner_;
+    SignatureVerifier signatureVerifier_;
     std::shared_ptr<TransferSession> activeTransfer_;
     std::shared_ptr<PldmStripper> activeStripper_;
     boost::asio::steady_timer reSignalTimer_;

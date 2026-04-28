@@ -124,6 +124,8 @@ if not nlohmann_json_dep.found()
     nlohmann_json_dep = nlohmann_json_proj.get_variable('nlohmann_json_dep')
 endif
 
+libcrypto_dep = dependency('libcrypto', required: true, include_type: 'system')
+
 libarchive_dep = dependency(
     'libarchive',
     required: false,
@@ -154,7 +156,14 @@ ist_app_a = static_library(
     'src/host_power_monitor.cpp',
     'src/itm_runner.cpp',
     'src/dbus_state_publisher.cpp',
-    dependencies: [boost, sdbusplus, nlohmann_json_dep, libarchive_dep],
+    'src/signature_verify.cpp',
+    dependencies: [
+        boost,
+        sdbusplus,
+        nlohmann_json_dep,
+        libarchive_dep,
+        libcrypto_dep,
+    ],
     include_directories: 'include',
 )
 
@@ -235,4 +244,20 @@ if get_option('tests').enabled()
     )
 
     test('itm_runner_test', itm_runner_test, protocol: 'gtest', timeout: 60)
+
+    signature_verify_test = executable(
+        'signature-verify-test',
+        'test/signature_verify_test.cpp',
+        dependencies: [
+            boost,
+            sdbusplus,
+            nlohmann_json_dep,
+            libcrypto_dep,
+            gtest_dep,
+        ],
+        include_directories: ['include'],
+        link_with: [ist_app_a],
+    )
+
+    test('signature_verify_test', signature_verify_test, protocol: 'gtest')
 endif
