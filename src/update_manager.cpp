@@ -413,41 +413,6 @@ class TransferSession : public std::enable_shared_from_this<TransferSession>
 };
 
 // ----------------------------------------------------------------
-// Async helper: run blocking work on a detached thread, signal
-// the bool result back to the io_context via a pipe so the
-// callback executes on the event-loop thread.
-// ----------------------------------------------------------------
-
-static void run_off_thread(boost::asio::io_context& io,
-                           std::move_only_function<bool()> work,
-                           std::move_only_function<void(bool) const> done)
-{
-    int fds[2];
-    if (::pipe2(fds, O_CLOEXEC) < 0)
-    {
-        done(false);
-        return;
-    }
-
-    auto stream =
-        std::make_shared<boost::asio::posix::stream_descriptor>(io, fds[0]);
-    std::shared_ptr<uint8_t> result = std::make_shared<uint8_t>(0);
-
-    stream->async_read_some(boost::asio::buffer(result.get(), 1),
-                            [stream, result, done = std::move(done)](
-                                const boost::system::error_code& ec, size_t) {
-                                done(!ec && *result != 0);
-                            });
-
-    std::thread([work = std::move(work), write_fd = fds[1]]() mutable {
-        bool ok = work();
-        uint8_t val = ok ? 1 : 0;
-        std::ignore = ::write(write_fd, &val, 1);
-        ::close(write_fd);
-    }).detach();
-}
-
-// ----------------------------------------------------------------
 // PLDM header stripping — runs entirely on a worker thread
 // ----------------------------------------------------------------
 
@@ -554,7 +519,7 @@ class PldmStripper : public std::enable_shared_from_this<PldmStripper>
         // shared_from_this is intentional: the callback must set
         // committed_ before the destructor runs, otherwise it would
         // delete the image file.
-        run_off_thread(
+        runOffThread(
             io_,
             [fd_ptr, comp]() {
                 return strip_pldm_payload(fd_ptr->get(), comp);
@@ -649,7 +614,7 @@ void IstService::onTransferComplete(bool ok, const fs::path& image_path)
 
     std::shared_ptr<std::optional<PldmComponentInfo>> comp =
         std::make_shared<std::optional<PldmComponentInfo>>();
-    run_off_thread(
+    runOffThread(
         io_,
         [comp, image_path]() {
             *comp = process_pldm_package(image_path);
@@ -968,7 +933,7 @@ void IstService::asyncTeardownMounts(
     std::move_only_function<void(bool) const> done)
 {
     auto self = shared_from_this();
-    run_off_thread(
+    runOffThread(
         io_, [self]() { return self->teardownMounts(); }, std::move(done));
 }
 
@@ -976,7 +941,7 @@ void IstService::asyncMountImages(
     std::move_only_function<void(bool) const> done)
 {
     auto self = shared_from_this();
-    run_off_thread(
+    runOffThread(
         io_, [self]() { return self->mountImages(); }, std::move(done));
 }
 
