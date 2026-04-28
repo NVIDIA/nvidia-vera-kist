@@ -806,7 +806,13 @@ std::string IstService::startIST(const ParamMap& test_params)
     for (const auto& entry :
          fs::directory_iterator(platformCfg_.storage.resultStoragePath, ec))
     {
-        fs::remove_all(entry.path(), ec);
+        std::error_code rm_ec;
+        fs::remove_all(entry.path(), rm_ec);
+        if (rm_ec)
+        {
+            std::cerr << "Failed to remove " << entry.path() << ": "
+                      << rm_ec.message() << '\n';
+        }
     }
 
     transitionTo(IstStage::pendingIstBoot);
