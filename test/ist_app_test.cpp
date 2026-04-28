@@ -3114,3 +3114,231 @@ TEST_F(IstServiceTest, StartIstCleansUpOldResults)
     EXPECT_FALSE(fs::exists(results_dir / "leftover.gz"));
     EXPECT_TRUE(fs::exists(results_dir));
 }
+
+// ----------------
+// CPU discovery tests
+// ----------------
+
+using CpuDoneCb =
+    std::move_only_function<void(const std::vector<std::string>&) const>;
+
+TEST_F(IstServiceTest, CpuDiscoverySetsTwoCpuSocketList)
+{
+    init_from_file(configPath_);
+
+    service_->setCpuDiscoverer([](CpuDoneCb done) {
+        done({"/xyz/openbmc_project/inventory/system/chassis/CPU_0",
+              "/xyz/openbmc_project/inventory/system/chassis/CPU_1"});
+    });
+
+    IstTestConfig captured_cfg;
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootAssert hook"),
+                         ::testing::_, ::testing::_, ::testing::_))
+        .WillOnce([](const std::string&, const std::string&, DoneCb done,
+                     const std::vector<std::string>&,
+                     std::chrono::seconds) { done(true); });
+    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+        .WillOnce([](DoneCb done) { done(true); });
+    EXPECT_CALL(*itmRunner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
+                                      ::testing::_))
+        .WillOnce([&](const IstTestConfig& cfg, const IstPlatformConfig&,
+                      ItmDoneCb done, ProgressCb) {
+            captured_cfg = cfg;
+            done(0);
+        });
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootDeassert hook"),
+                         ::testing::_, ::testing::_, ::testing::_))
+        .WillOnce([](const std::string&, const std::string&, DoneCb done,
+                     const std::vector<std::string>&,
+                     std::chrono::seconds) { done(true); });
+
+    start_ist();
+    io_.run();
+    io_.restart();
+
+    ASSERT_TRUE(captured_cfg.customSocketList.has_value());
+    EXPECT_EQ(*captured_cfg.customSocketList, "0,1");
+}
+
+TEST_F(IstServiceTest, CpuDiscoverySetsOneCpuSocketList)
+{
+    init_from_file(configPath_);
+
+    service_->setCpuDiscoverer([](CpuDoneCb done) {
+        done({"/xyz/openbmc_project/inventory/system/chassis/CPU_0"});
+    });
+
+    IstTestConfig captured_cfg;
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootAssert hook"),
+                         ::testing::_, ::testing::_, ::testing::_))
+        .WillOnce([](const std::string&, const std::string&, DoneCb done,
+                     const std::vector<std::string>&,
+                     std::chrono::seconds) { done(true); });
+    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+        .WillOnce([](DoneCb done) { done(true); });
+    EXPECT_CALL(*itmRunner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
+                                      ::testing::_))
+        .WillOnce([&](const IstTestConfig& cfg, const IstPlatformConfig&,
+                      ItmDoneCb done, ProgressCb) {
+            captured_cfg = cfg;
+            done(0);
+        });
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootDeassert hook"),
+                         ::testing::_, ::testing::_, ::testing::_))
+        .WillOnce([](const std::string&, const std::string&, DoneCb done,
+                     const std::vector<std::string>&,
+                     std::chrono::seconds) { done(true); });
+
+    start_ist();
+    io_.run();
+    io_.restart();
+
+    ASSERT_TRUE(captured_cfg.customSocketList.has_value());
+    EXPECT_EQ(*captured_cfg.customSocketList, "0");
+}
+
+TEST_F(IstServiceTest, CpuDiscoveryEmptyFailsIst)
+{
+    init_from_file(configPath_);
+
+    service_->setCpuDiscoverer([](CpuDoneCb done) { done({}); });
+
+    start_ist();
+
+    EXPECT_EQ(service_->state().stage, IstStage::idle);
+    EXPECT_EQ(service_->state().status, IstStatus::failed);
+}
+
+TEST_F(IstServiceTest, UserSocketListSkipsCpuDiscovery)
+{
+    init_from_file(configPath_);
+
+    bool discoverer_called = false;
+    service_->setCpuDiscoverer([&](CpuDoneCb done) {
+        discoverer_called = true;
+        done({"/xyz/openbmc_project/inventory/system/chassis/CPU_0"});
+    });
+
+    IstTestConfig captured_cfg;
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootAssert hook"),
+                         ::testing::_, ::testing::_, ::testing::_))
+        .WillOnce([](const std::string&, const std::string&, DoneCb done,
+                     const std::vector<std::string>&,
+                     std::chrono::seconds) { done(true); });
+    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+        .WillOnce([](DoneCb done) { done(true); });
+    EXPECT_CALL(*itmRunner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
+                                      ::testing::_))
+        .WillOnce([&](const IstTestConfig& cfg, const IstPlatformConfig&,
+                      ItmDoneCb done, ProgressCb) {
+            captured_cfg = cfg;
+            done(0);
+        });
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootDeassert hook"),
+                         ::testing::_, ::testing::_, ::testing::_))
+        .WillOnce([](const std::string&, const std::string&, DoneCb done,
+                     const std::vector<std::string>&,
+                     std::chrono::seconds) { done(true); });
+
+    ParamMap params;
+    params["customSocketList"] = std::string("3");
+    start_ist(params);
+    io_.run();
+    io_.restart();
+
+    EXPECT_FALSE(discoverer_called);
+    ASSERT_TRUE(captured_cfg.customSocketList.has_value());
+    EXPECT_EQ(*captured_cfg.customSocketList, "3");
+}
+
+TEST_F(IstServiceTest, CpuDiscoveryOutOfOrderPathsSorted)
+{
+    init_from_file(configPath_);
+
+    service_->setCpuDiscoverer([](CpuDoneCb done) {
+        done({"/xyz/openbmc_project/inventory/system/chassis/CPU_1",
+              "/xyz/openbmc_project/inventory/system/chassis/CPU_0"});
+    });
+
+    IstTestConfig captured_cfg;
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootAssert hook"),
+                         ::testing::_, ::testing::_, ::testing::_))
+        .WillOnce([](const std::string&, const std::string&, DoneCb done,
+                     const std::vector<std::string>&,
+                     std::chrono::seconds) { done(true); });
+    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+        .WillOnce([](DoneCb done) { done(true); });
+    EXPECT_CALL(*itmRunner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
+                                      ::testing::_))
+        .WillOnce([&](const IstTestConfig& cfg, const IstPlatformConfig&,
+                      ItmDoneCb done, ProgressCb) {
+            captured_cfg = cfg;
+            done(0);
+        });
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootDeassert hook"),
+                         ::testing::_, ::testing::_, ::testing::_))
+        .WillOnce([](const std::string&, const std::string&, DoneCb done,
+                     const std::vector<std::string>&,
+                     std::chrono::seconds) { done(true); });
+
+    start_ist();
+    io_.run();
+    io_.restart();
+
+    ASSERT_TRUE(captured_cfg.customSocketList.has_value());
+    EXPECT_EQ(*captured_cfg.customSocketList, "0,1");
+}
+
+TEST_F(IstServiceTest, CpuDiscoveryNonContiguousSocketsFails)
+{
+    init_from_file(configPath_);
+
+    service_->setCpuDiscoverer([](CpuDoneCb done) {
+        done({"/xyz/openbmc_project/inventory/system/chassis/CPU_1"});
+    });
+
+    start_ist();
+
+    EXPECT_EQ(service_->state().stage, IstStage::idle);
+    EXPECT_EQ(service_->state().status, IstStatus::failed);
+}
+
+TEST_F(IstServiceTest, CpuDiscoveryBadPathFails)
+{
+    init_from_file(configPath_);
+
+    service_->setCpuDiscoverer([](CpuDoneCb done) {
+        done({"/xyz/openbmc_project/inventory/system/chassis/CPU0"});
+    });
+
+    start_ist();
+
+    EXPECT_EQ(service_->state().stage, IstStage::idle);
+    EXPECT_EQ(service_->state().status, IstStatus::failed);
+}
+
+TEST_F(IstServiceTest, NoCpuDiscovererSkipsDiscovery)
+{
+    init_from_file(configPath_);
+
+    std::move_only_function<void(bool) const> assert_done;
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootAssert hook"),
+                         ::testing::_, ::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::string&, DoneCb done,
+                      const std::vector<std::string>&,
+                      std::chrono::seconds) { assert_done = std::move(done); });
+
+    start_ist();
+
+    EXPECT_EQ(service_->state().stage, IstStage::pendingIstBoot);
+    ASSERT_TRUE(assert_done);
+}

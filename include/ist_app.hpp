@@ -32,6 +32,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <variant>
+#include <vector>
 
 // ----------------
 // File-descriptor wrapper
@@ -381,6 +382,17 @@ class IstService : public std::enable_shared_from_this<IstService>
     using SignatureVerifier = std::function<bool(const IstPlatformConfig&)>;
     void setSignatureVerifier(SignatureVerifier fn);
 
+    /**
+     * Async callback that discovers the CPU sockets present on the system.
+     * The result is a vector of D-Bus object paths (one per CPU).
+     * Paths are expected to end in CPU_0 through CPU_N-1 with no gaps.
+     * The default implementation queries Entity Manager via Object Mapper.
+     * Exposed so unit tests can inject a canned response.
+     */
+    using CpuDiscoverer = std::function<void(
+        std::move_only_function<void(const std::vector<std::string>&) const>)>;
+    void setCpuDiscoverer(CpuDiscoverer fn);
+
     void setResultsFdCallback(ResultsFdCb cb);
     std::string startIST(const ParamMap& testParams);
     sdbusplus::message::unix_fd startUpdate();
@@ -400,6 +412,8 @@ class IstService : public std::enable_shared_from_this<IstService>
     void transitionTo(IstStage stage, IstStatus status);
 
     void onSignatureVerifyDone(bool ok);
+    void onCpuDiscoveryDone(const std::vector<std::string>& cpuPaths);
+    void launchBootAssert();
     void onIstBootAssertDone(bool ok);
     void onPowerCycleDone(bool ok);
     void startItmRun();
@@ -441,6 +455,7 @@ class IstService : public std::enable_shared_from_this<IstService>
     std::shared_ptr<HostPowerMonitor> powerMonitor_;
     std::unique_ptr<ItmRunner> itmRunner_;
     SignatureVerifier signatureVerifier_;
+    CpuDiscoverer cpuDiscoverer_;
     std::shared_ptr<TransferSession> activeTransfer_;
     std::shared_ptr<PldmStripper> activeStripper_;
     boost::asio::steady_timer reSignalTimer_;

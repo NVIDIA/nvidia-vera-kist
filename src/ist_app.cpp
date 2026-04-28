@@ -22,6 +22,7 @@
 #include <signature_verify.hpp>
 
 #include <algorithm>
+#include <charconv>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -106,6 +107,11 @@ IstService::IstService(boost::asio::io_context& io,
 void IstService::setSignatureVerifier(SignatureVerifier fn)
 {
     signatureVerifier_ = std::move(fn);
+}
+
+void IstService::setCpuDiscoverer(CpuDiscoverer fn)
+{
+    cpuDiscoverer_ = std::move(fn);
 }
 
 void IstService::setResultsFdCallback(ResultsFdCb cb)
@@ -841,6 +847,93 @@ void IstService::onSignatureVerifyDone(bool ok)
         return;
     }
 
+    if (test_.customSocketList.has_value())
+    {
+        std::cout << "Using user-provided socket list: "
+                  << *test_.customSocketList << '\n';
+        launchBootAssert();
+        return;
+    }
+
+    if (!cpuDiscoverer_)
+    {
+        std::cout << "No CPU discoverer configured, skipping discovery\n";
+        launchBootAssert();
+        return;
+    }
+
+    std::cout << "Starting CPU discovery via Entity Manager\n";
+    cpuDiscoverer_(
+        [self = shared_from_this()](const std::vector<std::string>& cpu_paths) {
+            self->onCpuDiscoveryDone(cpu_paths);
+        });
+}
+
+void IstService::onCpuDiscoveryDone(const std::vector<std::string>& cpu_paths)
+{
+    if (cpu_paths.empty())
+    {
+        std::cerr << "No CPUs discovered via Entity Manager\n";
+        transitionTo(IstStage::idle, IstStatus::failed);
+        return;
+    }
+
+    std::vector<size_t> socket_ids;
+    for (const auto& path : cpu_paths)
+    {
+        std::string cpu_name = fs::path(path).filename();
+        auto pos = cpu_name.rfind('_');
+        if (pos == std::string::npos || pos + 1 >= cpu_name.size())
+        {
+            std::cerr << "Cannot extract socket number from: " << path << '\n';
+            transitionTo(IstStage::idle, IstStatus::failed);
+            return;
+        }
+        std::string_view digits(cpu_name.data() + pos + 1,
+                                cpu_name.size() - pos - 1);
+        size_t id = 0;
+        auto [ptr, ec] =
+            std::from_chars(digits.data(), digits.data() + digits.size(), id);
+        if (ec != std::errc{} || ptr != digits.data() + digits.size())
+        {
+            std::cerr << "Cannot parse socket number from: " << path << '\n';
+            transitionTo(IstStage::idle, IstStatus::failed);
+            return;
+        }
+        socket_ids.push_back(id);
+    }
+
+    std::sort(socket_ids.begin(), socket_ids.end());
+
+    for (size_t i = 0; i < socket_ids.size(); ++i)
+    {
+        if (socket_ids[i] != i)
+        {
+            std::cerr << "Non-contiguous CPU sockets detected (expected socket "
+                      << i << ", found " << socket_ids[i] << ")\n";
+            transitionTo(IstStage::idle, IstStatus::failed);
+            return;
+        }
+    }
+
+    std::string socket_list;
+    for (size_t i = 0; i < socket_ids.size(); ++i)
+    {
+        if (i > 0)
+        {
+            socket_list += ',';
+        }
+        socket_list += std::to_string(socket_ids[i]);
+    }
+    test_.customSocketList = std::move(socket_list);
+    std::cout << "Discovered " << cpu_paths.size()
+              << " CPU(s), socket list: " << *test_.customSocketList << '\n';
+
+    launchBootAssert();
+}
+
+void IstService::launchBootAssert()
+{
     transitionTo(IstStage::pendingIstBoot);
 
     const fs::path& hook_cmd = platformCfg_.hooks.istBootAssert;

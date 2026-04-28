@@ -22,6 +22,8 @@
 
 #include <cerrno>
 #include <iostream>
+#include <string>
+#include <vector>
 
 static constexpr const char* config_path = "/etc/ist/platform_cfg.json";
 static constexpr const char* sw_path_prefix =
@@ -118,6 +120,32 @@ int main(int, char**)
                                                        "Service unavailable");
             }
             return return_and_post_close(svc->getResultsFd(), io);
+        });
+
+    service->setCpuDiscoverer(
+        [conn](
+            std::move_only_function<void(const std::vector<std::string>&) const>
+                done) {
+            conn->async_method_call(
+                [done =
+                     std::move(done)](const boost::system::error_code& ec,
+                                      const std::vector<std::string>& paths) {
+                    if (ec)
+                    {
+                        std::cerr
+                            << "ObjectMapper CPU query failed: " << ec.message()
+                            << '\n';
+                        done({});
+                        return;
+                    }
+                    done(paths);
+                },
+                "xyz.openbmc_project.ObjectMapper",
+                "/xyz/openbmc_project/object_mapper",
+                "xyz.openbmc_project.ObjectMapper", "GetSubTreePaths",
+                "/xyz/openbmc_project/inventory", 0,
+                std::array<const char*, 1>{
+                    "xyz.openbmc_project.Inventory.Item.Cpu"});
         });
 
     // D-Bus control interface
