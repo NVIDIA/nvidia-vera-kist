@@ -3325,3 +3325,74 @@ TEST_F(IstServiceTest, NoCpuDiscovererSkipsDiscovery)
     EXPECT_EQ(service_->state().stage, IstStage::pendingIstBoot);
     ASSERT_TRUE(assert_done);
 }
+
+// ----------------
+// Service log tee tests
+// ----------------
+
+TEST_F(IstServiceTest, ServiceLogCreatedOnStartIst)
+{
+    init_from_file(configPath_);
+
+    fs::path log_path = tmpDir_ / "results" / "IST_service.log";
+    EXPECT_FALSE(fs::exists(log_path));
+
+    start_ist();
+
+    EXPECT_TRUE(fs::exists(log_path));
+}
+
+TEST_F(IstServiceTest, ServiceLogCapturesCerrOutput)
+{
+    init_from_file(configPath_);
+
+    DoneCb assert_done;
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootAssert hook"),
+                         ::testing::_, ::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::string&, DoneCb done,
+                      const std::vector<std::string>&,
+                      std::chrono::seconds) { assert_done = std::move(done); });
+
+    start_ist();
+
+    // Force a cerr write while tee is active
+    std::cerr << "test_service_log_message\n";
+
+    // Simulate failure to drive to idle (removes tee)
+    assert_done(false);
+
+    fs::path log_path = tmpDir_ / "results" / "IST_service.log";
+    ASSERT_TRUE(fs::exists(log_path));
+
+    std::ifstream f(log_path);
+    std::string content((std::istreambuf_iterator<char>(f)), {});
+    EXPECT_NE(content.find("test_service_log_message"), std::string::npos);
+}
+
+TEST_F(IstServiceTest, ServiceLogTeeRemovedOnIdle)
+{
+    init_from_file(configPath_);
+
+    DoneCb assert_done;
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootAssert hook"),
+                         ::testing::_, ::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::string&, DoneCb done,
+                      const std::vector<std::string>&,
+                      std::chrono::seconds) { assert_done = std::move(done); });
+
+    start_ist();
+
+    // Drive to idle
+    assert_done(false);
+    EXPECT_EQ(service_->state().stage, IstStage::idle);
+
+    // Write after tee removed — should NOT appear in log
+    std::cerr << "after_tee_removed\n";
+
+    fs::path log_path = tmpDir_ / "results" / "IST_service.log";
+    std::ifstream f(log_path);
+    std::string content((std::istreambuf_iterator<char>(f)), {});
+    EXPECT_EQ(content.find("after_tee_removed"), std::string::npos);
+}

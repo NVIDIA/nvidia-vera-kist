@@ -25,9 +25,11 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <iostream>
 #include <map>
 #include <memory>
 #include <optional>
+#include <streambuf>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -82,6 +84,60 @@ class UniqueFd
 
   private:
     int fd_ = -1;
+};
+
+// ----------------
+// Tee streambuf — duplicates writes to a log file while forwarding to the
+// original streambuf (typically the journal fd under systemd).
+// ----------------
+
+class TeeStreambuf : public std::streambuf
+{
+  public:
+    TeeStreambuf(std::streambuf* primary, int logFd) :
+        primary_(primary), logFd_(logFd)
+    {}
+
+  protected:
+    // Single-char path; bulk writes go through xsputn.
+    int overflow(int c) override
+    {
+        if (c == EOF)
+        {
+            return EOF;
+        }
+        char ch = static_cast<char>(c);
+        if (primary_->sputc(ch) == EOF)
+        {
+            return EOF;
+        }
+        // Log file write is best-effort — don't fail the stream if it errors.
+        std::ignore = ::write(logFd_, &ch, 1);
+        return c;
+    }
+
+    std::streamsize xsputn(const char* s, std::streamsize n) override
+    {
+        std::streamsize primaryWritten = primary_->sputn(s, n);
+        // Best-effort write to log file regardless of primary result.
+        const char* p = s;
+        std::streamsize remaining = n;
+        while (remaining > 0)
+        {
+            ssize_t w = ::write(logFd_, p, static_cast<size_t>(remaining));
+            if (w <= 0)
+            {
+                break;
+            }
+            p += w;
+            remaining -= w;
+        }
+        return primaryWritten;
+    }
+
+  private:
+    std::streambuf* primary_;
+    int logFd_;
 };
 
 // ----------------
@@ -353,6 +409,8 @@ struct PldmComponentInfo
 class IstService : public std::enable_shared_from_this<IstService>
 {
   public:
+    ~IstService();
+
     static std::shared_ptr<IstService>
         create(boost::asio::io_context& io,
                std::unique_ptr<StatePublisher> publisher,
@@ -459,4 +517,13 @@ class IstService : public std::enable_shared_from_this<IstService>
     std::shared_ptr<TransferSession> activeTransfer_;
     std::shared_ptr<PldmStripper> activeStripper_;
     boost::asio::steady_timer reSignalTimer_;
+
+    UniqueFd serviceLogFd_;
+    std::unique_ptr<TeeStreambuf> coutTee_;
+    std::unique_ptr<TeeStreambuf> cerrTee_;
+    std::streambuf* origCoutBuf_{nullptr};
+    std::streambuf* origCerrBuf_{nullptr};
+
+    void installServiceLogTee();
+    void removeServiceLogTee();
 };

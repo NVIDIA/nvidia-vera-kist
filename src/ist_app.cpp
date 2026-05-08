@@ -14,6 +14,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include <fcntl.h>
+
 #include <async_utils.hpp>
 #include <boost/asio/post.hpp>
 #include <ist_app.hpp>
@@ -104,6 +106,11 @@ IstService::IstService(boost::asio::io_context& io,
     signatureVerifier_(verifyItmSignatures), reSignalTimer_(io)
 {}
 
+IstService::~IstService()
+{
+    removeServiceLogTee();
+}
+
 void IstService::setSignatureVerifier(SignatureVerifier fn)
 {
     signatureVerifier_ = std::move(fn);
@@ -140,7 +147,50 @@ void IstService::transitionTo(IstStage stage, IstStatus status)
     reSignalTimer_.cancel();
     state_.stage = stage;
     state_.status = status;
+    if (stage == IstStage::idle)
+    {
+        removeServiceLogTee();
+    }
     updateDbusState();
+}
+
+void IstService::installServiceLogTee()
+{
+    fs::path log_path =
+        platformCfg_.storage.resultStoragePath / "IST_service.log";
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
+    serviceLogFd_ = UniqueFd(::open(
+        log_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644));
+    if (serviceLogFd_.get() < 0)
+    {
+        std::cerr << "Failed to open service log '" << log_path
+                  << "': errno=" << errno << '\n';
+        return;
+    }
+
+    coutTee_ =
+        std::make_unique<TeeStreambuf>(std::cout.rdbuf(), serviceLogFd_.get());
+    cerrTee_ =
+        std::make_unique<TeeStreambuf>(std::cerr.rdbuf(), serviceLogFd_.get());
+    origCoutBuf_ = std::cout.rdbuf(coutTee_.get());
+    origCerrBuf_ = std::cerr.rdbuf(cerrTee_.get());
+}
+
+void IstService::removeServiceLogTee()
+{
+    if (origCoutBuf_)
+    {
+        std::cout.rdbuf(origCoutBuf_);
+        origCoutBuf_ = nullptr;
+    }
+    if (origCerrBuf_)
+    {
+        std::cerr.rdbuf(origCerrBuf_);
+        origCerrBuf_ = nullptr;
+    }
+    coutTee_.reset();
+    cerrTee_.reset();
+    serviceLogFd_ = UniqueFd();
 }
 
 // ----------------
@@ -623,6 +673,7 @@ void IstService::startItmRun()
 
 void IstService::runIstCleanup(int itm_exit)
 {
+    std::cout << "kist_itm exited with code " << itm_exit << '\n';
     emitIstEventLog(itm_exit);
     transitionTo(IstStage::cleanup);
 
@@ -815,6 +866,8 @@ std::string IstService::startIST(const ParamMap& test_params)
                       << rm_ec.message() << '\n';
         }
     }
+
+    installServiceLogTee();
 
     IstPlatformConfig cfg_snapshot = platformCfg_;
     SignatureVerifier verifier = signatureVerifier_;
