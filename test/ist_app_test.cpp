@@ -2804,7 +2804,7 @@ TEST_F(IstServiceTest, PlatformErrorIncludesMarkerFiles)
     fs::remove_all("/tmp/ist/err_marker");
 }
 
-TEST_F(IstServiceTest, PreExistingMarkersAbortBeforePowerCycle)
+TEST_F(IstServiceTest, PreExistingActiveMarkersContinueToIst)
 {
     init_from_file(configPath_);
 
@@ -2816,24 +2816,9 @@ TEST_F(IstServiceTest, PreExistingMarkersAbortBeforePowerCycle)
                       const std::vector<std::string>&,
                       std::chrono::seconds) { assert_done = std::move(done); });
 
-    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_)).Times(0);
-
-    DoneCb deassert_done;
-    EXPECT_CALL(*hookRunner_,
-                asyncRun(::testing::_, StrEq("istBootDeassert hook"),
-                         ::testing::_, ::testing::_, ::testing::_))
-        .WillOnce([&](const std::string&, const std::string&, DoneCb done,
-                      const std::vector<std::string>&, std::chrono::seconds) {
-            deassert_done = std::move(done);
-        });
-
-    EXPECT_CALL(*publisher_,
-                emitEventLog(::testing::_, ::testing::_, ::testing::_))
-        .WillOnce([](const std::string&, const std::string&,
-                     const std::map<std::string, std::string>& data) {
-            EXPECT_THAT(data.at("IST_MESSAGE"),
-                        ::testing::HasSubstr("PWR_BRAKE"));
-        });
+    DoneCb power_done;
+    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+        .WillOnce([&](DoneCb done) { power_done = std::move(done); });
 
     fs::create_directories("/tmp/ist/err_marker");
     std::ofstream("/tmp/ist/err_marker/PWR_BRAKE") << "asserted";
@@ -2841,11 +2826,9 @@ TEST_F(IstServiceTest, PreExistingMarkersAbortBeforePowerCycle)
     ParamMap params;
     start_ist(params);
     assert_done(true);
-    io_.run();
-    io_.restart();
-    deassert_done(true);
 
-    EXPECT_EQ(service_->state().status, IstStatus::failed);
+    EXPECT_EQ(service_->state().stage, IstStage::pendingPowerCycle);
+    EXPECT_TRUE(fs::exists("/tmp/ist/err_marker/PWR_BRAKE"));
 
     fs::remove_all("/tmp/ist/err_marker");
 }

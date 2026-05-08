@@ -519,7 +519,6 @@ void IstService::onIstBootAssertDone(bool ok)
     }
 
     std::error_code ec;
-    bool has_active_markers = false;
     if (fs::is_directory(err_marker_dir, ec))
     {
         for (const auto& entry : fs::directory_iterator(err_marker_dir, ec))
@@ -540,18 +539,8 @@ void IstService::onIstBootAssertDone(bool ok)
                               << entry.path().string() << "': " << ec.message()
                               << "\n";
                 }
-                continue;
             }
-
-            std::cerr << "Pre-existing error marker: "
-                      << entry.path().filename().string() << "\n";
-            has_active_markers = true;
         }
-    }
-    if (has_active_markers)
-    {
-        runIstCleanup(itm_exit_platform_error);
-        return;
     }
 
     transitionTo(IstStage::pendingPowerCycle);
