@@ -356,10 +356,6 @@ void ItmProcess::on_process_exit(const boost::system::error_code& ec,
         done_(-1);
         return;
     }
-    if (exit_code != 0)
-    {
-        std::cerr << "kist_itm exited with code " << exit_code << '\n';
-    }
     done_(exit_code);
 }
 

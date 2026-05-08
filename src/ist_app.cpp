@@ -673,7 +673,14 @@ void IstService::startItmRun()
 
 void IstService::runIstCleanup(int itm_exit)
 {
-    std::cout << "kist_itm exited with code " << itm_exit << '\n';
+    if (itm_exit >= 0)
+    {
+        std::cout << "kist_itm exited with code " << itm_exit << '\n';
+    }
+    else
+    {
+        std::cerr << "Failed to execute IST (code=" << itm_exit << ")\n";
+    }
     emitIstEventLog(itm_exit);
     transitionTo(IstStage::cleanup);
 
