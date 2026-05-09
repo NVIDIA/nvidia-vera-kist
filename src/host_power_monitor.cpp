@@ -152,9 +152,10 @@ void HostPowerMonitorImpl::on_state_changed(const std::string& state)
     {
         sawOff_ = true;
     }
-    else if (sawOff_ && state != "xyz.openbmc_project.State.Host.HostState.Off")
+    else if (sawOff_ &&
+             state == "xyz.openbmc_project.State.Host.HostState.Running")
     {
-        std::cerr << "Detected power cycle (host state: " << state << ")\n";
+        std::cout << "Detected power cycle (host state: " << state << ")\n";
         finish(true);
     }
 }
