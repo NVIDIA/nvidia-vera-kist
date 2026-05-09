@@ -94,8 +94,8 @@ class UniqueFd
 class TeeStreambuf : public std::streambuf
 {
   public:
-    TeeStreambuf(std::streambuf* primary, int logFd) :
-        primary_(primary), logFd_(logFd)
+    TeeStreambuf(std::streambuf* primary, int log_fd) :
+        primary_(primary), log_fd_(log_fd)
     {}
 
   protected:
@@ -112,19 +112,19 @@ class TeeStreambuf : public std::streambuf
             return EOF;
         }
         // Log file write is best-effort — don't fail the stream if it errors.
-        std::ignore = ::write(logFd_, &ch, 1);
+        std::ignore = ::write(log_fd_, &ch, 1);
         return c;
     }
 
     std::streamsize xsputn(const char* s, std::streamsize n) override
     {
-        std::streamsize primaryWritten = primary_->sputn(s, n);
+        std::streamsize primary_written = primary_->sputn(s, n);
         // Best-effort write to log file regardless of primary result.
         const char* p = s;
         std::streamsize remaining = n;
         while (remaining > 0)
         {
-            ssize_t w = ::write(logFd_, p, static_cast<size_t>(remaining));
+            ssize_t w = ::write(log_fd_, p, static_cast<size_t>(remaining));
             if (w <= 0)
             {
                 break;
@@ -132,12 +132,12 @@ class TeeStreambuf : public std::streambuf
             p += w;
             remaining -= w;
         }
-        return primaryWritten;
+        return primary_written;
     }
 
   private:
     std::streambuf* primary_;
-    int logFd_;
+    int log_fd_;
 };
 
 // ----------------
@@ -154,6 +154,7 @@ using ParamMap = std::unordered_map<std::string, IstParamVariant>;
 inline constexpr char err_marker_dir[] = "/tmp/ist/err_marker";
 inline constexpr int itm_exit_mismatch = 8;
 inline constexpr int itm_exit_platform_error = 14;
+inline constexpr int itm_exit_sw_timeout = -2;
 
 // ----------------
 // Software activation states (D-Bus enum values)
@@ -467,7 +468,8 @@ class IstService : public std::enable_shared_from_this<IstService>
 
     void updateDbusState();
     void transitionTo(IstStage stage);
-    void transitionTo(IstStage stage, IstStatus status);
+    void transitionTo(IstStage stage, IstStatus status,
+                      std::string_view error_info = {});
 
     void onSignatureVerifyDone(bool ok);
     void onCpuDiscoveryDone(const std::vector<std::string>& cpuPaths);
@@ -517,6 +519,8 @@ class IstService : public std::enable_shared_from_this<IstService>
     std::shared_ptr<TransferSession> activeTransfer_;
     std::shared_ptr<PldmStripper> activeStripper_;
     boost::asio::steady_timer reSignalTimer_;
+
+    std::vector<std::string> failureInfo_;
 
     UniqueFd serviceLogFd_;
     std::unique_ptr<TeeStreambuf> coutTee_;

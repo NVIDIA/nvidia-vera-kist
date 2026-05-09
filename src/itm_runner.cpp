@@ -346,7 +346,7 @@ void ItmProcess::on_process_exit(const boost::system::error_code& ec,
     if (timedOut_)
     {
         std::cerr << "kist_itm killed due to SW timeout\n";
-        done_(-1);
+        done_(itm_exit_sw_timeout);
         return;
     }
     if (ec)

@@ -142,13 +142,18 @@ void IstService::transitionTo(IstStage stage)
     updateDbusState();
 }
 
-void IstService::transitionTo(IstStage stage, IstStatus status)
+void IstService::transitionTo(IstStage stage, IstStatus status,
+                              std::string_view error_info)
 {
     reSignalTimer_.cancel();
     state_.stage = stage;
     state_.status = status;
     if (stage == IstStage::idle)
     {
+        if (status != IstStatus::completed && !error_info.empty())
+        {
+            std::cerr << "IST_ERROR: " << error_info << '\n';
+        }
         removeServiceLogTee();
     }
     updateDbusState();
@@ -156,6 +161,11 @@ void IstService::transitionTo(IstStage stage, IstStatus status)
 
 void IstService::installServiceLogTee()
 {
+    if (origCoutBuf_)
+    {
+        return;
+    }
+
     fs::path log_path =
         platformCfg_.storage.resultStoragePath / "IST_service.log";
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
@@ -564,7 +574,8 @@ void IstService::onIstBootAssertDone(bool ok)
     {
         std::cerr << "Failed to assert IST boot\n";
         state_.progress = 0;
-        transitionTo(IstStage::idle, IstStatus::failed);
+        transitionTo(IstStage::idle, IstStatus::failed,
+                     "category=HOOK, reason=ist_boot_assert_failed");
         return;
     }
 
@@ -621,6 +632,7 @@ void IstService::onPowerCycleDone(bool ok)
     if (!ok)
     {
         std::cerr << "Unable to detect power cycle, running cleanup\n";
+        failureInfo_.emplace_back("category=POWER_CYCLE, reason=not_detected");
         runIstCleanup(-1);
         return;
     }
@@ -637,6 +649,8 @@ void IstService::onPowerCycleDone(bool ok)
             std::cerr << "CAK bypass script '" << cak_script.string()
                       << "' resolves outside hookDirectory '"
                       << platformCfg_.hookDir.string() << "'\n";
+            failureInfo_.emplace_back(
+                "category=SECURITY, reason=cak_bypass_path_escape");
             runIstCleanup(-1);
             return;
         }
@@ -645,6 +659,8 @@ void IstService::onPowerCycleDone(bool ok)
                 if (!ok_cak)
                 {
                     std::cerr << "CAK bypass hook failed, aborting IST\n";
+                    self->failureInfo_.emplace_back(
+                        "category=HOOK, reason=cak_bypass_failed");
                     self->runIstCleanup(-1);
                     return;
                 }
@@ -663,6 +679,21 @@ void IstService::startItmRun()
     itmRunner_->asyncRun(
         test_, platformCfg_,
         [self = shared_from_this()](int itm_exit) {
+            if (itm_exit > 0)
+            {
+                self->failureInfo_.emplace_back("category=ITM, exit_code=" +
+                                                std::to_string(itm_exit));
+            }
+            else if (itm_exit == itm_exit_sw_timeout)
+            {
+                self->failureInfo_.emplace_back(
+                    "category=ITM, reason=sw_timeout");
+            }
+            else if (itm_exit < 0)
+            {
+                self->failureInfo_.emplace_back(
+                    "category=ITM, reason=process_error");
+            }
             self->runIstCleanup(itm_exit);
         },
         [self = shared_from_this()](uint8_t progress) {
@@ -682,6 +713,11 @@ void IstService::runIstCleanup(int itm_exit)
         std::cerr << "Failed to execute IST (code=" << itm_exit << ")\n";
     }
     emitIstEventLog(itm_exit);
+    for (const auto& info : failureInfo_)
+    {
+        std::cerr << "IST_ERROR: " << info << '\n';
+    }
+    failureInfo_.clear();
     transitionTo(IstStage::cleanup);
 
     fs::path results_dir = platformCfg_.storage.resultStoragePath;
@@ -705,7 +741,8 @@ void IstService::onArchiveDone(int itm_exit)
     if (hook_cmd.empty())
     {
         std::cerr << "istBootDeassert hook not found, failing cleanup\n";
-        transitionTo(IstStage::idle, IstStatus::failed);
+        transitionTo(IstStage::idle, IstStatus::failed,
+                     "category=HOOK, reason=ist_boot_deassert_not_found");
         return;
     }
 
@@ -778,7 +815,8 @@ void IstService::onDeassertDone(int itm_exit, bool ok_deassert)
     if (!ok_deassert)
     {
         std::cerr << "istBootDeassert hook failed during cleanup\n";
-        transitionTo(IstStage::idle, IstStatus::failed);
+        transitionTo(IstStage::idle, IstStatus::failed,
+                     "category=HOOK, reason=ist_boot_deassert_failed");
         return;
     }
 
@@ -788,7 +826,8 @@ void IstService::onDeassertDone(int itm_exit, bool ok_deassert)
         if (reset_cmd.empty())
         {
             std::cerr << "resetSystem hook not found, failing cleanup\n";
-            transitionTo(IstStage::idle, IstStatus::failed);
+            transitionTo(IstStage::idle, IstStatus::failed,
+                         "category=HOOK, reason=reset_system_not_found");
             return;
         }
         hookRunner_->asyncRun(
@@ -809,7 +848,8 @@ void IstService::onResetDone(int itm_exit, bool ok_reset)
 {
     if (!ok_reset)
     {
-        transitionTo(IstStage::idle, IstStatus::failed);
+        transitionTo(IstStage::idle, IstStatus::failed,
+                     "category=HOOK, reason=reset_system_failed");
     }
     else
     {
@@ -842,7 +882,8 @@ std::string IstService::startIST(const ParamMap& test_params)
 
     if (!collateralVerification(test_params))
     {
-        transitionTo(IstStage::idle, IstStatus::aborted);
+        transitionTo(IstStage::idle, IstStatus::aborted,
+                     "category=COLLATERAL, reason=verification_failed");
         throw sdbusplus::exception::SdBusError(
             EINVAL, "Collateral verification failed");
     }
@@ -850,7 +891,8 @@ std::string IstService::startIST(const ParamMap& test_params)
     const fs::path& hook_cmd = platformCfg_.hooks.istBootAssert;
     if (hook_cmd.empty())
     {
-        transitionTo(IstStage::idle, IstStatus::failed);
+        transitionTo(IstStage::idle, IstStatus::failed,
+                     "category=HOOK, reason=ist_boot_assert_not_found");
         throw sdbusplus::exception::SdBusError(ENOENT,
                                                "istBootAssert hook not found");
     }
@@ -892,7 +934,8 @@ void IstService::onSignatureVerifyDone(bool ok)
     if (!ok)
     {
         std::cerr << "IST binary/library signature verification failed\n";
-        transitionTo(IstStage::idle, IstStatus::failed);
+        transitionTo(IstStage::idle, IstStatus::failed,
+                     "category=SECURITY, reason=signature_verification_failed");
         return;
     }
 
@@ -923,7 +966,8 @@ void IstService::onCpuDiscoveryDone(const std::vector<std::string>& cpu_paths)
     if (cpu_paths.empty())
     {
         std::cerr << "No CPUs discovered via Entity Manager\n";
-        transitionTo(IstStage::idle, IstStatus::failed);
+        transitionTo(IstStage::idle, IstStatus::failed,
+                     "category=DISCOVERY, reason=no_cpus_found");
         return;
     }
 
@@ -935,7 +979,8 @@ void IstService::onCpuDiscoveryDone(const std::vector<std::string>& cpu_paths)
         if (pos == std::string::npos || pos + 1 >= cpu_name.size())
         {
             std::cerr << "Cannot extract socket number from: " << path << '\n';
-            transitionTo(IstStage::idle, IstStatus::failed);
+            transitionTo(IstStage::idle, IstStatus::failed,
+                         "category=DISCOVERY, reason=package_parse_failed");
             return;
         }
         std::string_view digits(cpu_name.data() + pos + 1,
@@ -946,7 +991,8 @@ void IstService::onCpuDiscoveryDone(const std::vector<std::string>& cpu_paths)
         if (ec != std::errc{} || ptr != digits.data() + digits.size())
         {
             std::cerr << "Cannot parse socket number from: " << path << '\n';
-            transitionTo(IstStage::idle, IstStatus::failed);
+            transitionTo(IstStage::idle, IstStatus::failed,
+                         "category=DISCOVERY, reason=package_parse_failed");
             return;
         }
         socket_ids.push_back(id);
@@ -960,7 +1006,8 @@ void IstService::onCpuDiscoveryDone(const std::vector<std::string>& cpu_paths)
         {
             std::cerr << "Non-contiguous CPU sockets detected (expected socket "
                       << i << ", found " << socket_ids[i] << ")\n";
-            transitionTo(IstStage::idle, IstStatus::failed);
+            transitionTo(IstStage::idle, IstStatus::failed,
+                         "category=DISCOVERY, reason=non_contiguous_packages");
             return;
         }
     }
