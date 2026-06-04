@@ -355,6 +355,8 @@ bool IstService::initialize(IstPlatformConfig cfg)
     }
 
     platformCfg_ = std::move(cfg);
+    swObjectPath_ = std::format("/xyz/openbmc_project/inventory_software/{}",
+                                platformCfg_.softwareInventoryId);
     printIstPlatformConfig();
 
     // Deassert IST boot on startup as a safety measure (e.g. after crash)

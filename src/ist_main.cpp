@@ -14,6 +14,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include <fcntl.h>
 #include <unistd.h>
 
 #include <ist_app.hpp>
@@ -22,6 +23,7 @@
 
 #include <cerrno>
 #include <iostream>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -168,9 +170,27 @@ int main(int, char**)
     // Software update interface
     std::shared_ptr<sdbusplus::asio::dbus_interface> update_iface =
         server.add_interface(sw_path, "xyz.openbmc_project.Software.Update");
-    update_iface->register_method("StartUpdate", [service, &io]() {
-        return return_and_post_close(service->startUpdate(), io);
-    });
+    update_iface->register_property(
+        "AllowedApplyTimes",
+        std::set<std::string>{std::string(k_apply_time_immediate),
+                              std::string(k_apply_time_on_reset)});
+    update_iface->register_method(
+        "StartUpdate", [service](sdbusplus::message::unix_fd image,
+                                 const std::string& apply_time) {
+            // The received fd is owned by the inbound D-Bus message and will be
+            // closed once this handler returns.  The async upload outlives the
+            // handler, so take our own close-on-exec copy to keep the read end
+            // of the pipe alive independently of the message lifetime.
+            UniqueFd owned(
+                ::fcntl(static_cast<int>(image), F_DUPFD_CLOEXEC, 0));
+            if (owned.get() < 0)
+            {
+                throw sdbusplus::exception::SdBusError(
+                    errno, "xyz.openbmc_project.Common.Error.Unavailable");
+            }
+            return sdbusplus::message::object_path(
+                service->startUpdate(owned.release(), apply_time));
+        });
     update_iface->initialize();
 
     conn->request_name("com.nvidia.vera.ist");

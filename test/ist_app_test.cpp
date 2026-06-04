@@ -14,6 +14,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include <sys/socket.h>
 #include <unistd.h>
 
 #include <ist_app.hpp>
@@ -37,6 +38,16 @@ using ::testing::StrEq;
 using DoneCb = std::move_only_function<void(bool) const>;
 using ItmDoneCb = std::move_only_function<void(int) const>;
 using ProgressCb = std::move_only_function<void(uint8_t) const>;
+
+static std::pair<int, int> make_upload_socket_pair()
+{
+    int fds[2];
+    if (::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, fds) != 0)
+    {
+        throw std::system_error(errno, std::generic_category(), "socketpair");
+    }
+    return {fds[0], fds[1]};
+}
 
 // ----------------
 // Mock implementations for dependency injection
@@ -363,6 +374,18 @@ class IstServiceTest : public ::testing::Test
         return path;
     }
 
+    int begin_start_update(std::string* object_path = nullptr)
+    {
+        auto [readFd, writeFd] = make_upload_socket_pair();
+        std::string path =
+            service_->startUpdate(readFd, k_apply_time_immediate);
+        if (object_path != nullptr)
+        {
+            *object_path = std::move(path);
+        }
+        return writeFd;
+    }
+
     static inline int counter = 0;
 };
 
@@ -609,7 +632,8 @@ TEST_F(IstServiceTest, SoftwareInventoryIdAcceptsUnderscoresAndDigits)
 
 TEST_F(IstServiceTest, StartUpdateBeforeInitializeThrows)
 {
-    EXPECT_THROW(service_->startUpdate(), sdbusplus::exception::SdBusError);
+    EXPECT_THROW(service_->startUpdate(-1, k_apply_time_immediate),
+                 sdbusplus::exception::generated_exception);
 }
 
 TEST_F(IstServiceTest, InitializeRejectsHookOutsideHookDir)
@@ -646,7 +670,7 @@ TEST_F(IstServiceTest, StartIstRejectsWhenInProgress)
 TEST_F(IstServiceTest, StartIstRejectsWhileUpdateInProgress)
 {
     init_from_file(configPath_);
-    int fd = static_cast<int>(service_->startUpdate());
+    int fd = begin_start_update();
 
     ParamMap params;
     EXPECT_THROW(service_->startIST(params), sdbusplus::exception::SdBusError);
@@ -2238,11 +2262,13 @@ std::vector<uint8_t> build_pldm_package(const std::vector<uint8_t>& payload)
 // StartUpdate / image transfer tests
 // ----------------
 
-TEST_F(IstServiceTest, StartUpdateReturnsValidFd)
+TEST_F(IstServiceTest, StartUpdateReturnsSoftwareObjectPath)
 {
     init_from_file(configPath_);
-    int fd = static_cast<int>(service_->startUpdate());
-    EXPECT_GE(fd, 0);
+    std::string object_path;
+    int fd = begin_start_update(&object_path);
+    EXPECT_EQ(object_path,
+              "/xyz/openbmc_project/inventory_software/IST_Vectors");
     ::close(fd);
     io_.run();
 }
@@ -2250,7 +2276,7 @@ TEST_F(IstServiceTest, StartUpdateReturnsValidFd)
 TEST_F(IstServiceTest, StartUpdateTransfersData)
 {
     init_from_file(configPath_);
-    int fd = static_cast<int>(service_->startUpdate());
+    int fd = begin_start_update();
 
     const std::string raw_payload = "hello image data";
     std::vector<uint8_t> payload(raw_payload.begin(), raw_payload.end());
@@ -2273,9 +2299,12 @@ TEST_F(IstServiceTest, StartUpdateTransfersData)
 TEST_F(IstServiceTest, StartUpdateRejectsConcurrentTransfer)
 {
     init_from_file(configPath_);
-    int fd = static_cast<int>(service_->startUpdate());
+    int fd = begin_start_update();
 
-    EXPECT_THROW(service_->startUpdate(), sdbusplus::exception::SdBusError);
+    auto [readFd2, writeFd2] = make_upload_socket_pair();
+    EXPECT_THROW(service_->startUpdate(readFd2, k_apply_time_immediate),
+                 sdbusplus::exception::generated_exception);
+    ::close(writeFd2);
 
     ::close(fd);
     io_.run();
@@ -2296,13 +2325,16 @@ TEST_F(IstServiceTest, StartUpdateRejectsWhileIstRunning)
     ParamMap params;
     start_ist(params);
 
-    EXPECT_THROW(service_->startUpdate(), sdbusplus::exception::SdBusError);
+    auto [readFd, writeFd] = make_upload_socket_pair();
+    EXPECT_THROW(service_->startUpdate(readFd, k_apply_time_immediate),
+                 sdbusplus::exception::generated_exception);
+    ::close(writeFd);
 }
 
 TEST_F(IstServiceTest, StartUpdateEmptyTransferCleansUp)
 {
     init_from_file(configPath_);
-    int fd = static_cast<int>(service_->startUpdate());
+    int fd = begin_start_update();
     ::close(fd);
 
     io_.run();
@@ -2318,7 +2350,7 @@ TEST_F(IstServiceTest, StartUpdateTimesOut)
     cfg.transferInactivityTimeout = std::chrono::seconds(1);
     ASSERT_TRUE(service_->initialize(std::move(cfg)));
 
-    int fd = static_cast<int>(service_->startUpdate());
+    int fd = begin_start_update();
 
     io_.run();
 
@@ -2336,7 +2368,7 @@ TEST_F(IstServiceTest, StartUpdateAllowsNewTransferAfterCompletion)
     std::vector<uint8_t> payload1(raw1.begin(), raw1.end());
     auto pkg1 = build_pldm_package(payload1);
 
-    int fd1 = static_cast<int>(service_->startUpdate());
+    int fd1 = begin_start_update();
     ASSERT_EQ(::write(fd1, pkg1.data(), pkg1.size()),
               static_cast<ssize_t>(pkg1.size()));
     ::close(fd1);
@@ -2351,7 +2383,7 @@ TEST_F(IstServiceTest, StartUpdateAllowsNewTransferAfterCompletion)
     std::vector<uint8_t> payload2(raw2.begin(), raw2.end());
     auto pkg2 = build_pldm_package(payload2);
 
-    int fd2 = static_cast<int>(service_->startUpdate());
+    int fd2 = begin_start_update();
     ASSERT_EQ(::write(fd2, pkg2.data(), pkg2.size()),
               static_cast<ssize_t>(pkg2.size()));
     ::close(fd2);
@@ -2361,6 +2393,27 @@ TEST_F(IstServiceTest, StartUpdateAllowsNewTransferAfterCompletion)
     std::string content((std::istreambuf_iterator<char>(img)),
                         std::istreambuf_iterator<char>());
     EXPECT_EQ(content, raw2);
+}
+
+TEST_F(IstServiceTest, StartUpdateAcceptsOnResetApplyTime)
+{
+    init_from_file(configPath_);
+
+    auto [readFd, writeFd] = make_upload_socket_pair();
+    std::string object_path =
+        service_->startUpdate(readFd, k_apply_time_on_reset);
+    EXPECT_FALSE(object_path.empty());
+    ::close(writeFd);
+}
+
+TEST_F(IstServiceTest, StartUpdateRejectsUnsupportedApplyTime)
+{
+    init_from_file(configPath_);
+
+    auto [readFd, writeFd] = make_upload_socket_pair();
+    EXPECT_THROW(service_->startUpdate(readFd, "not-a-valid-apply-time"),
+                 sdbusplus::exception::generated_exception);
+    ::close(writeFd);
 }
 
 TEST_F(IstServiceTest, StartUpdateRejectsEmptyStoragePath)
@@ -2386,7 +2439,10 @@ TEST_F(IstServiceTest, StartUpdateRejectsEmptyStoragePath)
     })");
     init_from_file(configPath_);
 
-    EXPECT_THROW(service_->startUpdate(), sdbusplus::exception::SdBusError);
+    auto [readFd, writeFd] = make_upload_socket_pair();
+    EXPECT_THROW(service_->startUpdate(readFd, k_apply_time_immediate),
+                 sdbusplus::exception::generated_exception);
+    ::close(writeFd);
 }
 
 // ----------------
@@ -2401,7 +2457,7 @@ TEST_F(IstServiceTest, StartUpdatePldmStripSucceeds)
     std::vector<uint8_t> payload(raw_payload.begin(), raw_payload.end());
     auto pldm_pkg = build_pldm_package(payload);
 
-    int fd = static_cast<int>(service_->startUpdate());
+    int fd = begin_start_update();
     ASSERT_EQ(::write(fd, pldm_pkg.data(), pldm_pkg.size()),
               static_cast<ssize_t>(pldm_pkg.size()));
     ::close(fd);
@@ -2428,7 +2484,7 @@ TEST_F(IstServiceTest, StartUpdatePldmBadHeaderCrc)
     // Corrupt a byte in the header (not the CRC field itself, but the data).
     pldm_pkg[10] ^= 0xFF;
 
-    int fd = static_cast<int>(service_->startUpdate());
+    int fd = begin_start_update();
     ASSERT_EQ(::write(fd, pldm_pkg.data(), pldm_pkg.size()),
               static_cast<ssize_t>(pldm_pkg.size()));
     ::close(fd);
@@ -2449,7 +2505,7 @@ TEST_F(IstServiceTest, StartUpdatePldmBadPayloadCrc)
     // Corrupt a payload byte (after the header) to invalidate payload CRC.
     pldm_pkg[pldm_pkg.size() - 1] ^= 0xFF;
 
-    int fd = static_cast<int>(service_->startUpdate());
+    int fd = begin_start_update();
     ASSERT_EQ(::write(fd, pldm_pkg.data(), pldm_pkg.size()),
               static_cast<ssize_t>(pldm_pkg.size()));
     ::close(fd);
@@ -2465,7 +2521,7 @@ TEST_F(IstServiceTest, StartUpdatePldmFileTooSmall)
 
     // Send fewer than 36 bytes — too small for a PLDM header.
     const std::string tiny = "too small";
-    int fd = static_cast<int>(service_->startUpdate());
+    int fd = begin_start_update();
     ASSERT_EQ(::write(fd, tiny.data(), tiny.size()),
               static_cast<ssize_t>(tiny.size()));
     ::close(fd);
@@ -2485,7 +2541,7 @@ TEST_F(IstServiceTest, StartUpdatePldmBadUuidLogsError)
     pldm_pkg[40] ^= 0xFF;
 
     testing::internal::CaptureStderr();
-    int fd = static_cast<int>(service_->startUpdate());
+    int fd = begin_start_update();
     ASSERT_EQ(::write(fd, pldm_pkg.data(), pldm_pkg.size()),
               static_cast<ssize_t>(pldm_pkg.size()));
     ::close(fd);
@@ -2512,7 +2568,7 @@ TEST_F(IstServiceTest, StartUpdateBadUuidDoesNotTruncateExistingImage)
     auto pldm_pkg = build_pldm_package(payload);
     pldm_pkg[40] ^= 0xFF;
 
-    int fd = static_cast<int>(service_->startUpdate());
+    int fd = begin_start_update();
     ASSERT_EQ(::write(fd, pldm_pkg.data(), pldm_pkg.size()),
               static_cast<ssize_t>(pldm_pkg.size()));
     ::close(fd);
@@ -2535,7 +2591,7 @@ TEST_F(IstServiceTest, StartUpdatePldmBadHeaderCrcLogsError)
     pldm_pkg[20] ^= 0xFF;
 
     testing::internal::CaptureStderr();
-    int fd = static_cast<int>(service_->startUpdate());
+    int fd = begin_start_update();
     ASSERT_EQ(::write(fd, pldm_pkg.data(), pldm_pkg.size()),
               static_cast<ssize_t>(pldm_pkg.size()));
     ::close(fd);
@@ -2555,7 +2611,7 @@ TEST_F(IstServiceTest, StartUpdatePldmBadPayloadCrcLogsError)
     pldm_pkg[pldm_pkg.size() - 1] ^= 0xFF;
 
     testing::internal::CaptureStderr();
-    int fd = static_cast<int>(service_->startUpdate());
+    int fd = begin_start_update();
     ASSERT_EQ(::write(fd, pldm_pkg.data(), pldm_pkg.size()),
               static_cast<ssize_t>(pldm_pkg.size()));
     ::close(fd);
@@ -2583,7 +2639,7 @@ TEST_F(IstServiceTest, StartUpdatePldmRejectsOldRevision)
     const std::string raw = "payload";
     hdr.insert(hdr.end(), raw.begin(), raw.end());
 
-    int fd = static_cast<int>(service_->startUpdate());
+    int fd = begin_start_update();
     ASSERT_EQ(::write(fd, hdr.data(), hdr.size()),
               static_cast<ssize_t>(hdr.size()));
     ::close(fd);
@@ -2600,7 +2656,7 @@ TEST_F(IstServiceTest, StartUpdatePldmZeroLengthPayload)
     std::vector<uint8_t> payload; // empty
     auto pldm_pkg = build_pldm_package(payload);
 
-    int fd = static_cast<int>(service_->startUpdate());
+    int fd = begin_start_update();
     ASSERT_EQ(::write(fd, pldm_pkg.data(), pldm_pkg.size()),
               static_cast<ssize_t>(pldm_pkg.size()));
     ::close(fd);
@@ -2619,7 +2675,7 @@ TEST_F(IstServiceTest, StartUpdatePldmStripMultiChunk)
     std::vector<uint8_t> payload(200000, 0xAB);
     auto pldm_pkg = build_pldm_package(payload);
 
-    int fd = static_cast<int>(service_->startUpdate());
+    int fd = begin_start_update();
     ASSERT_EQ(::write(fd, pldm_pkg.data(), pldm_pkg.size()),
               static_cast<ssize_t>(pldm_pkg.size()));
     ::close(fd);

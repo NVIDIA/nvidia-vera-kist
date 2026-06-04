@@ -45,6 +45,45 @@
 
 namespace fs = std::filesystem;
 
+namespace
+{
+
+struct InvalidArgument final : sdbusplus::exception::generated_exception
+{
+    const char* name() const noexcept override
+    {
+        return "xyz.openbmc_project.Common.Error.InvalidArgument";
+    }
+    const char* description() const noexcept override
+    {
+        return "Invalid argument was given.";
+    }
+    const char* what() const noexcept override
+    {
+        return "xyz.openbmc_project.Common.Error.InvalidArgument: "
+               "Invalid argument was given.";
+    }
+};
+
+struct Unavailable final : sdbusplus::exception::generated_exception
+{
+    const char* name() const noexcept override
+    {
+        return "xyz.openbmc_project.Common.Error.Unavailable";
+    }
+    const char* description() const noexcept override
+    {
+        return "The service is temporarily unavailable.";
+    }
+    const char* what() const noexcept override
+    {
+        return "xyz.openbmc_project.Common.Error.Unavailable: "
+               "The service is temporarily unavailable.";
+    }
+};
+
+} // namespace
+
 static constexpr std::string_view k_image_file_name = "CPU-IST.img";
 static constexpr size_t k_transfer_buf_size = 65536;
 
@@ -816,43 +855,46 @@ class PldmStripper : public std::enable_shared_from_this<PldmStripper>
 // IstService::startUpdate
 // ----------------------------------------------------------------
 
-sdbusplus::message::unix_fd IstService::startUpdate()
+std::string IstService::startUpdate(int image_fd, std::string_view apply_time)
 {
+    // Take ownership immediately so the fd is closed on any early return/throw
+    // below; on success it is moved into the peek session.
+    UniqueFd image(image_fd);
     if (!initialized_)
     {
-        throw sdbusplus::exception::SdBusError(EINVAL, "Not initialized");
+        throw Unavailable{};
     }
     if (state_.stage != IstStage::idle)
     {
-        throw sdbusplus::exception::SdBusError(
-            EBUSY, "Cannot update while IST is running");
+        throw Unavailable{};
     }
     if (updateInProgress_)
     {
-        throw sdbusplus::exception::SdBusError(EBUSY,
-                                               "Update already in progress");
+        throw Unavailable{};
     }
     if (platformCfg_.storage.vectorStoragePath.empty())
     {
-        throw sdbusplus::exception::SdBusError(
-            EINVAL, "vectorStoragePath not configured");
+        throw InvalidArgument{};
     }
+    if (image.get() < 0)
+    {
+        throw InvalidArgument{};
+    }
+    if (!isAllowedApplyTime(apply_time))
+    {
+        throw InvalidArgument{};
+    }
+    (void)apply_time; // Immediate and OnReset are accepted; apply is always
+                      // immediate.
 
     const fs::path& storage_path = platformCfg_.storage.vectorStoragePath;
     fs::path image_path = storage_path / k_image_file_name;
-
-    int fds[2];
-    if (::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, fds) != 0)
-    {
-        throw sdbusplus::exception::SdBusError(errno, "socketpair failed");
-    }
-    UniqueFd write_fd(fds[1]);
 
     updateInProgress_ = true;
 
     std::shared_ptr<PldmUuidPeekSession> peek =
         std::make_shared<PldmUuidPeekSession>(
-            io_, UniqueFd(fds[0]), platformCfg_.transferInactivityTimeout,
+            io_, std::move(image), platformCfg_.transferInactivityTimeout,
             [weak = weak_from_this(), image_path](
                 bool ok, std::vector<uint8_t> prefix, UniqueFd read_fd) {
                 if (auto self = weak.lock())
@@ -864,7 +906,7 @@ sdbusplus::message::unix_fd IstService::startUpdate()
     activeUuidPeek_ = peek;
     peek->start();
 
-    return {write_fd.release()};
+    return swObjectPath_;
 }
 
 void IstService::onTransferComplete(bool ok, const fs::path& image_path)

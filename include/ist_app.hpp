@@ -167,6 +167,17 @@ inline constexpr std::string_view k_activation_active =
 inline constexpr std::string_view k_activation_failed =
     "xyz.openbmc_project.Software.Activation.Activations.Failed";
 
+inline constexpr std::string_view k_apply_time_immediate =
+    "xyz.openbmc_project.Software.ApplyTime.RequestedApplyTimes.Immediate";
+inline constexpr std::string_view k_apply_time_on_reset =
+    "xyz.openbmc_project.Software.ApplyTime.RequestedApplyTimes.OnReset";
+
+inline bool isAllowedApplyTime(std::string_view applyTime)
+{
+    return applyTime == k_apply_time_immediate ||
+           applyTime == k_apply_time_on_reset;
+}
+
 // ----------------
 // Configuration
 // ----------------
@@ -455,7 +466,7 @@ class IstService : public std::enable_shared_from_this<IstService>
 
     void setResultsFdCallback(ResultsFdCb cb);
     std::string startIST(const ParamMap& testParams);
-    sdbusplus::message::unix_fd startUpdate();
+    std::string startUpdate(int imageFd, std::string_view applyTime);
     sdbusplus::message::unix_fd getResultsFd();
 
   private:
@@ -514,6 +525,7 @@ class IstService : public std::enable_shared_from_this<IstService>
     bool updateInProgress_{false};
     uint64_t runCounter_{0};
     std::string currentRunPath_;
+    std::string swObjectPath_;
     ResultsFdCb resultsFdCb_;
 
     std::unique_ptr<HookRunner> hookRunner_;
