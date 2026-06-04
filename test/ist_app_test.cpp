@@ -19,6 +19,7 @@
 #include <ist_app.hpp>
 #include <sdbusplus/exception.hpp>
 
+#include <array>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
@@ -2182,17 +2183,41 @@ void write_u32_le(uint8_t* p, uint32_t v)
     p[3] = static_cast<uint8_t>((v >> 24) & 0xFF);
 }
 
+static constexpr std::array<uint8_t, 16> k_ist_vectors_component_uuid = {
+    0x8f, 0x1b, 0x9b, 0x0e, 0x3c, 0x6d, 0x4a, 0x8c,
+    0x9f, 0x32, 0x12, 0xe7, 0xb4, 0xd9, 0xc5, 0xa1,
+};
+
+static constexpr std::array<uint8_t, 16> k_test_pldm_package_id = {
+    0x7b, 0x29, 0x1c, 0x99, 0x6d, 0xb6, 0x42, 0x08,
+    0x80, 0x1b, 0x02, 0x02, 0x6e, 0x46, 0x3c, 0x78,
+};
+
+void write_ist_vectors_component_descriptor(std::vector<uint8_t>& hdr,
+                                            size_t offset)
+{
+    hdr[offset + 0] = 0x02;
+    hdr[offset + 1] = 0x00;
+    hdr[offset + 2] = 0x10;
+    hdr[offset + 3] = 0x00;
+    std::memcpy(hdr.data() + offset + 4, k_ist_vectors_component_uuid.data(),
+                k_ist_vectors_component_uuid.size());
+}
+
 // Build a minimal PLDM firmware package (revision 4) wrapping `payload`.
-// Header size field at offset 17 (2 bytes LE), revision at offset 16.
-// Trailer: [header CRC (4)][payload CRC (4)].
+// PackageHeaderIdentifier at offset 0, component UUID descriptor embedded
+// before the header CRC trailer.
 std::vector<uint8_t> build_pldm_package(const std::vector<uint8_t>& payload)
 {
-    constexpr uint16_t header_size = 44;
+    constexpr uint16_t header_size = 64;
     constexpr uint8_t revision = 4;
 
     std::vector<uint8_t> hdr(header_size, 0);
+    std::memcpy(hdr.data(), k_test_pldm_package_id.data(),
+                k_test_pldm_package_id.size());
     hdr[16] = revision;
     write_u16_le(&hdr[17], header_size);
+    write_ist_vectors_component_descriptor(hdr, 36);
 
     uint32_t payload_crc = test_crc32(payload.data(), payload.size());
     write_u32_le(&hdr[header_size - 4], payload_crc);
@@ -2450,16 +2475,108 @@ TEST_F(IstServiceTest, StartUpdatePldmFileTooSmall)
     EXPECT_FALSE(fs::exists(image_path));
 }
 
+TEST_F(IstServiceTest, StartUpdatePldmBadUuidLogsError)
+{
+    init_from_file(configPath_);
+
+    const std::string raw_payload = "payload data";
+    std::vector<uint8_t> payload(raw_payload.begin(), raw_payload.end());
+    auto pldm_pkg = build_pldm_package(payload);
+    pldm_pkg[40] ^= 0xFF;
+
+    testing::internal::CaptureStderr();
+    int fd = static_cast<int>(service_->startUpdate());
+    ASSERT_EQ(::write(fd, pldm_pkg.data(), pldm_pkg.size()),
+              static_cast<ssize_t>(pldm_pkg.size()));
+    ::close(fd);
+    io_.run();
+    std::string err = testing::internal::GetCapturedStderr();
+
+    EXPECT_THAT(err, ::testing::HasSubstr("PLDM component UUID mismatch"));
+}
+
+TEST_F(IstServiceTest, StartUpdateBadUuidDoesNotTruncateExistingImage)
+{
+    init_from_file(configPath_);
+
+    fs::path image_path = tmpDir_ / "storage" / "CPU-IST.img";
+    fs::create_directories(image_path.parent_path());
+    static constexpr std::string_view k_existing = "existing-vector-image";
+    {
+        std::ofstream existing(image_path, std::ios::binary);
+        existing << k_existing;
+    }
+
+    const std::string raw_payload = "payload data";
+    std::vector<uint8_t> payload(raw_payload.begin(), raw_payload.end());
+    auto pldm_pkg = build_pldm_package(payload);
+    pldm_pkg[40] ^= 0xFF;
+
+    int fd = static_cast<int>(service_->startUpdate());
+    ASSERT_EQ(::write(fd, pldm_pkg.data(), pldm_pkg.size()),
+              static_cast<ssize_t>(pldm_pkg.size()));
+    ::close(fd);
+    io_.run();
+
+    ASSERT_TRUE(fs::exists(image_path));
+    std::ifstream img(image_path, std::ios::binary);
+    std::string content((std::istreambuf_iterator<char>(img)),
+                        std::istreambuf_iterator<char>());
+    EXPECT_EQ(content, k_existing);
+}
+
+TEST_F(IstServiceTest, StartUpdatePldmBadHeaderCrcLogsError)
+{
+    init_from_file(configPath_);
+
+    const std::string raw_payload = "payload data";
+    std::vector<uint8_t> payload(raw_payload.begin(), raw_payload.end());
+    auto pldm_pkg = build_pldm_package(payload);
+    pldm_pkg[20] ^= 0xFF;
+
+    testing::internal::CaptureStderr();
+    int fd = static_cast<int>(service_->startUpdate());
+    ASSERT_EQ(::write(fd, pldm_pkg.data(), pldm_pkg.size()),
+              static_cast<ssize_t>(pldm_pkg.size()));
+    ::close(fd);
+    io_.run();
+    std::string err = testing::internal::GetCapturedStderr();
+
+    EXPECT_THAT(err, ::testing::HasSubstr("PLDM header CRC mismatch"));
+}
+
+TEST_F(IstServiceTest, StartUpdatePldmBadPayloadCrcLogsError)
+{
+    init_from_file(configPath_);
+
+    const std::string raw_payload = "payload data for crc test";
+    std::vector<uint8_t> payload(raw_payload.begin(), raw_payload.end());
+    auto pldm_pkg = build_pldm_package(payload);
+    pldm_pkg[pldm_pkg.size() - 1] ^= 0xFF;
+
+    testing::internal::CaptureStderr();
+    int fd = static_cast<int>(service_->startUpdate());
+    ASSERT_EQ(::write(fd, pldm_pkg.data(), pldm_pkg.size()),
+              static_cast<ssize_t>(pldm_pkg.size()));
+    ::close(fd);
+    io_.run();
+    std::string err = testing::internal::GetCapturedStderr();
+
+    EXPECT_THAT(err, ::testing::HasSubstr("PLDM payload CRC mismatch"));
+}
+
 TEST_F(IstServiceTest, StartUpdatePldmRejectsOldRevision)
 {
     init_from_file(configPath_);
 
     // Build a header with revision 3 (no payload checksum).
-    // Use a 40-byte header: 36 base + 4 header CRC (no payload CRC).
-    constexpr uint16_t header_size = 40;
+    constexpr uint16_t header_size = 64;
     std::vector<uint8_t> hdr(header_size, 0);
+    std::memcpy(hdr.data(), k_test_pldm_package_id.data(),
+                k_test_pldm_package_id.size());
     hdr[16] = 3;
     write_u16_le(&hdr[17], header_size);
+    write_ist_vectors_component_descriptor(hdr, 36);
     uint32_t header_crc = test_crc32(hdr.data(), header_size - 4);
     write_u32_le(&hdr[header_size - 4], header_crc);
 

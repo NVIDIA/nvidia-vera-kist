@@ -398,6 +398,7 @@ bool archiveResults(const std::filesystem::path& resultsDir);
 
 struct PldmComponentInfo;
 class TransferSession;
+class PldmUuidPeekSession;
 class PldmStripper;
 
 struct PldmComponentInfo
@@ -488,7 +489,11 @@ class IstService : public std::enable_shared_from_this<IstService>
         bool ok, const std::shared_ptr<std::optional<PldmComponentInfo>>& comp,
         const std::filesystem::path& imagePath);
     void onStripComplete(bool ok);
-    void onTeardownComplete(bool ok, const std::shared_ptr<UniqueFd>& readFd,
+    void onUuidPeekComplete(bool ok, std::vector<uint8_t> prefix,
+                            UniqueFd readFd,
+                            const std::filesystem::path& imagePath);
+    void onTeardownComplete(bool ok, UniqueFd readFd,
+                            std::vector<uint8_t> prefix,
                             const std::filesystem::path& imagePath);
     void onMountComplete(bool ok);
     bool mountImages();
@@ -517,6 +522,7 @@ class IstService : public std::enable_shared_from_this<IstService>
     SignatureVerifier signatureVerifier_;
     CpuDiscoverer cpuDiscoverer_;
     std::shared_ptr<TransferSession> activeTransfer_;
+    std::shared_ptr<PldmUuidPeekSession> activeUuidPeek_;
     std::shared_ptr<PldmStripper> activeStripper_;
     boost::asio::steady_timer reSignalTimer_;
 
