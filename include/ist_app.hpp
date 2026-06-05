@@ -409,13 +409,15 @@ bool archiveResults(const std::filesystem::path& resultsDir);
 
 struct PldmComponentInfo;
 class TransferSession;
-class PldmUuidPeekSession;
-class PldmStripper;
+class PldmHeaderPeekSession;
 
 struct PldmComponentInfo
 {
+    // Offset of the component payload within the PLDM package, which equals
+    // the PLDM package header size.  The header is never written to disk; the
+    // payload is streamed straight to the image file starting at offset 0.
     uint32_t offset;
-    uint32_t size;
+    // Stored CRC-32 of the component payload, taken from the package header.
     uint32_t payloadCrc;
 };
 
@@ -495,16 +497,12 @@ class IstService : public std::enable_shared_from_this<IstService>
     void onDeassertDone(int itmExit, bool okDeassert);
     void onResetDone(int itmExit, bool okReset);
 
-    void onTransferComplete(bool ok, const std::filesystem::path& imagePath);
-    void onPldmParseComplete(
-        bool ok, const std::shared_ptr<std::optional<PldmComponentInfo>>& comp,
-        const std::filesystem::path& imagePath);
-    void onStripComplete(bool ok);
-    void onUuidPeekComplete(bool ok, std::vector<uint8_t> prefix,
-                            UniqueFd readFd,
-                            const std::filesystem::path& imagePath);
+    void onTransferComplete(bool ok);
+    void onHeaderPeekComplete(bool ok, std::vector<uint8_t> prefix,
+                              UniqueFd readFd, PldmComponentInfo comp,
+                              const std::filesystem::path& imagePath);
     void onTeardownComplete(bool ok, UniqueFd readFd,
-                            std::vector<uint8_t> prefix,
+                            std::vector<uint8_t> prefix, PldmComponentInfo comp,
                             const std::filesystem::path& imagePath);
     void onMountComplete(bool ok);
     bool mountImages();
@@ -534,8 +532,7 @@ class IstService : public std::enable_shared_from_this<IstService>
     SignatureVerifier signatureVerifier_;
     CpuDiscoverer cpuDiscoverer_;
     std::shared_ptr<TransferSession> activeTransfer_;
-    std::shared_ptr<PldmUuidPeekSession> activeUuidPeek_;
-    std::shared_ptr<PldmStripper> activeStripper_;
+    std::shared_ptr<PldmHeaderPeekSession> activeHeaderPeek_;
     boost::asio::steady_timer reSignalTimer_;
 
     std::vector<std::string> failureInfo_;

@@ -201,32 +201,32 @@ static PldmHeaderCheck check_ist_component_uuid(const uint8_t* data, size_t len)
     return PldmHeaderCheck::ok;
 }
 
-static bool parse_pldm_header(const std::vector<uint8_t>& hdr, size_t file_size,
-                              PldmComponentInfo& comp)
+// Validate a fully-buffered PLDM package header and extract the payload
+// offset (== header size) and the stored payload CRC.  This runs entirely
+// in memory during the upload "peek" phase, before any data is written to
+// disk, so a malformed header never disturbs the existing on-disk image.
+//
+// Precondition: check_ist_component_uuid(hdr.data(), hdr.size()) == ok,
+// i.e. the buffer already contains the complete header and the IST vectors
+// component UUID has been matched.
+static bool validate_pldm_header(const std::vector<uint8_t>& hdr,
+                                 PldmComponentInfo& comp)
 {
     if (hdr.size() < k_pldm_min_header_size)
     {
-        std::cerr << "PLDM header too small\n";
+        std::cerr << "validate_pldm_header called with short buffer ("
+                  << hdr.size() << " bytes)\n";
         return false;
     }
 
     uint8_t revision = hdr[16];
     uint16_t header_size = read_u16_le(&hdr[17]);
 
-    switch (check_ist_component_uuid(hdr.data(), hdr.size()))
+    if (hdr.size() < header_size)
     {
-        case PldmHeaderCheck::need_more_data:
-            std::cerr << "Failed to read full PLDM header\n";
-            return false;
-        case PldmHeaderCheck::invalid_header:
-            std::cerr << "PLDM header size invalid: " << header_size << '\n';
-            return false;
-        case PldmHeaderCheck::component_uuid_mismatch:
-            std::cerr << "PLDM component UUID mismatch (expected IST vectors "
-                         "component)\n";
-            return false;
-        case PldmHeaderCheck::ok:
-            break;
+        std::cerr << "PLDM header truncated: have " << hdr.size()
+                  << " bytes, header declares " << header_size << '\n';
+        return false;
     }
 
     // Per DSP0267 v1.3.0 Table 8: revision 0x04 is the first format
@@ -236,14 +236,6 @@ static bool parse_pldm_header(const std::vector<uint8_t>& hdr, size_t file_size,
         std::cerr << "PLDM revision 0x" << std::hex
                   << static_cast<unsigned>(revision) << std::dec
                   << " does not include payload checksum; rejecting\n";
-        return false;
-    }
-
-    // The header_size < min check overlaps with the trailer check below,
-    // but gives a clearer error when the header size itself is nonsense.
-    if (hdr.size() < header_size || header_size < k_pldm_min_header_size)
-    {
-        std::cerr << "PLDM header size invalid: " << header_size << '\n';
         return false;
     }
 
@@ -267,67 +259,12 @@ static bool parse_pldm_header(const std::vector<uint8_t>& hdr, size_t file_size,
     }
 
     comp.payloadCrc = read_u32_le(&hdr[header_size - 4]);
+    comp.offset = header_size;
 
     std::cerr << "PLDM revision 0x" << std::hex
               << static_cast<unsigned>(revision) << std::dec << ", header size "
-              << header_size << '\n';
-
-    comp.offset = header_size;
-    comp.size = static_cast<uint32_t>(file_size - header_size);
-    return true;
-}
-
-static bool process_pldm_package(const fs::path& file_path,
-                                 PldmComponentInfo& comp)
-{
-    std::ifstream file(file_path, std::ios::binary | std::ios::ate);
-    if (!file)
-    {
-        std::cerr << "Cannot open PLDM package: " << file_path << '\n';
-        return false;
-    }
-
-    size_t file_size = static_cast<size_t>(file.tellg());
-    if (file_size < k_pldm_min_header_size)
-    {
-        std::cerr << "File too small to be a PLDM package\n";
-        return false;
-    }
-
-    // Read the first 19 bytes to extract the header size field at offset 17.
-    file.seekg(0);
-    std::array<uint8_t, 19> prefix{};
-    file.read(reinterpret_cast<char*>(prefix.data()), prefix.size());
-    if (!file)
-    {
-        std::cerr << "Failed to read PLDM header prefix\n";
-        return false;
-    }
-
-    uint16_t header_size = read_u16_le(&prefix[17]);
-    if (header_size < k_pldm_min_header_size || header_size > file_size)
-    {
-        std::cerr << "Invalid PLDM header size: " << header_size << '\n';
-        return false;
-    }
-
-    std::vector<uint8_t> header(header_size);
-    file.seekg(0);
-    file.read(reinterpret_cast<char*>(header.data()), header_size);
-    if (!file)
-    {
-        std::cerr << "Failed to read full PLDM header\n";
-        return false;
-    }
-    file.close();
-
-    if (!parse_pldm_header(header, file_size, comp))
-    {
-        return false;
-    }
-
-    std::cerr << "PLDM header verified (CRC OK). Component at offset "
-              << comp.offset << ", size " << comp.size << '\n';
+              << header_size << "; payload starts at offset " << comp.offset
+              << '\n';
     return true;
 }
 
@@ -394,19 +331,19 @@ static std::optional<LoopDevice> setup_loop_device(const fs::path& image_path,
 }
 
 // ----------------------------------------------------------------
-// PldmUuidPeekSession — read full PLDM header before touching disk
+// PldmHeaderPeekSession — read full PLDM header before touching disk
 // ----------------------------------------------------------------
 
-class PldmUuidPeekSession :
-    public std::enable_shared_from_this<PldmUuidPeekSession>
+class PldmHeaderPeekSession :
+    public std::enable_shared_from_this<PldmHeaderPeekSession>
 {
   public:
-    PldmUuidPeekSession(
-        boost::asio::io_context& io, UniqueFd read_fd,
-        std::chrono::seconds timeout,
-        std::move_only_function<void(bool ok, std::vector<uint8_t> prefix,
-                                     UniqueFd read_fd) const>
-            on_complete) :
+    PldmHeaderPeekSession(boost::asio::io_context& io, UniqueFd read_fd,
+                          std::chrono::seconds timeout,
+                          std::move_only_function<void(
+                              bool ok, std::vector<uint8_t> prefix,
+                              UniqueFd read_fd, PldmComponentInfo comp) const>
+                              on_complete) :
         stream_(io, read_fd.release()), deadline_(io), timeout_(timeout),
         onComplete_(std::move(on_complete))
     {}
@@ -487,7 +424,12 @@ class PldmUuidPeekSession :
                 finish(false);
                 return;
             case PldmHeaderCheck::ok:
-                std::cout << "PLDM component UUID verified\n";
+                if (!validate_pldm_header(prefix_, comp_))
+                {
+                    finish(false);
+                    return;
+                }
+                std::cout << "PLDM header verified\n";
                 finish(true);
                 return;
         }
@@ -533,7 +475,7 @@ class PldmUuidPeekSession :
         auto cb = std::move(onComplete_);
         if (cb)
         {
-            cb(ok, std::move(prefix_), std::move(read_fd));
+            cb(ok, std::move(prefix_), std::move(read_fd), comp_);
         }
     }
 
@@ -541,18 +483,27 @@ class PldmUuidPeekSession :
     boost::asio::steady_timer deadline_;
     std::chrono::seconds timeout_;
     std::move_only_function<void(bool ok, std::vector<uint8_t> prefix,
-                                 UniqueFd read_fd) const>
+                                 UniqueFd read_fd, PldmComponentInfo comp)
+                                const>
         onComplete_;
     std::array<char, k_transfer_buf_size> buf_{};
     std::vector<uint8_t> prefix_;
+    PldmComponentInfo comp_{};
     bool finished_{false};
 };
 
 // ----------------------------------------------------------------
-// TransferSession — async image transfer via socketpair
+// TransferSession — async image transfer from the upload stream
+//
+// Streams the PLDM component payload straight to the image file on the
+// io_context thread, skipping the PLDM package header (which is never
+// persisted) and verifying the payload CRC as bytes arrive.  The expected
+// payload offset and CRC come from the header validated during the peek
+// phase, so there is no second pass over the file.
 //
 // Owns: stream_descriptor (read-end FD), ofstream, deadline timer.
-// On destruction, removes the image file unless committed.
+// On destruction, removes the image file unless committed (a transfer is
+// committed only once the full payload arrives and its CRC matches).
 // ----------------------------------------------------------------
 
 class TransferSession : public std::enable_shared_from_this<TransferSession>
@@ -560,12 +511,17 @@ class TransferSession : public std::enable_shared_from_this<TransferSession>
   public:
     TransferSession(boost::asio::io_context& io, UniqueFd read_fd,
                     fs::path image_path, std::chrono::seconds timeout,
-                    std::vector<uint8_t> prefix,
+                    std::vector<uint8_t> prefix, PldmComponentInfo comp,
                     std::move_only_function<void(bool ok) const> on_complete) :
         stream_(io, read_fd.release()), deadline_(io),
         imagePath_(std::move(image_path)), timeout_(timeout),
-        prefix_(std::move(prefix)), onComplete_(std::move(on_complete))
+        prefix_(std::move(prefix)), payloadOffset_(comp.offset),
+        expectedCrc_(comp.payloadCrc), onComplete_(std::move(on_complete))
     {
+        // Overwrite in place (no room for a temp copy): once the validated
+        // header gets us here, a payload-level failure intentionally leaves no
+        // image. Header/UUID failures are rejected earlier and never reach
+        // this.
         output_.open(imagePath_, std::ios::binary | std::ios::trunc);
         if (!output_)
         {
@@ -589,23 +545,41 @@ class TransferSession : public std::enable_shared_from_this<TransferSession>
 
     void start()
     {
-        if (!prefix_.empty())
+        // The buffered prefix holds the full PLDM header plus, usually, the
+        // first payload bytes.  Write only the payload portion; the header is
+        // intentionally never persisted.
+        if (prefix_.size() > payloadOffset_)
         {
-            output_.write(reinterpret_cast<const char*>(prefix_.data()),
-                          static_cast<std::streamsize>(prefix_.size()));
-            if (!output_)
+            const uint8_t* payload = prefix_.data() + payloadOffset_;
+            size_t payload_len = prefix_.size() - payloadOffset_;
+            if (!write_payload(payload, payload_len))
             {
-                finish(false);
                 return;
             }
-            bytesReceived_ += prefix_.size();
-            prefix_.clear();
         }
+        prefix_.clear();
         reset_deadline();
         read_next();
     }
 
   private:
+    // Append `len` payload bytes to the image file and fold them into the
+    // running CRC.  Returns false (and finishes the session) on write error.
+    bool write_payload(const uint8_t* data, size_t len)
+    {
+        output_.write(reinterpret_cast<const char*>(data),
+                      static_cast<std::streamsize>(len));
+        if (!output_)
+        {
+            std::cerr << "Write to image file failed\n";
+            finish(false);
+            return false;
+        }
+        crcState_ = crc32_update(crcState_, data, len);
+        payloadBytes_ += len;
+        return true;
+    }
+
     void reset_deadline()
     {
         deadline_.expires_after(timeout_);
@@ -644,32 +618,41 @@ class TransferSession : public std::enable_shared_from_this<TransferSession>
 
         if (ec)
         {
-            if (bytesReceived_ == 0)
+            if (ec != boost::asio::error::eof)
             {
-                std::cerr << "Transfer aborted: received 0 bytes\n";
-                finish(false);
+                std::cerr << "Image transfer read error: " << ec.message()
+                          << '\n';
             }
-            else
-            {
-                std::cout << "Image transfer complete: " << bytesReceived_
-                          << " bytes\n";
-                committed_ = true;
-                finish(true);
-            }
+            verify_and_finish();
             return;
         }
 
-        output_.write(buf_.data(), static_cast<std::streamsize>(n));
-        if (!output_)
+        if (!write_payload(reinterpret_cast<const uint8_t*>(buf_.data()), n))
         {
-            std::cerr << "Write to image file failed\n";
+            return;
+        }
+
+        reset_deadline();
+        read_next();
+    }
+
+    void verify_and_finish()
+    {
+        uint32_t computed = ~crcState_;
+        if (computed != expectedCrc_)
+        {
+            std::cerr << "PLDM payload CRC mismatch: stored 0x" << std::hex
+                      << expectedCrc_ << " computed 0x" << computed << std::dec
+                      << " (" << payloadBytes_
+                      << " payload bytes received; truncated transfer?)\n";
             finish(false);
             return;
         }
 
-        bytesReceived_ += n;
-        reset_deadline();
-        read_next();
+        std::cout << "Image transfer complete: " << payloadBytes_
+                  << " payload bytes, CRC verified\n";
+        committed_ = true;
+        finish(true);
     }
 
     void on_timeout()
@@ -679,8 +662,8 @@ class TransferSession : public std::enable_shared_from_this<TransferSession>
             return;
         }
         std::cerr << "Transfer timed out after " << timeout_.count()
-                  << "s of inactivity (" << bytesReceived_
-                  << " bytes received)\n";
+                  << "s of inactivity (" << payloadBytes_
+                  << " payload bytes received)\n";
         stream_.close();
         finish(false);
     }
@@ -707,147 +690,13 @@ class TransferSession : public std::enable_shared_from_this<TransferSession>
     fs::path imagePath_;
     std::chrono::seconds timeout_;
     std::vector<uint8_t> prefix_;
+    size_t payloadOffset_;
+    uint32_t expectedCrc_;
     std::move_only_function<void(bool ok) const> onComplete_;
     std::array<char, k_transfer_buf_size> buf_{};
-    size_t bytesReceived_{0};
+    uint32_t crcState_{0xFFFFFFFF};
+    size_t payloadBytes_{0};
     bool finished_{false};
-    bool committed_{false};
-};
-
-// ----------------------------------------------------------------
-// PLDM header stripping — runs entirely on a worker thread
-// ----------------------------------------------------------------
-
-static bool strip_pldm_payload(int fd, const PldmComponentInfo& comp)
-{
-    uint32_t remaining = comp.size;
-    off_t read_pos = comp.offset;
-    off_t write_pos = 0;
-    uint32_t crc_state = 0xFFFFFFFF;
-    std::array<char, k_transfer_buf_size> buf{};
-
-    while (remaining > 0)
-    {
-        size_t to_read =
-            std::min(static_cast<size_t>(remaining), k_transfer_buf_size);
-        ssize_t nread = ::pread(fd, buf.data(), to_read, read_pos);
-        if (nread < 0)
-        {
-            std::cerr << "pread failed during PLDM stripping: " << errno
-                      << '\n';
-            return false;
-        }
-        if (nread == 0)
-        {
-            std::cerr << "Unexpected EOF during PLDM stripping"
-                         " (file truncated?)\n";
-            return false;
-        }
-
-        crc_state = crc32_update(crc_state,
-                                 reinterpret_cast<const uint8_t*>(buf.data()),
-                                 static_cast<size_t>(nread));
-
-        ssize_t nwritten =
-            ::pwrite(fd, buf.data(), static_cast<size_t>(nread), write_pos);
-        if (nwritten != nread)
-        {
-            std::cerr << "pwrite failed during PLDM stripping: " << errno
-                      << '\n';
-            return false;
-        }
-
-        read_pos += nread;
-        write_pos += nread;
-        remaining -= static_cast<uint32_t>(nread);
-    }
-
-    uint32_t computed = ~crc_state;
-    if (computed != comp.payloadCrc)
-    {
-        std::cerr << "PLDM payload CRC mismatch: stored 0x" << std::hex
-                  << comp.payloadCrc << " computed 0x" << computed << std::dec
-                  << '\n';
-        return false;
-    }
-    std::cerr << "PLDM payload CRC verified OK\n";
-
-    if (::ftruncate(fd, static_cast<off_t>(comp.size)) != 0)
-    {
-        std::cerr << "ftruncate failed: " << errno << '\n';
-        return false;
-    }
-
-    std::cerr << "PLDM header stripped, image ready (" << comp.size
-              << " bytes)\n";
-    return true;
-}
-
-class PldmStripper : public std::enable_shared_from_this<PldmStripper>
-{
-  public:
-    PldmStripper(boost::asio::io_context& io, fs::path image_path,
-                 PldmComponentInfo comp,
-                 std::move_only_function<void(bool ok) const> on_complete) :
-        io_(io), imagePath_(std::move(image_path)), comp_(comp),
-        onComplete_(std::move(on_complete)),
-        fd_(::open(imagePath_.c_str(), O_RDWR | O_CLOEXEC))
-    {
-        if (fd_.get() < 0)
-        {
-            throw std::system_error(errno, std::generic_category(),
-                                    "Failed to open " + imagePath_.string());
-        }
-    }
-
-    ~PldmStripper()
-    {
-        if (!committed_)
-        {
-            std::error_code ec;
-            fs::remove(imagePath_, ec);
-        }
-    }
-
-    PldmStripper(const PldmStripper&) = delete;
-    PldmStripper& operator=(const PldmStripper&) = delete;
-
-    void start()
-    {
-        std::shared_ptr<UniqueFd> fd_ptr =
-            std::make_shared<UniqueFd>(std::move(fd_));
-        PldmComponentInfo comp = comp_;
-
-        // shared_from_this is intentional: the callback must set
-        // committed_ before the destructor runs, otherwise it would
-        // delete the image file.
-        runOffThread(
-            io_,
-            [fd_ptr, comp]() {
-                return strip_pldm_payload(fd_ptr->get(), comp);
-            },
-            [self = shared_from_this()](bool ok) {
-                if (ok)
-                {
-                    self->committed_ = true;
-                }
-                else
-                {
-                    std::cerr << "PLDM strip failed\n";
-                }
-                if (self->onComplete_)
-                {
-                    self->onComplete_(ok);
-                }
-            });
-    }
-
-  private:
-    boost::asio::io_context& io_;
-    fs::path imagePath_;
-    PldmComponentInfo comp_;
-    std::move_only_function<void(bool ok) const> onComplete_;
-    UniqueFd fd_;
     bool committed_{false};
 };
 
@@ -892,24 +741,26 @@ std::string IstService::startUpdate(int image_fd, std::string_view apply_time)
 
     updateInProgress_ = true;
 
-    std::shared_ptr<PldmUuidPeekSession> peek =
-        std::make_shared<PldmUuidPeekSession>(
+    std::shared_ptr<PldmHeaderPeekSession> peek =
+        std::make_shared<PldmHeaderPeekSession>(
             io_, std::move(image), platformCfg_.transferInactivityTimeout,
-            [weak = weak_from_this(), image_path](
-                bool ok, std::vector<uint8_t> prefix, UniqueFd read_fd) {
+            [weak = weak_from_this(),
+             image_path](bool ok, std::vector<uint8_t> prefix, UniqueFd read_fd,
+                         PldmComponentInfo comp) {
                 if (auto self = weak.lock())
                 {
-                    self->onUuidPeekComplete(ok, std::move(prefix),
-                                             std::move(read_fd), image_path);
+                    self->onHeaderPeekComplete(ok, std::move(prefix),
+                                               std::move(read_fd), comp,
+                                               image_path);
                 }
             });
-    activeUuidPeek_ = peek;
+    activeHeaderPeek_ = peek;
     peek->start();
 
     return swObjectPath_;
 }
 
-void IstService::onTransferComplete(bool ok, const fs::path& image_path)
+void IstService::onTransferComplete(bool ok)
 {
     activeTransfer_.reset();
     if (!ok)
@@ -919,73 +770,7 @@ void IstService::onTransferComplete(bool ok, const fs::path& image_path)
         return;
     }
 
-    std::cout << "Image transfer succeeded, processing PLDM package\n";
-
-    std::shared_ptr<std::optional<PldmComponentInfo>> comp =
-        std::make_shared<std::optional<PldmComponentInfo>>();
-    runOffThread(
-        io_,
-        [comp, image_path]() {
-            PldmComponentInfo parsed{};
-            if (process_pldm_package(image_path, parsed))
-            {
-                *comp = parsed;
-                return true;
-            }
-            return false;
-        },
-        [weak = weak_from_this(), comp, image_path](bool parse_ok) {
-            if (auto self = weak.lock())
-            {
-                self->onPldmParseComplete(parse_ok, comp, image_path);
-            }
-        });
-}
-
-void IstService::onPldmParseComplete(
-    bool ok, const std::shared_ptr<std::optional<PldmComponentInfo>>& comp,
-    const fs::path& image_path)
-{
-    if (!ok)
-    {
-        std::cerr << "PLDM processing failed, removing image\n";
-        std::error_code ec;
-        fs::remove(image_path, ec);
-        finishUpdate(false);
-        return;
-    }
-    try
-    {
-        std::shared_ptr<PldmStripper> stripper = std::make_shared<PldmStripper>(
-            io_, image_path, **comp, [weak = weak_from_this()](bool strip_ok) {
-                if (auto self = weak.lock())
-                {
-                    self->onStripComplete(strip_ok);
-                }
-            });
-        activeStripper_ = stripper;
-        stripper->start();
-    }
-    catch (const std::system_error& e)
-    {
-        std::cerr << "Failed to start PLDM strip: " << e.what() << '\n';
-        std::error_code ec;
-        fs::remove(image_path, ec);
-        finishUpdate(false);
-    }
-}
-
-void IstService::onStripComplete(bool ok)
-{
-    activeStripper_.reset();
-    if (!ok)
-    {
-        std::cerr << "PLDM strip failed\n";
-        finishUpdate(false);
-        return;
-    }
-
-    std::cout << "PLDM strip succeeded\n";
+    std::cout << "Image transfer succeeded (payload verified); mounting\n";
     publisher_->publishActivationProgress(100);
     publisher_->removeActivationProgress();
 
@@ -1185,11 +970,11 @@ void IstService::finishUpdate(bool ok)
     updateInProgress_ = false;
 }
 
-void IstService::onUuidPeekComplete(bool ok, std::vector<uint8_t> prefix,
-                                    UniqueFd read_fd,
-                                    const fs::path& image_path)
+void IstService::onHeaderPeekComplete(bool ok, std::vector<uint8_t> prefix,
+                                      UniqueFd read_fd, PldmComponentInfo comp,
+                                      const fs::path& image_path)
 {
-    activeUuidPeek_.reset();
+    activeHeaderPeek_.reset();
     if (!ok)
     {
         finishUpdate(false);
@@ -1200,17 +985,18 @@ void IstService::onUuidPeekComplete(bool ok, std::vector<uint8_t> prefix,
     auto read_fd_holder = std::make_shared<UniqueFd>(std::move(read_fd));
 
     asyncTeardownMounts([weak = weak_from_this(), image_path, prefix_buf,
-                         read_fd_holder](bool tear_ok) {
+                         read_fd_holder, comp](bool tear_ok) {
         if (auto self = weak.lock())
         {
             self->onTeardownComplete(tear_ok, std::move(*read_fd_holder),
-                                     std::move(*prefix_buf), image_path);
+                                     std::move(*prefix_buf), comp, image_path);
         }
     });
 }
 
 void IstService::onTeardownComplete(bool ok, UniqueFd read_fd,
                                     std::vector<uint8_t> prefix,
+                                    PldmComponentInfo comp,
                                     const fs::path& image_path)
 {
     if (!ok)
@@ -1234,11 +1020,11 @@ void IstService::onTeardownComplete(bool ok, UniqueFd read_fd,
         std::shared_ptr<TransferSession> session =
             std::make_shared<TransferSession>(
                 io_, std::move(read_fd), image_path,
-                platformCfg_.transferInactivityTimeout, std::move(prefix),
-                [weak = weak_from_this(), image_path](bool xfer_ok) {
+                platformCfg_.transferInactivityTimeout, std::move(prefix), comp,
+                [weak = weak_from_this()](bool xfer_ok) {
                     if (auto self = weak.lock())
                     {
-                        self->onTransferComplete(xfer_ok, image_path);
+                        self->onTransferComplete(xfer_ok);
                     }
                 });
 
@@ -1261,7 +1047,7 @@ void IstService::onMountComplete(bool ok)
 {
     if (!ok)
     {
-        std::cerr << "Failed to mount images after PLDM strip\n";
+        std::cerr << "Failed to mount images after transfer\n";
         finishUpdate(false);
         return;
     }

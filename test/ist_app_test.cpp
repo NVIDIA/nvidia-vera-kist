@@ -2395,6 +2395,52 @@ TEST_F(IstServiceTest, StartUpdateAllowsNewTransferAfterCompletion)
     EXPECT_EQ(content, raw2);
 }
 
+TEST_F(IstServiceTest, StartUpdateTruncatedTransferRemovesImageAndReleasesLock)
+{
+    init_from_file(configPath_);
+
+    fs::path image_path = tmpDir_ / "storage" / "CPU-IST.img";
+
+    const std::string raw1 = "payload that gets cut off partway through";
+    std::vector<uint8_t> payload1(raw1.begin(), raw1.end());
+    auto pkg1 = build_pldm_package(payload1);
+
+    // Send the complete header but only a few payload bytes, then drop the
+    // connection mid-transfer.
+    size_t partial = 64 + 5;
+    ASSERT_LT(partial, pkg1.size());
+
+    int fd1 = begin_start_update();
+    ASSERT_EQ(::write(fd1, pkg1.data(), partial),
+              static_cast<ssize_t>(partial));
+    ::close(fd1);
+    io_.run();
+
+    // The payload CRC cannot match a truncated stream, so nothing is left
+    // behind on disk.
+    EXPECT_FALSE(fs::exists(image_path));
+
+    io_.restart();
+
+    // The update lock must have been released: a second, complete upload
+    // succeeds (begin_start_update would throw if the service were still busy).
+    const std::string raw2 = "second complete payload";
+    std::vector<uint8_t> payload2(raw2.begin(), raw2.end());
+    auto pkg2 = build_pldm_package(payload2);
+
+    int fd2 = begin_start_update();
+    ASSERT_EQ(::write(fd2, pkg2.data(), pkg2.size()),
+              static_cast<ssize_t>(pkg2.size()));
+    ::close(fd2);
+    io_.run();
+
+    ASSERT_TRUE(fs::exists(image_path));
+    std::ifstream img2(image_path, std::ios::binary);
+    std::string content2((std::istreambuf_iterator<char>(img2)),
+                         std::istreambuf_iterator<char>());
+    EXPECT_EQ(content2, raw2);
+}
+
 TEST_F(IstServiceTest, StartUpdateAcceptsOnResetApplyTime)
 {
     init_from_file(configPath_);
