@@ -19,6 +19,7 @@
 #include <async_utils.hpp>
 #include <boost/asio/post.hpp>
 #include <ist_app.hpp>
+#include <ist_results.hpp>
 #include <nlohmann/json.hpp>
 #include <sdbusplus/exception.hpp>
 #include <signature_verify.hpp>
@@ -723,18 +724,17 @@ void IstService::runIstCleanup(int itm_exit)
     transitionTo(IstStage::cleanup);
 
     fs::path results_dir = platformCfg_.storage.resultStoragePath;
-    runOffThread(
-        io_, [results_dir]() { return archiveResults(results_dir); },
-        [weak = weak_from_this(), itm_exit](bool ok) {
-            if (!ok)
-            {
-                std::cerr << "IST: results archiving failed\n";
-            }
-            if (auto self = weak.lock())
-            {
-                self->onArchiveDone(itm_exit);
-            }
-        });
+    archiveResultsAsync(io_, results_dir,
+                        [weak = weak_from_this(), itm_exit](bool ok) {
+                            if (!ok)
+                            {
+                                std::cerr << "IST: results archiving failed\n";
+                            }
+                            if (auto self = weak.lock())
+                            {
+                                self->onArchiveDone(itm_exit);
+                            }
+                        });
 }
 
 void IstService::onArchiveDone(int itm_exit)

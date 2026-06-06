@@ -405,8 +405,6 @@ std::unique_ptr<StatePublisher>
 bool parsePlatformConfig(IstPlatformConfig& out, const std::string& path);
 void resolveItmPaths(IstPlatformConfig& cfg);
 
-bool archiveResults(const std::filesystem::path& resultsDir);
-
 struct PldmComponentInfo;
 class TransferSession;
 class PldmHeaderPeekSession;

@@ -18,6 +18,7 @@
 #include <unistd.h>
 
 #include <ist_app.hpp>
+#include <ist_results.hpp>
 #include <sdbusplus/exception.hpp>
 
 #include <array>
