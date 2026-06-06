@@ -16,7 +16,10 @@
  */
 #pragma once
 
+#include <boost/asio/io_context.hpp>
+
 #include <filesystem>
+#include <functional>
 
 struct IstPlatformConfig;
 
@@ -38,11 +41,21 @@ bool verifyFileSignature(const std::filesystem::path& file,
  * Fails if the verification key (cfg.signingKeyPath) does not exist
  * on disk.
  *
- * This function is blocking (file I/O + crypto) and must be called from a
- * worker thread, not from the main io_context thread.
+ * This function is blocking (file I/O + crypto). Production code uses
+ * verifyItmSignaturesAsync(); this synchronous form is the building block it
+ * shares and is exercised directly by the unit tests.
  *
  * @param cfg Platform configuration (provides itmBinaryPath, itmLibDir,
  *            signingKeyPath).
  * @return true if all signatures are valid.
  */
 bool verifyItmSignatures(const IstPlatformConfig& cfg);
+
+/**
+ * Chunked variant of verifyItmSignatures() that runs on the io_context one
+ * block per turn instead of blocking. onComplete(ok) fires exactly once on the
+ * io_context thread.
+ */
+void verifyItmSignaturesAsync(
+    boost::asio::io_context& io, IstPlatformConfig cfg,
+    std::move_only_function<void(bool ok) const> onComplete);

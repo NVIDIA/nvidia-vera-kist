@@ -447,10 +447,13 @@ class IstService : public std::enable_shared_from_this<IstService>
     }
     /**
      * Override the function used to verify kist_itm binary and library
-     * signatures before execution.  Defaults to verifyItmSignatures.
-     * Exposed so unit tests can bypass crypto without real signing keys.
+     * signatures before execution.  It is invoked with the platform config and
+     * a completion callback that must be called once with the result.  Defaults
+     * to verifyItmSignaturesAsync.  Exposed so unit tests can bypass crypto
+     * without real signing keys.
      */
-    using SignatureVerifier = std::function<bool(const IstPlatformConfig&)>;
+    using SignatureVerifier = std::function<void(
+        const IstPlatformConfig&, std::move_only_function<void(bool) const>)>;
     void setSignatureVerifier(SignatureVerifier fn);
 
     /**

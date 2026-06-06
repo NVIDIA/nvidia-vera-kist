@@ -340,7 +340,7 @@ class IstServiceTest : public ::testing::Test
             return false;
         }
         service_->setSignatureVerifier(
-            [](const IstPlatformConfig&) { return true; });
+            [](const IstPlatformConfig&, DoneCb cb) { cb(true); });
         return service_->initialize(std::move(cfg));
     }
 
@@ -4075,7 +4075,7 @@ TEST_F(IstServiceTest, ErrorSecuritySignatureFailed)
 {
     init_from_file(configPath_);
     service_->setSignatureVerifier(
-        [](const IstPlatformConfig&) { return false; });
+        [](const IstPlatformConfig&, DoneCb cb) { cb(false); });
 
     testing::internal::CaptureStderr();
     start_ist();

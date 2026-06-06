@@ -16,8 +16,6 @@
  */
 #include <fcntl.h>
 
-#include <async_utils.hpp>
-#include <boost/asio/post.hpp>
 #include <ist_app.hpp>
 #include <ist_results.hpp>
 #include <nlohmann/json.hpp>
@@ -104,7 +102,11 @@ IstService::IstService(boost::asio::io_context& io,
     io_(io), publisher_(std::move(publisher)),
     hookRunner_(std::move(hook_runner)),
     powerMonitor_(std::move(power_monitor)), itmRunner_(std::move(itm_runner)),
-    signatureVerifier_(verifyItmSignatures), reSignalTimer_(io)
+    signatureVerifier_([&io](const IstPlatformConfig& cfg,
+                             std::move_only_function<void(bool) const> cb) {
+        verifyItmSignaturesAsync(io, cfg, std::move(cb));
+    }),
+    reSignalTimer_(io)
 {}
 
 IstService::~IstService()
@@ -920,13 +922,9 @@ std::string IstService::startIST(const ParamMap& test_params)
 
     installServiceLogTee();
 
-    IstPlatformConfig cfg_snapshot = platformCfg_;
-    SignatureVerifier verifier = signatureVerifier_;
-    runOffThread(
-        io_, [cfg_snapshot, verifier]() { return verifier(cfg_snapshot); },
-        [self = shared_from_this()](bool ok) {
-            self->onSignatureVerifyDone(ok);
-        });
+    signatureVerifier_(platformCfg_, [self = shared_from_this()](bool ok) {
+        self->onSignatureVerifyDone(ok);
+    });
 
     return currentRunPath_;
 }
