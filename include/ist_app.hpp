@@ -507,8 +507,6 @@ class IstService : public std::enable_shared_from_this<IstService>
     void onMountComplete(bool ok);
     bool mountImages();
     bool teardownMounts();
-    void asyncMountImages(std::move_only_function<void(bool ok) const> done);
-    void asyncTeardownMounts(std::move_only_function<void(bool ok) const> done);
     void ensureMounted();
     void readAndPublishVersion();
     void finishUpdate(bool ok);

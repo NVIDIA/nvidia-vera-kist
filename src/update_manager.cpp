@@ -21,8 +21,8 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-#include <async_utils.hpp>
 #include <boost/algorithm/string/trim.hpp>
+#include <boost/asio/error.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/posix/stream_descriptor.hpp>
 #include <boost/asio/steady_timer.hpp>
@@ -774,12 +774,7 @@ void IstService::onTransferComplete(bool ok)
     publisher_->publishActivationProgress(100);
     publisher_->removeActivationProgress();
 
-    asyncMountImages([weak = weak_from_this()](bool mount_ok) {
-        if (auto self = weak.lock())
-        {
-            self->onMountComplete(mount_ok);
-        }
-    });
+    onMountComplete(mountImages());
 }
 
 bool IstService::teardownMounts()
@@ -981,17 +976,9 @@ void IstService::onHeaderPeekComplete(bool ok, std::vector<uint8_t> prefix,
         return;
     }
 
-    auto prefix_buf = std::make_shared<std::vector<uint8_t>>(std::move(prefix));
-    auto read_fd_holder = std::make_shared<UniqueFd>(std::move(read_fd));
-
-    asyncTeardownMounts([weak = weak_from_this(), image_path, prefix_buf,
-                         read_fd_holder, comp](bool tear_ok) {
-        if (auto self = weak.lock())
-        {
-            self->onTeardownComplete(tear_ok, std::move(*read_fd_holder),
-                                     std::move(*prefix_buf), comp, image_path);
-        }
-    });
+    bool tear_ok = teardownMounts();
+    onTeardownComplete(tear_ok, std::move(read_fd), std::move(prefix), comp,
+                       image_path);
 }
 
 void IstService::onTeardownComplete(bool ok, UniqueFd read_fd,
@@ -1054,22 +1041,6 @@ void IstService::onMountComplete(bool ok)
     publisher_->publishActivation(k_activation_active);
     readAndPublishVersion();
     updateInProgress_ = false;
-}
-
-void IstService::asyncTeardownMounts(
-    std::move_only_function<void(bool) const> done)
-{
-    auto self = shared_from_this();
-    runOffThread(
-        io_, [self]() { return self->teardownMounts(); }, std::move(done));
-}
-
-void IstService::asyncMountImages(
-    std::move_only_function<void(bool) const> done)
-{
-    auto self = shared_from_this();
-    runOffThread(
-        io_, [self]() { return self->mountImages(); }, std::move(done));
 }
 
 void IstService::ensureMounted()
