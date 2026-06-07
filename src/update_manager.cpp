@@ -711,26 +711,34 @@ std::string IstService::startUpdate(int image_fd, std::string_view apply_time)
     UniqueFd image(image_fd);
     if (!initialized_)
     {
+        std::cerr << "StartUpdate rejected: service not initialized\n";
         throw Unavailable{};
     }
     if (state_.stage != IstStage::idle)
     {
+        std::cerr << "StartUpdate rejected: IST is running (stage="
+                  << istStageToString(state_.stage) << ")\n";
         throw Unavailable{};
     }
     if (updateInProgress_)
     {
+        std::cerr << "StartUpdate rejected: an update is already in progress\n";
         throw Unavailable{};
     }
     if (platformCfg_.storage.vectorStoragePath.empty())
     {
+        std::cerr << "StartUpdate rejected: vector storage path is empty\n";
         throw InvalidArgument{};
     }
     if (image.get() < 0)
     {
+        std::cerr << "StartUpdate rejected: invalid image fd\n";
         throw InvalidArgument{};
     }
     if (!isAllowedApplyTime(apply_time))
     {
+        std::cerr << "StartUpdate rejected: unsupported apply time '"
+                  << apply_time << "'\n";
         throw InvalidArgument{};
     }
     (void)apply_time; // Immediate and OnReset are accepted; apply is always
