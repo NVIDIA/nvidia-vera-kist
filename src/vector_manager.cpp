@@ -28,12 +28,14 @@
 #include <boost/asio/steady_timer.hpp>
 #include <ist_app.hpp>
 #include <sdbusplus/exception.hpp>
+#include <vector_manager.hpp>
 
 #include <algorithm>
 #include <array>
 #include <cerrno>
 #include <cstdint>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <iostream>
 #include <optional>
@@ -532,12 +534,7 @@ class TransferSession : public std::enable_shared_from_this<TransferSession>
 
     ~TransferSession()
     {
-        output_.close();
-        if (!committed_)
-        {
-            std::error_code ec;
-            fs::remove(imagePath_, ec);
-        }
+        discard_if_uncommitted();
     }
 
     TransferSession(const TransferSession&) = delete;
@@ -668,6 +665,16 @@ class TransferSession : public std::enable_shared_from_this<TransferSession>
         finish(false);
     }
 
+    void discard_if_uncommitted()
+    {
+        output_.close();
+        if (!committed_)
+        {
+            std::error_code ec;
+            fs::remove(imagePath_, ec);
+        }
+    }
+
     void finish(bool ok)
     {
         if (finished_)
@@ -676,12 +683,7 @@ class TransferSession : public std::enable_shared_from_this<TransferSession>
         }
         finished_ = true;
         deadline_.cancel();
-        output_.close();
-        if (!committed_)
-        {
-            std::error_code ec;
-            fs::remove(imagePath_, ec);
-        }
+        discard_if_uncommitted();
         auto cb = std::move(onComplete_);
         if (cb)
         {
@@ -706,25 +708,36 @@ class TransferSession : public std::enable_shared_from_this<TransferSession>
 };
 
 // ----------------------------------------------------------------
-// IstService::startUpdate
+// VectorManager
 // ----------------------------------------------------------------
 
-std::string IstService::startUpdate(int image_fd, std::string_view apply_time)
+std::shared_ptr<VectorManager>
+    VectorManager::create(boost::asio::io_context& io,
+                          StatePublisher& publisher,
+                          const IstPlatformConfig& cfg)
 {
-    // Take ownership immediately so the fd is closed on any early return/throw
-    // below; on success it is moved into the peek session.
-    UniqueFd image(image_fd);
-    if (!initialized_)
+    return std::shared_ptr<VectorManager>(
+        new VectorManager(io, publisher, cfg));
+}
+
+VectorManager::VectorManager(boost::asio::io_context& io,
+                             StatePublisher& publisher,
+                             const IstPlatformConfig& cfg) :
+    io_(io), publisher_(publisher), platformCfg_(cfg)
+{}
+
+void VectorManager::mountVectorsOnStartup()
+{
+    if (!mountImages())
     {
-        std::cerr << "StartUpdate rejected: service not initialized\n";
-        throw Unavailable{};
+        publisher_.publishActivation(k_activation_failed);
     }
-    if (state_.stage != IstStage::idle)
-    {
-        std::cerr << "StartUpdate rejected: IST is running (stage="
-                  << istStageToString(state_.stage) << ")\n";
-        throw Unavailable{};
-    }
+    readAndPublishVersion();
+}
+
+std::string VectorManager::startUpdate(UniqueFd image,
+                                       std::string_view apply_time)
+{
     if (updateInProgress_)
     {
         std::cerr << "StartUpdate rejected: an update is already in progress\n";
@@ -770,10 +783,11 @@ std::string IstService::startUpdate(int image_fd, std::string_view apply_time)
     activeHeaderPeek_ = peek;
     peek->start();
 
-    return swObjectPath_;
+    return std::format("/xyz/openbmc_project/inventory_software/{}",
+                       platformCfg_.softwareInventoryId);
 }
 
-void IstService::onTransferComplete(bool ok)
+void VectorManager::onTransferComplete(bool ok)
 {
     activeTransfer_.reset();
     if (!ok)
@@ -784,13 +798,13 @@ void IstService::onTransferComplete(bool ok)
     }
 
     std::cout << "Image transfer succeeded (payload verified); mounting\n";
-    publisher_->publishActivationProgress(100);
-    publisher_->removeActivationProgress();
+    publisher_.publishActivationProgress(100);
+    publisher_.removeActivationProgress();
 
     onMountComplete(mountImages());
 }
 
-bool IstService::teardownMounts()
+bool VectorManager::teardownMounts()
 {
     const fs::path& mount_path = platformCfg_.storage.vectorMountPath;
 
@@ -820,7 +834,7 @@ bool IstService::teardownMounts()
     return ok;
 }
 
-bool IstService::mountImages()
+bool VectorManager::mountImages()
 {
     const fs::path& storage_path = platformCfg_.storage.vectorStoragePath;
     const fs::path& mount_path = platformCfg_.storage.vectorMountPath;
@@ -925,7 +939,7 @@ bool IstService::mountImages()
     return true;
 }
 
-void IstService::readAndPublishVersion()
+void VectorManager::readAndPublishVersion()
 {
     const fs::path& mount_path = platformCfg_.storage.vectorMountPath;
     if (mount_path.empty())
@@ -966,21 +980,22 @@ void IstService::readAndPublishVersion()
         return;
     }
 
-    publisher_->publishVersion(version);
+    publisher_.publishVersion(version);
     std::cout << "IST vector version: " << version << '\n';
 }
 
-void IstService::finishUpdate(bool ok)
+void VectorManager::finishUpdate(bool ok)
 {
-    publisher_->publishActivation(ok ? k_activation_active
-                                     : k_activation_failed);
-    publisher_->removeActivationProgress();
+    publisher_.publishActivation(ok ? k_activation_active
+                                    : k_activation_failed);
+    publisher_.removeActivationProgress();
     updateInProgress_ = false;
 }
 
-void IstService::onHeaderPeekComplete(bool ok, std::vector<uint8_t> prefix,
-                                      UniqueFd read_fd, PldmComponentInfo comp,
-                                      const fs::path& image_path)
+void VectorManager::onHeaderPeekComplete(bool ok, std::vector<uint8_t> prefix,
+                                         UniqueFd read_fd,
+                                         PldmComponentInfo comp,
+                                         const fs::path& image_path)
 {
     activeHeaderPeek_.reset();
     if (!ok)
@@ -994,24 +1009,22 @@ void IstService::onHeaderPeekComplete(bool ok, std::vector<uint8_t> prefix,
                        image_path);
 }
 
-void IstService::onTeardownComplete(bool ok, UniqueFd read_fd,
-                                    std::vector<uint8_t> prefix,
-                                    PldmComponentInfo comp,
-                                    const fs::path& image_path)
+void VectorManager::onTeardownComplete(bool ok, UniqueFd read_fd,
+                                       std::vector<uint8_t> prefix,
+                                       PldmComponentInfo comp,
+                                       const fs::path& image_path)
 {
     if (!ok)
     {
         std::cerr << "Failed to unmount existing images; rejecting update\n";
-        publisher_->publishActivation(k_activation_failed);
-        updateInProgress_ = false;
+        finishUpdate(false);
         return;
     }
 
     if (read_fd.get() < 0)
     {
         std::cerr << "Failed to start image transfer\n";
-        publisher_->publishActivation(k_activation_failed);
-        updateInProgress_ = false;
+        finishUpdate(false);
         return;
     }
 
@@ -1028,9 +1041,9 @@ void IstService::onTeardownComplete(bool ok, UniqueFd read_fd,
                     }
                 });
 
-        publisher_->publishActivation(k_activation_activating);
-        publisher_->createActivationProgress();
-        publisher_->publishActivationProgress(0);
+        publisher_.publishActivation(k_activation_activating);
+        publisher_.createActivationProgress();
+        publisher_.publishActivationProgress(0);
 
         activeTransfer_ = session;
         session->start();
@@ -1038,12 +1051,11 @@ void IstService::onTeardownComplete(bool ok, UniqueFd read_fd,
     catch (const std::system_error& e)
     {
         std::cerr << "Failed to start transfer: " << e.what() << '\n';
-        publisher_->publishActivation(k_activation_failed);
-        updateInProgress_ = false;
+        finishUpdate(false);
     }
 }
 
-void IstService::onMountComplete(bool ok)
+void VectorManager::onMountComplete(bool ok)
 {
     if (!ok)
     {
@@ -1051,12 +1063,11 @@ void IstService::onMountComplete(bool ok)
         finishUpdate(false);
         return;
     }
-    publisher_->publishActivation(k_activation_active);
     readAndPublishVersion();
-    updateInProgress_ = false;
+    finishUpdate(true);
 }
 
-void IstService::ensureMounted()
+void VectorManager::ensureMounted()
 {
     const fs::path& mount_path = platformCfg_.storage.vectorMountPath;
     if (mount_path.empty())
@@ -1077,4 +1088,27 @@ void IstService::ensureMounted()
     {
         readAndPublishVersion();
     }
+}
+
+// ----------------------------------------------------------------
+// IstService::startUpdate — service-level guard, then delegate
+// ----------------------------------------------------------------
+
+std::string IstService::startUpdate(int image_fd, std::string_view apply_time)
+{
+    // Take ownership immediately so the fd is closed on any early return/throw
+    // below; on success it is moved into the update flow.
+    UniqueFd image(image_fd);
+    if (!initialized_)
+    {
+        std::cerr << "StartUpdate rejected: service not initialized\n";
+        throw Unavailable{};
+    }
+    if (state_.stage != IstStage::idle)
+    {
+        std::cerr << "StartUpdate rejected: IST is running (stage="
+                  << istStageToString(state_.stage) << ")\n";
+        throw Unavailable{};
+    }
+    return vectorManager_->startUpdate(std::move(image), apply_time);
 }

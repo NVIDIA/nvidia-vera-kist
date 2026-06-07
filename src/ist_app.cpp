@@ -22,6 +22,7 @@
 #include <nlohmann/json.hpp>
 #include <sdbusplus/exception.hpp>
 #include <signature_verify.hpp>
+#include <vector_manager.hpp>
 
 #include <algorithm>
 #include <charconv>
@@ -108,6 +109,7 @@ IstService::IstService(boost::asio::io_context& io,
                              std::move_only_function<void(bool) const> cb) {
         verifyItmSignaturesAsync(io, cfg, std::move(cb));
     }),
+    vectorManager_(VectorManager::create(io, *publisher_, platformCfg_)),
     reSignalTimer_(io)
 {}
 
@@ -360,8 +362,6 @@ bool IstService::initialize(IstPlatformConfig cfg)
     }
 
     platformCfg_ = std::move(cfg);
-    swObjectPath_ = std::format("/xyz/openbmc_project/inventory_software/{}",
-                                platformCfg_.softwareInventoryId);
     printIstPlatformConfig();
 
     // Deassert IST boot on startup as a safety measure (e.g. after crash)
@@ -380,11 +380,7 @@ bool IstService::initialize(IstPlatformConfig cfg)
 
     initialized_ = true;
 
-    if (!mountImages())
-    {
-        publisher_->publishActivation(k_activation_failed);
-    }
-    readAndPublishVersion();
+    vectorManager_->mountVectorsOnStartup();
     return true;
 }
 
@@ -867,14 +863,14 @@ std::string IstService::startIST(const ParamMap& test_params)
         std::cerr << "Another IST run is in progress\n";
         throw sdbusplus::exception::SdBusError(EBUSY, "IST already running");
     }
-    if (updateInProgress_)
+    if (vectorManager_->inProgress())
     {
         std::cerr << "Cannot start IST while update is in progress\n";
         throw sdbusplus::exception::SdBusError(
             EBUSY, "Cannot start IST while update is in progress");
     }
 
-    ensureMounted();
+    vectorManager_->ensureMounted();
 
     transitionTo(IstStage::collateralVerification, IstStatus::inProgress);
 

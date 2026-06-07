@@ -150,7 +150,7 @@ endif
 ist_app_a = static_library(
     'ist_app_a',
     'src/ist_app.cpp',
-    'src/update_manager.cpp',
+    'src/vector_manager.cpp',
     'src/ist_results.cpp',
     'src/hook_runner.cpp',
     'src/host_power_monitor.cpp',

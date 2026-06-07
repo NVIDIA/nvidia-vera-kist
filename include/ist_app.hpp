@@ -408,6 +408,7 @@ void resolveItmPaths(IstPlatformConfig& cfg);
 struct PldmComponentInfo;
 class TransferSession;
 class PldmHeaderPeekSession;
+class VectorManager;
 
 struct PldmComponentInfo
 {
@@ -499,20 +500,6 @@ class IstService : public std::enable_shared_from_this<IstService>
     void onDeassertDone(int itmExit, bool okDeassert);
     void onResetDone(int itmExit, bool okReset);
 
-    void onTransferComplete(bool ok);
-    void onHeaderPeekComplete(bool ok, std::vector<uint8_t> prefix,
-                              UniqueFd readFd, PldmComponentInfo comp,
-                              const std::filesystem::path& imagePath);
-    void onTeardownComplete(bool ok, UniqueFd readFd,
-                            std::vector<uint8_t> prefix, PldmComponentInfo comp,
-                            const std::filesystem::path& imagePath);
-    void onMountComplete(bool ok);
-    bool mountImages();
-    bool teardownMounts();
-    void ensureMounted();
-    void readAndPublishVersion();
-    void finishUpdate(bool ok);
-
     boost::asio::io_context& io_;
     std::unique_ptr<StatePublisher> publisher_;
 
@@ -520,10 +507,8 @@ class IstService : public std::enable_shared_from_this<IstService>
     IstTestConfig test_;
     IstState state_;
     bool initialized_{false};
-    bool updateInProgress_{false};
     uint64_t runCounter_{0};
     std::string currentRunPath_;
-    std::string swObjectPath_;
     ResultsFdCb resultsFdCb_;
 
     std::unique_ptr<HookRunner> hookRunner_;
@@ -531,8 +516,7 @@ class IstService : public std::enable_shared_from_this<IstService>
     std::unique_ptr<ItmRunner> itmRunner_;
     SignatureVerifier signatureVerifier_;
     CpuDiscoverer cpuDiscoverer_;
-    std::shared_ptr<TransferSession> activeTransfer_;
-    std::shared_ptr<PldmHeaderPeekSession> activeHeaderPeek_;
+    std::shared_ptr<VectorManager> vectorManager_;
     boost::asio::steady_timer reSignalTimer_;
 
     std::vector<std::string> failureInfo_;
