@@ -677,6 +677,11 @@ class TransferSession : public std::enable_shared_from_this<TransferSession>
         finished_ = true;
         deadline_.cancel();
         output_.close();
+        if (!committed_)
+        {
+            std::error_code ec;
+            fs::remove(imagePath_, ec);
+        }
         auto cb = std::move(onComplete_);
         if (cb)
         {
