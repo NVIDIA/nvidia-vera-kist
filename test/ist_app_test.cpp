@@ -165,7 +165,7 @@ TEST(IstPlatformConfigTest, DefaultValues)
     EXPECT_TRUE(cfg.storage.vectorStoragePath.empty());
     EXPECT_TRUE(cfg.storage.resultStoragePath.empty());
     EXPECT_TRUE(cfg.itmLibDir.empty());
-    EXPECT_EQ(cfg.transferInactivityTimeout, std::chrono::seconds(300));
+    EXPECT_EQ(cfg.transferInactivityTimeout, std::chrono::seconds(60));
 }
 
 // ----------------

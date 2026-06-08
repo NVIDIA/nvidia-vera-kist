@@ -207,7 +207,7 @@ struct IstPlatformConfig
     std::filesystem::path signingKeyPath{"/etc/ist/kist_itm_verify_key.pem"};
     HookPaths hooks;
     StoragePaths storage;
-    std::chrono::seconds transferInactivityTimeout{300};
+    std::chrono::seconds transferInactivityTimeout{60};
 };
 
 /**
