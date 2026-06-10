@@ -479,7 +479,7 @@ class IstService : public std::enable_shared_from_this<IstService>
                std::shared_ptr<HostPowerMonitor> powerMonitor,
                std::unique_ptr<ItmRunner> itmRunner);
     bool getISTParams(const ParamMap& testParams);
-    bool collateralVerification(const ParamMap& testParams);
+    bool collateralVerification();
 
     void updateDbusState();
     void transitionTo(IstStage stage);

@@ -18,6 +18,7 @@
 #include <unistd.h>
 
 #include <ist_app.hpp>
+#include <ist_errors.hpp>
 #include <ist_results.hpp>
 #include <sdbusplus/exception.hpp>
 
@@ -35,6 +36,8 @@
 namespace fs = std::filesystem;
 using ::testing::NiceMock;
 using ::testing::StrEq;
+
+namespace ist_err = sdbusplus::error::com::nvidia::vera::ist;
 
 using DoneCb = std::move_only_function<void(bool) const>;
 using ItmDoneCb = std::move_only_function<void(int) const>;
@@ -689,7 +692,7 @@ TEST_F(IstServiceTest, StartIstAbortsOnMissingVectorStorage)
     init_from_file(configPath_);
 
     ParamMap params;
-    EXPECT_THROW(service_->startIST(params), sdbusplus::exception::SdBusError);
+    EXPECT_THROW(service_->startIST(params), ist_err::CollateralNotFound);
     EXPECT_EQ(service_->state().status, IstStatus::aborted);
     EXPECT_EQ(service_->state().stage, IstStage::idle);
 }
@@ -701,7 +704,7 @@ TEST_F(IstServiceTest, StartIstAbortsOnMissingItmBinary)
     init_from_file(configPath_);
 
     ParamMap params;
-    EXPECT_THROW(service_->startIST(params), sdbusplus::exception::SdBusError);
+    EXPECT_THROW(service_->startIST(params), ist_err::CollateralNotFound);
     EXPECT_EQ(service_->state().status, IstStatus::aborted);
     EXPECT_EQ(service_->state().stage, IstStage::idle);
 }
@@ -713,7 +716,7 @@ TEST_F(IstServiceTest, StartIstAbortsOnMissingGoldenRes)
     init_from_file(configPath_);
 
     ParamMap params;
-    EXPECT_THROW(service_->startIST(params), sdbusplus::exception::SdBusError);
+    EXPECT_THROW(service_->startIST(params), ist_err::CollateralNotFound);
     EXPECT_EQ(service_->state().status, IstStatus::aborted);
     EXPECT_EQ(service_->state().stage, IstStage::idle);
 }
@@ -726,7 +729,7 @@ TEST_F(IstServiceTest, StartIstAbortsOnEmptyGoldenRes)
     init_from_file(configPath_);
 
     ParamMap params;
-    EXPECT_THROW(service_->startIST(params), sdbusplus::exception::SdBusError);
+    EXPECT_THROW(service_->startIST(params), ist_err::CollateralNotFound);
     EXPECT_EQ(service_->state().status, IstStatus::aborted);
     EXPECT_EQ(service_->state().stage, IstStage::idle);
 }
@@ -737,7 +740,7 @@ TEST_F(IstServiceTest, StartIstAbortsOnUnknownParam)
 
     ParamMap params;
     params["unknownParam"] = std::string("value");
-    EXPECT_THROW(service_->startIST(params), sdbusplus::exception::SdBusError);
+    EXPECT_THROW(service_->startIST(params), ist_err::InvalidParameter);
     EXPECT_EQ(service_->state().status, IstStatus::aborted);
 }
 
@@ -747,7 +750,7 @@ TEST_F(IstServiceTest, StartIstAbortsOnOversizedParam)
 
     ParamMap params;
     params["customTestList"] = std::string(5000, 'A'); // exceeds 4096 limit
-    EXPECT_THROW(service_->startIST(params), sdbusplus::exception::SdBusError);
+    EXPECT_THROW(service_->startIST(params), ist_err::InvalidParameter);
     EXPECT_EQ(service_->state().status, IstStatus::aborted);
 }
 
@@ -1777,7 +1780,7 @@ TEST_F(IstServiceTest, StartIstAbortsOnMissingResultStorageConfig)
     init_from_file(configPath_);
 
     ParamMap params;
-    EXPECT_THROW(service_->startIST(params), sdbusplus::exception::SdBusError);
+    EXPECT_THROW(service_->startIST(params), ist_err::CollateralNotFound);
     EXPECT_EQ(service_->state().status, IstStatus::aborted);
 }
 
@@ -1984,7 +1987,7 @@ TEST_F(IstServiceTest, RunObjectNotCreatedOnCollateralAbort)
         .Times(0);
 
     ParamMap params;
-    EXPECT_THROW(service_->startIST(params), sdbusplus::exception::SdBusError);
+    EXPECT_THROW(service_->startIST(params), ist_err::CollateralNotFound);
     EXPECT_EQ(service_->state().status, IstStatus::aborted);
 }
 
@@ -2094,7 +2097,7 @@ TEST_F(IstServiceTest, ParamTypeMismatchRejected)
 
     ParamMap params;
     params["istSwTimeoutSec"] = std::string("not_a_number");
-    EXPECT_THROW(service_->startIST(params), sdbusplus::exception::SdBusError);
+    EXPECT_THROW(service_->startIST(params), ist_err::InvalidParameter);
     EXPECT_EQ(service_->state().status, IstStatus::aborted);
 }
 
@@ -2168,7 +2171,7 @@ TEST_F(IstServiceTest, SecondRunAfterFailureWorks)
 TEST_F(IstServiceTest, StartIstBeforeInitializeThrows)
 {
     ParamMap params;
-    EXPECT_THROW(service_->startIST(params), sdbusplus::exception::SdBusError);
+    EXPECT_THROW(service_->startIST(params), ist_err::CollateralNotFound);
     EXPECT_EQ(service_->state().status, IstStatus::aborted);
     EXPECT_EQ(service_->state().stage, IstStage::idle);
 }
@@ -3095,7 +3098,7 @@ TEST_F(IstServiceTest, ResultsPreservedWhenCollateralVerificationFails)
     fs::remove_all(tmpDir_ / "vectors");
 
     ParamMap params;
-    EXPECT_THROW(service_->startIST(params), sdbusplus::exception::SdBusError);
+    EXPECT_THROW(service_->startIST(params), ist_err::CollateralNotFound);
     EXPECT_EQ(service_->state().status, IstStatus::aborted);
 
     // Previous results and markers should still be intact
@@ -3628,7 +3631,7 @@ TEST_F(IstServiceTest, ErrorCollateralVerificationFailed)
 
     testing::internal::CaptureStderr();
     ParamMap params;
-    EXPECT_THROW(service_->startIST(params), sdbusplus::exception::SdBusError);
+    EXPECT_THROW(service_->startIST(params), ist_err::CollateralNotFound);
     std::string err = testing::internal::GetCapturedStderr();
 
     EXPECT_THAT(

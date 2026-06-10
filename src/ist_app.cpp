@@ -17,6 +17,7 @@
 #include <fcntl.h>
 
 #include <ist_app.hpp>
+#include <ist_errors.hpp>
 #include <ist_results.hpp>
 #include <nlohmann/json.hpp>
 #include <sdbusplus/exception.hpp>
@@ -32,6 +33,7 @@
 #include <string>
 
 namespace fs = std::filesystem;
+namespace ist_err = sdbusplus::error::com::nvidia::vera::ist;
 using json = nlohmann::json;
 
 static constexpr size_t max_param_string_length = 4096;
@@ -507,14 +509,8 @@ bool IstService::getISTParams(const ParamMap& test_params)
     return true;
 }
 
-bool IstService::collateralVerification(const ParamMap& test_params)
+bool IstService::collateralVerification()
 {
-    if (!getISTParams(test_params))
-    {
-        std::cerr << "Failed to get IST test params\n";
-        return false;
-    }
-
     if (platformCfg_.storage.vectorMountPath.empty())
     {
         std::cerr << "vectorMountPath not configured in platform config!\n";
@@ -884,12 +880,18 @@ std::string IstService::startIST(const ParamMap& test_params)
 
     transitionTo(IstStage::collateralVerification, IstStatus::inProgress);
 
-    if (!collateralVerification(test_params))
+    if (!getISTParams(test_params))
+    {
+        transitionTo(IstStage::idle, IstStatus::aborted,
+                     "category=PARAMS, reason=invalid_test_params");
+        throw ist_err::InvalidParameter{};
+    }
+
+    if (!collateralVerification())
     {
         transitionTo(IstStage::idle, IstStatus::aborted,
                      "category=COLLATERAL, reason=verification_failed");
-        throw sdbusplus::exception::SdBusError(
-            EINVAL, "Collateral verification failed");
+        throw ist_err::CollateralNotFound{};
     }
 
     const fs::path& hook_cmd = platformCfg_.hooks.istBootAssert;
