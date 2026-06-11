@@ -92,4 +92,27 @@ struct ResultStorageError final :
     }
 };
 
+struct HookNotFound final : public sdbusplus::exception::generated_exception
+{
+    static constexpr auto errName = "com.nvidia.vera.ist.Error.HookNotFound";
+    static constexpr auto errDesc =
+        "A required IST hook script is not installed.";
+    static constexpr auto errWhat =
+        "com.nvidia.vera.ist.Error.HookNotFound: "
+        "A required IST hook script is not installed.";
+
+    const char* name() const noexcept override
+    {
+        return errName;
+    }
+    const char* description() const noexcept override
+    {
+        return errDesc;
+    }
+    const char* what() const noexcept override
+    {
+        return errWhat;
+    }
+};
+
 } // namespace sdbusplus::error::com::nvidia::vera::ist

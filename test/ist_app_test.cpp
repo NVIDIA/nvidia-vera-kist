@@ -1481,7 +1481,7 @@ TEST_F(IstServiceTest, StartIstThrowsWhenAssertHookMissing)
     init_from_file(configPath_);
 
     ParamMap params;
-    EXPECT_THROW(service_->startIST(params), sdbusplus::exception::SdBusError);
+    EXPECT_THROW(service_->startIST(params), ist_err::HookNotFound);
     EXPECT_EQ(service_->state().status, IstStatus::failed);
     EXPECT_EQ(service_->state().stage, IstStage::idle);
 }
@@ -1521,60 +1521,6 @@ TEST_F(IstServiceTest, SwTimeoutClampedToMax)
 
     ASSERT_TRUE(captured_cfg.swTimeoutSec.has_value());
     EXPECT_EQ(*captured_cfg.swTimeoutSec, 7200); // clamped to max
-}
-
-TEST_F(IstServiceTest, CleanupFailsWhenDeassertHookMissing)
-{
-    // Config without istBootDeassert hook
-    write_config(R"({
-        "hookDirectory": ")" +
-                 (tmpDir_ / "hooks").string() + R"(",
-        "hookPaths": {
-            "istBootAssert": ")" +
-                 (tmpDir_ / "hooks/assert.sh").string() + R"("
-        },
-        "storageConfig": {
-            "vectorMountPath": ")" +
-                 (tmpDir_ / "vectors").string() + R"(",
-            "vectorStoragePath": ")" +
-                 (tmpDir_ / "storage").string() + R"(",
-            "resultStoragePath": ")" +
-                 (tmpDir_ / "results").string() + R"("
-        },
-        "softwareInventoryId": "IST_Vectors"
-    })");
-    init_from_file(configPath_);
-
-    std::move_only_function<void(bool) const> assert_done;
-    EXPECT_CALL(*hookRunner_,
-                asyncRun(::testing::_, StrEq("istBootAssert hook"),
-                         ::testing::_, ::testing::_, ::testing::_))
-        .WillOnce([&](const std::string&, const std::string&, DoneCb done,
-                      const std::vector<std::string>&,
-                      std::chrono::seconds) { assert_done = std::move(done); });
-
-    std::move_only_function<void(bool) const> power_done;
-    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
-        .WillOnce([&](DoneCb done) { power_done = std::move(done); });
-
-    ItmDoneCb itm_done;
-    EXPECT_CALL(*itmRunner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
-                                      ::testing::_))
-        .WillOnce([&](const IstTestConfig&, const IstPlatformConfig&,
-                      ItmDoneCb done,
-                      ProgressCb) { itm_done = std::move(done); });
-
-    ParamMap params;
-    start_ist(params);
-    assert_done(true);
-    power_done(true);
-    itm_done(0);
-    io_.run();
-    io_.restart();
-
-    // Cleanup should fail because istBootDeassert is missing
-    EXPECT_EQ(service_->state().status, IstStatus::failed);
-    EXPECT_EQ(service_->state().stage, IstStage::idle);
 }
 
 TEST_F(IstServiceTest, AutoRebootResetFailureTransitionsToFailed)
@@ -3662,7 +3608,7 @@ TEST_F(IstServiceTest, ErrorHookAssertNotFound)
 
     testing::internal::CaptureStderr();
     ParamMap params;
-    EXPECT_THROW(service_->startIST(params), sdbusplus::exception::SdBusError);
+    EXPECT_THROW(service_->startIST(params), ist_err::HookNotFound);
     std::string err = testing::internal::GetCapturedStderr();
 
     EXPECT_THAT(
@@ -3713,38 +3659,17 @@ TEST_F(IstServiceTest, ErrorHookDeassertNotFound)
     })");
     init_from_file(configPath_);
 
-    DoneCb assert_done;
-    EXPECT_CALL(*hookRunner_,
-                asyncRun(::testing::_, StrEq("istBootAssert hook"),
-                         ::testing::_, ::testing::_, ::testing::_))
-        .WillOnce([&](const std::string&, const std::string&, DoneCb done,
-                      const std::vector<std::string>&,
-                      std::chrono::seconds) { assert_done = std::move(done); });
-
-    DoneCb power_done;
-    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
-        .WillOnce([&](DoneCb done) { power_done = std::move(done); });
-
-    ItmDoneCb itm_done;
-    EXPECT_CALL(*itmRunner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
-                                      ::testing::_))
-        .WillOnce([&](const IstTestConfig&, const IstPlatformConfig&,
-                      ItmDoneCb done,
-                      ProgressCb) { itm_done = std::move(done); });
-
     testing::internal::CaptureStderr();
-    start_ist();
-    assert_done(true);
-    power_done(true);
-    itm_done(0);
-    io_.run();
-    io_.restart();
+    ParamMap params;
+    EXPECT_THROW(service_->startIST(params), ist_err::HookNotFound);
     std::string err = testing::internal::GetCapturedStderr();
 
     EXPECT_THAT(
         err,
         ::testing::HasSubstr(
             "IST_ERROR: category=HOOK, reason=ist_boot_deassert_not_found"));
+    EXPECT_EQ(service_->state().status, IstStatus::failed);
+    EXPECT_EQ(service_->state().stage, IstStage::idle);
 }
 
 TEST_F(IstServiceTest, ErrorHookDeassertFailed)

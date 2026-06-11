@@ -744,14 +744,6 @@ void IstService::runIstCleanup(int itm_exit)
 void IstService::onArchiveDone(int itm_exit)
 {
     const fs::path& hook_cmd = platformCfg_.hooks.istBootDeassert;
-    if (hook_cmd.empty())
-    {
-        std::cerr << "istBootDeassert hook not found, failing cleanup\n";
-        transitionTo(IstStage::idle, IstStatus::failed,
-                     "category=HOOK, reason=ist_boot_deassert_not_found");
-        return;
-    }
-
     hookRunner_->asyncRun(
         hook_cmd, "istBootDeassert hook",
         [self = shared_from_this(), itm_exit](bool ok_deassert) {
@@ -912,8 +904,15 @@ std::string IstService::startIST(const ParamMap& test_params)
     {
         transitionTo(IstStage::idle, IstStatus::failed,
                      "category=HOOK, reason=ist_boot_assert_not_found");
-        throw sdbusplus::exception::SdBusError(ENOENT,
-                                               "istBootAssert hook not found");
+        throw ist_err::HookNotFound{};
+    }
+
+    const fs::path& deassert_cmd = platformCfg_.hooks.istBootDeassert;
+    if (deassert_cmd.empty())
+    {
+        transitionTo(IstStage::idle, IstStatus::failed,
+                     "category=HOOK, reason=ist_boot_deassert_not_found");
+        throw ist_err::HookNotFound{};
     }
 
     currentRunPath_ =
