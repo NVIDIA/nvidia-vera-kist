@@ -115,4 +115,50 @@ struct HookNotFound final : public sdbusplus::exception::generated_exception
     }
 };
 
+struct InvalidArgument final : public sdbusplus::exception::generated_exception
+{
+    static constexpr auto errName =
+        "xyz.openbmc_project.Common.Error.InvalidArgument";
+    static constexpr auto errDesc = "Invalid argument was given.";
+    static constexpr auto errWhat =
+        "xyz.openbmc_project.Common.Error.InvalidArgument: "
+        "Invalid argument was given.";
+
+    const char* name() const noexcept override
+    {
+        return errName;
+    }
+    const char* description() const noexcept override
+    {
+        return errDesc;
+    }
+    const char* what() const noexcept override
+    {
+        return errWhat;
+    }
+};
+
+struct Unavailable final : public sdbusplus::exception::generated_exception
+{
+    static constexpr auto errName =
+        "xyz.openbmc_project.Common.Error.Unavailable";
+    static constexpr auto errDesc = "The service is temporarily unavailable.";
+    static constexpr auto errWhat =
+        "xyz.openbmc_project.Common.Error.Unavailable: "
+        "The service is temporarily unavailable.";
+
+    const char* name() const noexcept override
+    {
+        return errName;
+    }
+    const char* description() const noexcept override
+    {
+        return errDesc;
+    }
+    const char* what() const noexcept override
+    {
+        return errWhat;
+    }
+};
+
 } // namespace sdbusplus::error::com::nvidia::vera::ist

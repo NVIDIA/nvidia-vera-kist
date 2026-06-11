@@ -637,7 +637,7 @@ TEST_F(IstServiceTest, SoftwareInventoryIdAcceptsUnderscoresAndDigits)
 TEST_F(IstServiceTest, StartUpdateBeforeInitializeThrows)
 {
     EXPECT_THROW(service_->startUpdate(-1, k_apply_time_immediate),
-                 sdbusplus::exception::generated_exception);
+                 ist_err::Unavailable);
 }
 
 TEST_F(IstServiceTest, InitializeRejectsHookOutsideHookDir)
@@ -2253,7 +2253,7 @@ TEST_F(IstServiceTest, StartUpdateRejectsConcurrentTransfer)
 
     auto [readFd2, writeFd2] = make_upload_socket_pair();
     EXPECT_THROW(service_->startUpdate(readFd2, k_apply_time_immediate),
-                 sdbusplus::exception::generated_exception);
+                 ist_err::Unavailable);
     ::close(writeFd2);
 
     ::close(fd);
@@ -2277,7 +2277,7 @@ TEST_F(IstServiceTest, StartUpdateRejectsWhileIstRunning)
 
     auto [readFd, writeFd] = make_upload_socket_pair();
     EXPECT_THROW(service_->startUpdate(readFd, k_apply_time_immediate),
-                 sdbusplus::exception::generated_exception);
+                 ist_err::Unavailable);
     ::close(writeFd);
 }
 
@@ -2408,7 +2408,7 @@ TEST_F(IstServiceTest, StartUpdateRejectsUnsupportedApplyTime)
 
     auto [readFd, writeFd] = make_upload_socket_pair();
     EXPECT_THROW(service_->startUpdate(readFd, "not-a-valid-apply-time"),
-                 sdbusplus::exception::generated_exception);
+                 ist_err::InvalidArgument);
     ::close(writeFd);
 }
 
@@ -2437,7 +2437,7 @@ TEST_F(IstServiceTest, StartUpdateRejectsEmptyStoragePath)
 
     auto [readFd, writeFd] = make_upload_socket_pair();
     EXPECT_THROW(service_->startUpdate(readFd, k_apply_time_immediate),
-                 sdbusplus::exception::generated_exception);
+                 ist_err::InvalidArgument);
     ::close(writeFd);
 }
 

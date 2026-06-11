@@ -27,6 +27,7 @@
 #include <boost/asio/posix/stream_descriptor.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <ist_app.hpp>
+#include <ist_errors.hpp>
 #include <sdbusplus/exception.hpp>
 #include <vector_manager.hpp>
 
@@ -46,45 +47,7 @@
 #include <vector>
 
 namespace fs = std::filesystem;
-
-namespace
-{
-
-struct InvalidArgument final : sdbusplus::exception::generated_exception
-{
-    const char* name() const noexcept override
-    {
-        return "xyz.openbmc_project.Common.Error.InvalidArgument";
-    }
-    const char* description() const noexcept override
-    {
-        return "Invalid argument was given.";
-    }
-    const char* what() const noexcept override
-    {
-        return "xyz.openbmc_project.Common.Error.InvalidArgument: "
-               "Invalid argument was given.";
-    }
-};
-
-struct Unavailable final : sdbusplus::exception::generated_exception
-{
-    const char* name() const noexcept override
-    {
-        return "xyz.openbmc_project.Common.Error.Unavailable";
-    }
-    const char* description() const noexcept override
-    {
-        return "The service is temporarily unavailable.";
-    }
-    const char* what() const noexcept override
-    {
-        return "xyz.openbmc_project.Common.Error.Unavailable: "
-               "The service is temporarily unavailable.";
-    }
-};
-
-} // namespace
+namespace ist_err = sdbusplus::error::com::nvidia::vera::ist;
 
 static constexpr std::string_view k_image_file_name = "CPU-IST.img";
 static constexpr size_t k_transfer_buf_size = 65536;
@@ -741,23 +704,23 @@ std::string VectorManager::startUpdate(UniqueFd image,
     if (updateInProgress_)
     {
         std::cerr << "StartUpdate rejected: an update is already in progress\n";
-        throw Unavailable{};
+        throw ist_err::Unavailable{};
     }
     if (platformCfg_.storage.vectorStoragePath.empty())
     {
         std::cerr << "StartUpdate rejected: vector storage path is empty\n";
-        throw InvalidArgument{};
+        throw ist_err::InvalidArgument{};
     }
     if (image.get() < 0)
     {
         std::cerr << "StartUpdate rejected: invalid image fd\n";
-        throw InvalidArgument{};
+        throw ist_err::InvalidArgument{};
     }
     if (!isAllowedApplyTime(apply_time))
     {
         std::cerr << "StartUpdate rejected: unsupported apply time '"
                   << apply_time << "'\n";
-        throw InvalidArgument{};
+        throw ist_err::InvalidArgument{};
     }
     (void)apply_time; // Immediate and OnReset are accepted; apply is always
                       // immediate.
@@ -1102,13 +1065,13 @@ std::string IstService::startUpdate(int image_fd, std::string_view apply_time)
     if (!initialized_)
     {
         std::cerr << "StartUpdate rejected: service not initialized\n";
-        throw Unavailable{};
+        throw ist_err::Unavailable{};
     }
     if (state_.stage != IstStage::idle)
     {
         std::cerr << "StartUpdate rejected: IST is running (stage="
                   << istStageToString(state_.stage) << ")\n";
-        throw Unavailable{};
+        throw ist_err::Unavailable{};
     }
     return vectorManager_->startUpdate(std::move(image), apply_time);
 }
