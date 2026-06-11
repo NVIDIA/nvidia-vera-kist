@@ -161,4 +161,27 @@ struct Unavailable final : public sdbusplus::exception::generated_exception
     }
 };
 
+struct InternalFailure final : public sdbusplus::exception::generated_exception
+{
+    static constexpr auto errName =
+        "xyz.openbmc_project.Common.Error.InternalFailure";
+    static constexpr auto errDesc = "The operation failed internally.";
+    static constexpr auto errWhat =
+        "xyz.openbmc_project.Common.Error.InternalFailure: "
+        "The operation failed internally.";
+
+    const char* name() const noexcept override
+    {
+        return errName;
+    }
+    const char* description() const noexcept override
+    {
+        return errDesc;
+    }
+    const char* what() const noexcept override
+    {
+        return errWhat;
+    }
+};
+
 } // namespace sdbusplus::error::com::nvidia::vera::ist

@@ -18,6 +18,7 @@
 #include <unistd.h>
 
 #include <ist_app.hpp>
+#include <ist_errors.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/message/types.hpp>
 
@@ -26,6 +27,8 @@
 #include <set>
 #include <string>
 #include <vector>
+
+namespace ist_err = sdbusplus::error::com::nvidia::vera::ist;
 
 static constexpr const char* config_path = "/etc/ist/platform_cfg.json";
 static constexpr const char* sw_path_prefix =
@@ -118,8 +121,7 @@ int main(int, char**)
             auto svc = weak.lock();
             if (!svc)
             {
-                throw sdbusplus::exception::SdBusError(ENOENT,
-                                                       "Service unavailable");
+                throw ist_err::InternalFailure{};
             }
             return return_and_post_close(svc->getResultsFd(), io);
         });
@@ -185,8 +187,7 @@ int main(int, char**)
                 ::fcntl(static_cast<int>(image), F_DUPFD_CLOEXEC, 0));
             if (owned.get() < 0)
             {
-                throw sdbusplus::exception::SdBusError(
-                    errno, "xyz.openbmc_project.Common.Error.Unavailable");
+                throw ist_err::InternalFailure{};
             }
             return sdbusplus::message::object_path(
                 service->startUpdate(owned.release(), apply_time));
