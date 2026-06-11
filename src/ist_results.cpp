@@ -22,6 +22,7 @@
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/post.hpp>
 #include <ist_app.hpp>
+#include <ist_errors.hpp>
 #include <ist_results.hpp>
 
 #include <array>
@@ -35,6 +36,7 @@
 #include <vector>
 
 namespace fs = std::filesystem;
+namespace ist_err = sdbusplus::error::com::nvidia::vera::ist;
 
 inline constexpr std::string_view k_archive_name = "ist_results.tar.gz";
 static constexpr size_t k_archive_buf_size = 65536;
@@ -409,8 +411,7 @@ sdbusplus::message::unix_fd IstService::getResultsFd()
     if (results_dir.empty())
     {
         std::cerr << "IST: resultStoragePath not configured\n";
-        throw sdbusplus::exception::SdBusError(
-            ENOENT, "resultStoragePath not configured");
+        throw ist_err::InternalFailure{};
     }
 
     fs::path archive_path = results_dir / k_archive_name;
@@ -421,8 +422,7 @@ sdbusplus::message::unix_fd IstService::getResultsFd()
     {
         std::cerr << "IST: no results archive at " << archive_path << ": "
                   << errno << '\n';
-        throw sdbusplus::exception::SdBusError(ENOENT,
-                                               "No IST results available");
+        throw ist_err::ResourceNotFound{};
     }
 
     struct stat st{};
@@ -431,16 +431,14 @@ sdbusplus::message::unix_fd IstService::getResultsFd()
         int err = errno;
         std::cerr << "IST: fstat failed on results archive: " << err << '\n';
         ::close(fd);
-        throw sdbusplus::exception::SdBusError(
-            err, "Failed to stat IST results archive");
+        throw ist_err::InternalFailure{};
     }
     if (st.st_size > k_max_result_size)
     {
         std::cerr << "IST: results archive too large (" << st.st_size
                   << " bytes, max " << k_max_result_size << ")\n";
         ::close(fd);
-        throw sdbusplus::exception::SdBusError(
-            EFBIG, "IST results archive exceeds size limit");
+        throw ist_err::InternalFailure{};
     }
 
     return {fd};

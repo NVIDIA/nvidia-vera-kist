@@ -184,4 +184,27 @@ struct InternalFailure final : public sdbusplus::exception::generated_exception
     }
 };
 
+struct ResourceNotFound final : public sdbusplus::exception::generated_exception
+{
+    static constexpr auto errName =
+        "xyz.openbmc_project.Common.Error.ResourceNotFound";
+    static constexpr auto errDesc = "The resource is not found.";
+    static constexpr auto errWhat =
+        "xyz.openbmc_project.Common.Error.ResourceNotFound: "
+        "The resource is not found.";
+
+    const char* name() const noexcept override
+    {
+        return errName;
+    }
+    const char* description() const noexcept override
+    {
+        return errDesc;
+    }
+    const char* what() const noexcept override
+    {
+        return errWhat;
+    }
+};
+
 } // namespace sdbusplus::error::com::nvidia::vera::ist

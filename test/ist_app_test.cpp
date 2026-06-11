@@ -3230,7 +3230,7 @@ TEST_F(IstServiceTest, GetResultsFdThrowsWhenNoArchive)
 {
     init_from_file(configPath_);
 
-    EXPECT_THROW(service_->getResultsFd(), sdbusplus::exception::SdBusError);
+    EXPECT_THROW(service_->getResultsFd(), ist_err::ResourceNotFound);
 }
 
 TEST_F(IstServiceTest, GetResultsFdThrowsWhenArchiveTooLarge)
@@ -3246,7 +3246,7 @@ TEST_F(IstServiceTest, GetResultsFdThrowsWhenArchiveTooLarge)
     ofs.put('\0');
     ofs.close();
 
-    EXPECT_THROW(service_->getResultsFd(), sdbusplus::exception::SdBusError);
+    EXPECT_THROW(service_->getResultsFd(), ist_err::InternalFailure);
 }
 
 TEST_F(IstServiceTest, StartIstCleansUpOldResults)
