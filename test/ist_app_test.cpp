@@ -1780,7 +1780,7 @@ TEST_F(IstServiceTest, StartIstAbortsOnMissingResultStorageConfig)
     init_from_file(configPath_);
 
     ParamMap params;
-    EXPECT_THROW(service_->startIST(params), ist_err::CollateralNotFound);
+    EXPECT_THROW(service_->startIST(params), ist_err::ResultStorageError);
     EXPECT_EQ(service_->state().status, IstStatus::aborted);
 }
 

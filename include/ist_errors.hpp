@@ -68,4 +68,28 @@ struct InvalidParameter final : public sdbusplus::exception::generated_exception
     }
 };
 
+struct ResultStorageError final :
+    public sdbusplus::exception::generated_exception
+{
+    static constexpr auto errName =
+        "com.nvidia.vera.ist.Error.ResultStorageError";
+    static constexpr auto errDesc = "IST result storage is unavailable.";
+    static constexpr auto errWhat =
+        "com.nvidia.vera.ist.Error.ResultStorageError: "
+        "IST result storage is unavailable.";
+
+    const char* name() const noexcept override
+    {
+        return errName;
+    }
+    const char* description() const noexcept override
+    {
+        return errDesc;
+    }
+    const char* what() const noexcept override
+    {
+        return errWhat;
+    }
+};
+
 } // namespace sdbusplus::error::com::nvidia::vera::ist

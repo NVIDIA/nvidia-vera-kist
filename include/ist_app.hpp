@@ -480,6 +480,7 @@ class IstService : public std::enable_shared_from_this<IstService>
                std::unique_ptr<ItmRunner> itmRunner);
     bool getISTParams(const ParamMap& testParams);
     bool collateralVerification();
+    bool prepareResultStorage();
 
     void updateDbusState();
     void transitionTo(IstStage stage);

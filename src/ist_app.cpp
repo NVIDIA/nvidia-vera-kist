@@ -549,11 +549,17 @@ bool IstService::collateralVerification()
         return false;
     }
 
+    return true;
+}
+
+bool IstService::prepareResultStorage()
+{
     if (platformCfg_.storage.resultStoragePath.empty())
     {
         std::cerr << "resultStoragePath not configured in platform config!\n";
         return false;
     }
+    std::error_code fs_ec;
     fs::create_directories(platformCfg_.storage.resultStoragePath, fs_ec);
     if (fs_ec)
     {
@@ -892,6 +898,13 @@ std::string IstService::startIST(const ParamMap& test_params)
         transitionTo(IstStage::idle, IstStatus::aborted,
                      "category=COLLATERAL, reason=verification_failed");
         throw ist_err::CollateralNotFound{};
+    }
+
+    if (!prepareResultStorage())
+    {
+        transitionTo(IstStage::idle, IstStatus::aborted,
+                     "category=STORAGE, reason=result_storage_unavailable");
+        throw ist_err::ResultStorageError{};
     }
 
     const fs::path& hook_cmd = platformCfg_.hooks.istBootAssert;
