@@ -692,7 +692,7 @@ TEST_F(IstServiceTest, StartIstAbortsOnMissingVectorStorage)
     init_from_file(configPath_);
 
     ParamMap params;
-    EXPECT_THROW(service_->startIST(params), ist_err::CollateralNotFound);
+    EXPECT_THROW(service_->startIST(params), ist_err::ResourceNotFound);
     EXPECT_EQ(service_->state().status, IstStatus::aborted);
     EXPECT_EQ(service_->state().stage, IstStage::idle);
 }
@@ -704,7 +704,7 @@ TEST_F(IstServiceTest, StartIstAbortsOnMissingItmBinary)
     init_from_file(configPath_);
 
     ParamMap params;
-    EXPECT_THROW(service_->startIST(params), ist_err::CollateralNotFound);
+    EXPECT_THROW(service_->startIST(params), ist_err::ResourceNotFound);
     EXPECT_EQ(service_->state().status, IstStatus::aborted);
     EXPECT_EQ(service_->state().stage, IstStage::idle);
 }
@@ -716,7 +716,7 @@ TEST_F(IstServiceTest, StartIstAbortsOnMissingGoldenRes)
     init_from_file(configPath_);
 
     ParamMap params;
-    EXPECT_THROW(service_->startIST(params), ist_err::CollateralNotFound);
+    EXPECT_THROW(service_->startIST(params), ist_err::ResourceNotFound);
     EXPECT_EQ(service_->state().status, IstStatus::aborted);
     EXPECT_EQ(service_->state().stage, IstStage::idle);
 }
@@ -729,7 +729,7 @@ TEST_F(IstServiceTest, StartIstAbortsOnEmptyGoldenRes)
     init_from_file(configPath_);
 
     ParamMap params;
-    EXPECT_THROW(service_->startIST(params), ist_err::CollateralNotFound);
+    EXPECT_THROW(service_->startIST(params), ist_err::ResourceNotFound);
     EXPECT_EQ(service_->state().status, IstStatus::aborted);
     EXPECT_EQ(service_->state().stage, IstStage::idle);
 }
@@ -740,7 +740,7 @@ TEST_F(IstServiceTest, StartIstAbortsOnUnknownParam)
 
     ParamMap params;
     params["unknownParam"] = std::string("value");
-    EXPECT_THROW(service_->startIST(params), ist_err::InvalidParameter);
+    EXPECT_THROW(service_->startIST(params), ist_err::InvalidArgument);
     EXPECT_EQ(service_->state().status, IstStatus::aborted);
 }
 
@@ -750,7 +750,7 @@ TEST_F(IstServiceTest, StartIstAbortsOnOversizedParam)
 
     ParamMap params;
     params["customTestList"] = std::string(5000, 'A'); // exceeds 4096 limit
-    EXPECT_THROW(service_->startIST(params), ist_err::InvalidParameter);
+    EXPECT_THROW(service_->startIST(params), ist_err::InvalidArgument);
     EXPECT_EQ(service_->state().status, IstStatus::aborted);
 }
 
@@ -1481,7 +1481,7 @@ TEST_F(IstServiceTest, StartIstThrowsWhenAssertHookMissing)
     init_from_file(configPath_);
 
     ParamMap params;
-    EXPECT_THROW(service_->startIST(params), ist_err::HookNotFound);
+    EXPECT_THROW(service_->startIST(params), ist_err::InternalFailure);
     EXPECT_EQ(service_->state().status, IstStatus::failed);
     EXPECT_EQ(service_->state().stage, IstStage::idle);
 }
@@ -1726,7 +1726,7 @@ TEST_F(IstServiceTest, StartIstAbortsOnMissingResultStorageConfig)
     init_from_file(configPath_);
 
     ParamMap params;
-    EXPECT_THROW(service_->startIST(params), ist_err::ResultStorageError);
+    EXPECT_THROW(service_->startIST(params), ist_err::InternalFailure);
     EXPECT_EQ(service_->state().status, IstStatus::aborted);
 }
 
@@ -1933,7 +1933,7 @@ TEST_F(IstServiceTest, RunObjectNotCreatedOnCollateralAbort)
         .Times(0);
 
     ParamMap params;
-    EXPECT_THROW(service_->startIST(params), ist_err::CollateralNotFound);
+    EXPECT_THROW(service_->startIST(params), ist_err::ResourceNotFound);
     EXPECT_EQ(service_->state().status, IstStatus::aborted);
 }
 
@@ -2043,7 +2043,7 @@ TEST_F(IstServiceTest, ParamTypeMismatchRejected)
 
     ParamMap params;
     params["istSwTimeoutSec"] = std::string("not_a_number");
-    EXPECT_THROW(service_->startIST(params), ist_err::InvalidParameter);
+    EXPECT_THROW(service_->startIST(params), ist_err::InvalidArgument);
     EXPECT_EQ(service_->state().status, IstStatus::aborted);
 }
 
@@ -2114,10 +2114,10 @@ TEST_F(IstServiceTest, SecondRunAfterFailureWorks)
     EXPECT_EQ(service_->state().stage, IstStage::idle);
 }
 
-TEST_F(IstServiceTest, StartIstBeforeInitializeThrows)
+TEST_F(IstServiceTest, StartIstUninitializedThrowsResourceNotFound)
 {
     ParamMap params;
-    EXPECT_THROW(service_->startIST(params), ist_err::CollateralNotFound);
+    EXPECT_THROW(service_->startIST(params), ist_err::ResourceNotFound);
     EXPECT_EQ(service_->state().status, IstStatus::aborted);
     EXPECT_EQ(service_->state().stage, IstStage::idle);
 }
@@ -3044,7 +3044,7 @@ TEST_F(IstServiceTest, ResultsPreservedWhenCollateralVerificationFails)
     fs::remove_all(tmpDir_ / "vectors");
 
     ParamMap params;
-    EXPECT_THROW(service_->startIST(params), ist_err::CollateralNotFound);
+    EXPECT_THROW(service_->startIST(params), ist_err::ResourceNotFound);
     EXPECT_EQ(service_->state().status, IstStatus::aborted);
 
     // Previous results and markers should still be intact
@@ -3577,7 +3577,7 @@ TEST_F(IstServiceTest, ErrorCollateralVerificationFailed)
 
     testing::internal::CaptureStderr();
     ParamMap params;
-    EXPECT_THROW(service_->startIST(params), ist_err::CollateralNotFound);
+    EXPECT_THROW(service_->startIST(params), ist_err::ResourceNotFound);
     std::string err = testing::internal::GetCapturedStderr();
 
     EXPECT_THAT(
@@ -3608,7 +3608,7 @@ TEST_F(IstServiceTest, ErrorHookAssertNotFound)
 
     testing::internal::CaptureStderr();
     ParamMap params;
-    EXPECT_THROW(service_->startIST(params), ist_err::HookNotFound);
+    EXPECT_THROW(service_->startIST(params), ist_err::InternalFailure);
     std::string err = testing::internal::GetCapturedStderr();
 
     EXPECT_THAT(
@@ -3661,7 +3661,7 @@ TEST_F(IstServiceTest, ErrorHookDeassertNotFound)
 
     testing::internal::CaptureStderr();
     ParamMap params;
-    EXPECT_THROW(service_->startIST(params), ist_err::HookNotFound);
+    EXPECT_THROW(service_->startIST(params), ist_err::InternalFailure);
     std::string err = testing::internal::GetCapturedStderr();
 
     EXPECT_THAT(

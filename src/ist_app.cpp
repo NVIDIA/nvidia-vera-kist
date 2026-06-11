@@ -878,21 +878,21 @@ std::string IstService::startIST(const ParamMap& test_params)
     {
         transitionTo(IstStage::idle, IstStatus::aborted,
                      "category=PARAMS, reason=invalid_test_params");
-        throw ist_err::InvalidParameter{};
+        throw ist_err::InvalidArgument{};
     }
 
     if (!collateralVerification())
     {
         transitionTo(IstStage::idle, IstStatus::aborted,
                      "category=COLLATERAL, reason=verification_failed");
-        throw ist_err::CollateralNotFound{};
+        throw ist_err::ResourceNotFound{};
     }
 
     if (!prepareResultStorage())
     {
         transitionTo(IstStage::idle, IstStatus::aborted,
                      "category=STORAGE, reason=result_storage_unavailable");
-        throw ist_err::ResultStorageError{};
+        throw ist_err::InternalFailure{};
     }
 
     const fs::path& hook_cmd = platformCfg_.hooks.istBootAssert;
@@ -900,7 +900,7 @@ std::string IstService::startIST(const ParamMap& test_params)
     {
         transitionTo(IstStage::idle, IstStatus::failed,
                      "category=HOOK, reason=ist_boot_assert_not_found");
-        throw ist_err::HookNotFound{};
+        throw ist_err::InternalFailure{};
     }
 
     const fs::path& deassert_cmd = platformCfg_.hooks.istBootDeassert;
@@ -908,7 +908,7 @@ std::string IstService::startIST(const ParamMap& test_params)
     {
         transitionTo(IstStage::idle, IstStatus::failed,
                      "category=HOOK, reason=ist_boot_deassert_not_found");
-        throw ist_err::HookNotFound{};
+        throw ist_err::InternalFailure{};
     }
 
     currentRunPath_ =
