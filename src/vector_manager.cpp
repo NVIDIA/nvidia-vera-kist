@@ -709,12 +709,12 @@ std::string VectorManager::startUpdate(UniqueFd image,
     if (platformCfg_.storage.vectorStoragePath.empty())
     {
         std::cerr << "StartUpdate rejected: vector storage path is empty\n";
-        throw ist_err::InvalidArgument{};
+        throw ist_err::InternalFailure{};
     }
     if (image.get() < 0)
     {
         std::cerr << "StartUpdate rejected: invalid image fd\n";
-        throw ist_err::InvalidArgument{};
+        throw ist_err::InternalFailure{};
     }
     if (!isAllowedApplyTime(apply_time))
     {

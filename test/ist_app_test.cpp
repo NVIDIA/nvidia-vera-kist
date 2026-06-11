@@ -2437,7 +2437,7 @@ TEST_F(IstServiceTest, StartUpdateRejectsEmptyStoragePath)
 
     auto [readFd, writeFd] = make_upload_socket_pair();
     EXPECT_THROW(service_->startUpdate(readFd, k_apply_time_immediate),
-                 ist_err::InvalidArgument);
+                 ist_err::InternalFailure);
     ::close(writeFd);
 }
 
