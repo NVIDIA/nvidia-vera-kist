@@ -52,7 +52,7 @@ static sdbusplus::message::unix_fd
     return fd;
 }
 
-static sdbusplus::message::object_path start_ist_from_dbus(
+static sdbusplus::object_path start_ist_from_dbus(
     const std::shared_ptr<IstService>& service, int32_t sw_timeout_sec,
     const std::string& continue_on_fail, bool auto_reboot_on_complete,
     const std::string& test_list, const std::string& socket_list,
@@ -189,7 +189,7 @@ int main(int, char**)
             {
                 throw ist_err::InternalFailure{};
             }
-            return sdbusplus::message::object_path(
+            return sdbusplus::object_path(
                 service->startUpdate(owned.release(), apply_time));
         });
     update_iface->initialize();
