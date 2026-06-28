@@ -140,6 +140,16 @@ class SignatureVerifyTest : public ::testing::Test
         sign_file(lib_path, fs::path(lib_path).concat(".sig"), keyPair_->pkey);
     }
 
+    void create_lib_symlink(const std::string& link_name,
+                            const fs::path& target)
+    {
+        fs::path link_path = tmpDir_ / "lib" / link_name;
+        std::error_code ec;
+        fs::create_symlink(target, link_path, ec);
+        ASSERT_FALSE(ec) << "failed to create symlink " << link_path << ": "
+                         << ec.message();
+    }
+
     void TearDown() override
     {
         fs::remove_all(tmpDir_);
@@ -298,6 +308,91 @@ TEST_F(SignatureVerifyTest, VerifyPassesWithEmptyLibDir)
     IstPlatformConfig cfg;
     cfg.itmBinaryPath = binaryPath_;
     cfg.itmLibDir = "";
+    cfg.signingKeyPath = pubKeyPath_;
+
+    EXPECT_TRUE(verifyItmSignatures(cfg));
+}
+
+// ----------------
+// symlink handling tests
+// ----------------
+
+TEST_F(SignatureVerifyTest, VerifyPassesWithSymlinkToSignedLib)
+{
+    create_signed_lib("libusb-1.0.so.0.5.0", "fake libusb content");
+    create_lib_symlink("libusb-1.0.so.0", "libusb-1.0.so.0.5.0");
+
+    IstPlatformConfig cfg;
+    cfg.itmBinaryPath = binaryPath_;
+    cfg.itmLibDir = tmpDir_ / "lib";
+    cfg.signingKeyPath = pubKeyPath_;
+
+    EXPECT_TRUE(verifyItmSignatures(cfg));
+}
+
+TEST_F(SignatureVerifyTest, VerifyPassesWithSymlinkChain)
+{
+    create_signed_lib("libusb-1.0.so.0.5.0", "fake libusb content");
+    create_lib_symlink("libusb-1.0.so.0", "libusb-1.0.so.0.5.0");
+    create_lib_symlink("libusb-1.0.so", "libusb-1.0.so.0");
+
+    IstPlatformConfig cfg;
+    cfg.itmBinaryPath = binaryPath_;
+    cfg.itmLibDir = tmpDir_ / "lib";
+    cfg.signingKeyPath = pubKeyPath_;
+
+    EXPECT_TRUE(verifyItmSignatures(cfg));
+}
+
+TEST_F(SignatureVerifyTest, VerifyFailsWhenSymlinkResolvesOutsideVerifiedSet)
+{
+    fs::path outside = tmpDir_ / "unsigned_payload.so";
+    std::ofstream(outside) << "unsigned content";
+    create_lib_symlink("libusb-1.0.so.0", outside);
+
+    IstPlatformConfig cfg;
+    cfg.itmBinaryPath = binaryPath_;
+    cfg.itmLibDir = tmpDir_ / "lib";
+    cfg.signingKeyPath = pubKeyPath_;
+
+    EXPECT_FALSE(verifyItmSignatures(cfg));
+}
+
+TEST_F(SignatureVerifyTest, VerifyFailsWhenSymlinkDangling)
+{
+    create_lib_symlink("libusb-1.0.so.0", "does-not-exist.so.0.5.0");
+
+    IstPlatformConfig cfg;
+    cfg.itmBinaryPath = binaryPath_;
+    cfg.itmLibDir = tmpDir_ / "lib";
+    cfg.signingKeyPath = pubKeyPath_;
+
+    EXPECT_FALSE(verifyItmSignatures(cfg));
+}
+
+TEST_F(SignatureVerifyTest, VerifyPassesWhenSymlinkResolvesToBinary)
+{
+    create_lib_symlink("kist_itm.link", binaryPath_);
+
+    IstPlatformConfig cfg;
+    cfg.itmBinaryPath = binaryPath_;
+    cfg.itmLibDir = tmpDir_ / "lib";
+    cfg.signingKeyPath = pubKeyPath_;
+
+    EXPECT_TRUE(verifyItmSignatures(cfg));
+}
+
+TEST_F(SignatureVerifyTest, VerifyPassesWithMixedRealAndSymlinkedLibs)
+{
+    create_signed_lib("libcrypto.so.3", "fake libcrypto content");
+    create_lib_symlink("libcrypto.so", "libcrypto.so.3");
+    create_signed_lib("libusb-1.0.so.0.5.0", "fake libusb content");
+    create_lib_symlink("libusb-1.0.so.0", "libusb-1.0.so.0.5.0");
+    create_lib_symlink("libusb-1.0.so", "libusb-1.0.so.0");
+
+    IstPlatformConfig cfg;
+    cfg.itmBinaryPath = binaryPath_;
+    cfg.itmLibDir = tmpDir_ / "lib";
     cfg.signingKeyPath = pubKeyPath_;
 
     EXPECT_TRUE(verifyItmSignatures(cfg));

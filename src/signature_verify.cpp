@@ -32,6 +32,7 @@
 #include <iostream>
 #include <memory>
 #include <optional>
+#include <set>
 #include <span>
 #include <string>
 #include <utility>
@@ -264,6 +265,7 @@ static std::optional<std::vector<VerifyTarget>>
     }
 
     std::vector<VerifyTarget> targets;
+    std::set<fs::path> verified_real;
 
     fs::path binary_sig = cfg.itmBinaryPath;
     binary_sig += ".sig";
@@ -274,6 +276,11 @@ static std::optional<std::vector<VerifyTarget>>
         return std::nullopt;
     }
     targets.push_back({cfg.itmBinaryPath, binary_sig});
+    fs::path binary_real = fs::canonical(cfg.itmBinaryPath, ec);
+    if (!ec)
+    {
+        verified_real.insert(binary_real);
+    }
 
     if (cfg.itmLibDir.empty())
     {
@@ -290,6 +297,8 @@ static std::optional<std::vector<VerifyTarget>>
     {
         return targets;
     }
+
+    std::vector<fs::path> symlinks;
 
     for (const auto& entry : fs::directory_iterator(cfg.itmLibDir, ec))
     {
@@ -308,6 +317,18 @@ static std::optional<std::vector<VerifyTarget>>
         }
 
         std::error_code entry_ec;
+        if (entry.is_symlink(entry_ec))
+        {
+            symlinks.push_back(path);
+            continue;
+        }
+        if (entry_ec)
+        {
+            std::cerr << "Failed to stat " << path << ": " << entry_ec.message()
+                      << '\n';
+            return std::nullopt;
+        }
+
         if (!entry.is_regular_file(entry_ec))
         {
             if (entry_ec)
@@ -327,12 +348,37 @@ static std::optional<std::vector<VerifyTarget>>
             return std::nullopt;
         }
 
+        fs::path lib_real = fs::canonical(path, ec);
+        if (ec)
+        {
+            std::cerr << "Failed to resolve library path " << path << ": "
+                      << ec.message() << '\n';
+            return std::nullopt;
+        }
+        verified_real.insert(lib_real);
         targets.push_back({path, lib_sig});
     }
     if (ec)
     {
         std::cerr << "Error iterating lib directory: " << ec.message() << '\n';
         return std::nullopt;
+    }
+
+    for (const fs::path& link : symlinks)
+    {
+        fs::path link_real = fs::canonical(link, ec);
+        if (ec)
+        {
+            std::cerr << "Symlink target could not be resolved: " << link
+                      << ": " << ec.message() << '\n';
+            return std::nullopt;
+        }
+        if (!verified_real.contains(link_real))
+        {
+            std::cerr << "Symlink resolves outside the verified set: " << link
+                      << " -> " << link_real << '\n';
+            return std::nullopt;
+        }
     }
 
     return targets;
