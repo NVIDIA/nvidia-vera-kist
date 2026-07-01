@@ -1010,6 +1010,13 @@ void IstService::onCpuDiscoveryDone(const std::vector<std::string>& cpu_paths)
 
     std::sort(socket_ids.begin(), socket_ids.end());
 
+    // A single physical socket may be exposed under more than one inventory
+    // path (e.g. .../system/component/CPU_0 and .../system/cpu/CPU_0). Collapse
+    // duplicate socket numbers so the count and contiguity check reflect
+    // physical sockets, not the number of inventory representations.
+    socket_ids.erase(std::unique(socket_ids.begin(), socket_ids.end()),
+                     socket_ids.end());
+
     for (size_t i = 0; i < socket_ids.size(); ++i)
     {
         if (socket_ids[i] != i)
@@ -1032,8 +1039,10 @@ void IstService::onCpuDiscoveryDone(const std::vector<std::string>& cpu_paths)
         socket_list += std::to_string(socket_ids[i]);
     }
     test_.customSocketList = std::move(socket_list);
-    std::cout << "Discovered " << cpu_paths.size()
-              << " CPU(s), socket list: " << *test_.customSocketList << '\n';
+    std::cout << "Discovered " << socket_ids.size() << " CPU socket(s) from "
+              << cpu_paths.size()
+              << " inventory path(s), socket list: " << *test_.customSocketList
+              << '\n';
 
     launchBootAssert();
 }
