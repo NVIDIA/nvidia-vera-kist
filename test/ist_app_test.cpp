@@ -3449,6 +3449,52 @@ TEST_F(IstServiceTest, CpuDiscoveryOutOfOrderPathsSorted)
     EXPECT_EQ(*captured_cfg.customSocketList, "0,1");
 }
 
+TEST_F(IstServiceTest, CpuDiscoveryDeduplicatesRepresentations)
+{
+    init_from_file(configPath_);
+
+    // Entity Manager may expose the same physical socket under more than one
+    // inventory path (e.g. .../system/component/CPU_0 and
+    // .../system/cpu/CPU_0). Discovery must collapse these to one socket per
+    // number, not fail the contiguity check on the repeated basenames.
+    service_->setCpuDiscoverer([](CpuDoneCb done) {
+        done({"/xyz/openbmc_project/inventory/system/component/CPU_0",
+              "/xyz/openbmc_project/inventory/system/component/CPU_1",
+              "/xyz/openbmc_project/inventory/system/cpu/CPU_0",
+              "/xyz/openbmc_project/inventory/system/cpu/CPU_1"});
+    });
+
+    IstTestConfig captured_cfg;
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootAssert hook"),
+                         ::testing::_, ::testing::_, ::testing::_))
+        .WillOnce([](const std::string&, const std::string&, DoneCb done,
+                     const std::vector<std::string>&,
+                     std::chrono::seconds) { done(true); });
+    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+        .WillOnce([](DoneCb done) { done(true); });
+    EXPECT_CALL(*itmRunner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
+                                      ::testing::_))
+        .WillOnce([&](const IstTestConfig& cfg, const IstPlatformConfig&,
+                      ItmDoneCb done, ProgressCb) {
+            captured_cfg = cfg;
+            done(0);
+        });
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootDeassert hook"),
+                         ::testing::_, ::testing::_, ::testing::_))
+        .WillOnce([](const std::string&, const std::string&, DoneCb done,
+                     const std::vector<std::string>&,
+                     std::chrono::seconds) { done(true); });
+
+    start_ist();
+    io_.run();
+    io_.restart();
+
+    ASSERT_TRUE(captured_cfg.customSocketList.has_value());
+    EXPECT_EQ(*captured_cfg.customSocketList, "0,1");
+}
+
 TEST_F(IstServiceTest, CpuDiscoveryNonContiguousSocketsFails)
 {
     init_from_file(configPath_);
