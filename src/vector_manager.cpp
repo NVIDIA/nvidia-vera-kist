@@ -131,6 +131,75 @@ static bool header_contains_ist_component_uuid(const uint8_t* hdr,
     return false;
 }
 
+// DSP0267 v1.3.0 Table 20 (component image information).
+static constexpr size_t k_comp_info_fixed_size = 22;
+static constexpr size_t k_comp_info_location_offset = 12;
+static constexpr size_t k_comp_info_size_offset = 16;
+static constexpr size_t k_comp_info_version_len_offset = 21;
+static constexpr size_t k_comp_info_opaque_len_size = 4;
+static constexpr size_t k_pldm_package_version_len_offset = 35;
+
+// Package size from the component image information area, or 0 if the header
+// cannot be walked.  0 is not a reject; progress then uses a heartbeat.
+static uint64_t package_size_from_header(const std::vector<uint8_t>& hdr,
+                                         size_t header_size)
+{
+    size_t offset =
+        k_pldm_min_header_size + hdr[k_pldm_package_version_len_offset];
+
+    if (offset >= header_size)
+    {
+        return 0;
+    }
+    uint8_t device_records = hdr[offset];
+    offset += sizeof(uint8_t);
+
+    while (device_records-- > 0)
+    {
+        if (offset + sizeof(uint16_t) > header_size)
+        {
+            return 0;
+        }
+        uint16_t record_length = read_u16_le(&hdr[offset]);
+        if (record_length == 0)
+        {
+            return 0;
+        }
+        offset += record_length;
+    }
+
+    if (offset >= header_size || hdr[offset] != 0)
+    {
+        return 0;
+    }
+    offset += sizeof(uint8_t); // DownstreamDeviceIDRecordCount
+
+    if (offset + sizeof(uint16_t) > header_size)
+    {
+        return 0;
+    }
+    uint16_t component_count = read_u16_le(&hdr[offset]);
+    offset += sizeof(uint16_t);
+
+    uint64_t package_end = 0;
+    while (component_count-- > 0)
+    {
+        if (offset + k_comp_info_fixed_size > header_size)
+        {
+            return 0;
+        }
+        uint64_t location =
+            read_u32_le(&hdr[offset + k_comp_info_location_offset]);
+        uint64_t size = read_u32_le(&hdr[offset + k_comp_info_size_offset]);
+        package_end = std::max(package_end, location + size);
+        offset += k_comp_info_fixed_size +
+                  hdr[offset + k_comp_info_version_len_offset] +
+                  k_comp_info_opaque_len_size;
+    }
+
+    return package_end;
+}
+
 enum class PldmHeaderCheck
 {
     need_more_data,
@@ -226,10 +295,14 @@ static bool validate_pldm_header(const std::vector<uint8_t>& hdr,
     comp.payloadCrc = read_u32_le(&hdr[header_size - 4]);
     comp.offset = header_size;
 
+    uint64_t package_size = package_size_from_header(hdr, header_size);
+    comp.payloadSize =
+        package_size > header_size ? package_size - header_size : 0;
+
     std::cerr << "PLDM revision 0x" << std::hex
               << static_cast<unsigned>(revision) << std::dec << ", header size "
               << header_size << "; payload starts at offset " << comp.offset
-              << '\n';
+              << " and spans " << comp.payloadSize << " bytes\n";
     return true;
 }
 
@@ -466,22 +539,29 @@ class PldmHeaderPeekSession :
 // payload offset and CRC come from the header validated during the peek
 // phase, so there is no second pass over the file.
 //
-// Owns: stream_descriptor (read-end FD), ofstream, deadline timer.
-// On destruction, removes the image file unless committed (a transfer is
-// committed only once the full payload arrives and its CRC matches).
+// Owns: stream_descriptor (read-end FD), ofstream, deadline timer, progress
+// timer.  On destruction, removes the image file unless committed (a transfer
+// is committed only once the full payload arrives and its CRC matches).
 // ----------------------------------------------------------------
+
+// 100 is reserved for a committed image.
+static constexpr uint8_t k_transfer_progress_max = 99;
 
 class TransferSession : public std::enable_shared_from_this<TransferSession>
 {
   public:
-    TransferSession(boost::asio::io_context& io, UniqueFd read_fd,
-                    fs::path image_path, std::chrono::seconds timeout,
-                    std::vector<uint8_t> prefix, PldmComponentInfo comp,
-                    std::move_only_function<void(bool ok) const> on_complete) :
-        stream_(io, read_fd.release()), deadline_(io),
+    TransferSession(
+        boost::asio::io_context& io, UniqueFd read_fd, fs::path image_path,
+        std::chrono::seconds timeout, std::chrono::seconds progress_interval,
+        std::vector<uint8_t> prefix, PldmComponentInfo comp,
+        std::move_only_function<void(uint8_t progress) const> on_progress,
+        std::move_only_function<void(bool ok) const> on_complete) :
+        stream_(io, read_fd.release()), deadline_(io), progressTimer_(io),
         imagePath_(std::move(image_path)), timeout_(timeout),
-        prefix_(std::move(prefix)), payloadOffset_(comp.offset),
-        expectedCrc_(comp.payloadCrc), onComplete_(std::move(on_complete))
+        progressInterval_(progress_interval), prefix_(std::move(prefix)),
+        payloadOffset_(comp.offset), expectedCrc_(comp.payloadCrc),
+        payloadTotal_(comp.payloadSize), onProgress_(std::move(on_progress)),
+        onComplete_(std::move(on_complete))
     {
         // Overwrite in place (no room for a temp copy): once the validated
         // header gets us here, a payload-level failure intentionally leaves no
@@ -519,6 +599,7 @@ class TransferSession : public std::enable_shared_from_this<TransferSession>
         }
         prefix_.clear();
         reset_deadline();
+        schedule_progress_tick();
         read_next();
     }
 
@@ -554,6 +635,56 @@ class TransferSession : public std::enable_shared_from_this<TransferSession>
                     self->on_timeout();
                 }
             });
+    }
+
+    void schedule_progress_tick()
+    {
+        progressTimer_.expires_after(progressInterval_);
+        progressTimer_.async_wait(
+            [weak = weak_from_this()](const boost::system::error_code& ec) {
+                if (ec)
+                {
+                    return;
+                }
+                if (std::shared_ptr<TransferSession> self = weak.lock())
+                {
+                    self->on_progress_tick();
+                }
+            });
+    }
+
+    void on_progress_tick()
+    {
+        if (finished_)
+        {
+            return;
+        }
+
+        if (payloadBytes_ != reportedBytes_)
+        {
+            reportedBytes_ = payloadBytes_;
+            uint8_t progress = next_progress();
+            if (progress != lastProgress_ && onProgress_)
+            {
+                lastProgress_ = progress;
+                onProgress_(progress);
+            }
+        }
+
+        schedule_progress_tick();
+    }
+
+    uint8_t next_progress() const
+    {
+        if (payloadTotal_ == 0)
+        {
+            return static_cast<uint8_t>(std::min<unsigned>(
+                lastProgress_ + 1U, k_transfer_progress_max));
+        }
+        uint64_t pct = static_cast<uint64_t>(payloadBytes_) *
+                       k_transfer_progress_max / payloadTotal_;
+        return static_cast<uint8_t>(
+            std::min<uint64_t>(pct, k_transfer_progress_max));
     }
 
     void read_next()
@@ -646,6 +777,7 @@ class TransferSession : public std::enable_shared_from_this<TransferSession>
         }
         finished_ = true;
         deadline_.cancel();
+        progressTimer_.cancel();
         discard_if_uncommitted();
         auto cb = std::move(onComplete_);
         if (cb)
@@ -656,16 +788,22 @@ class TransferSession : public std::enable_shared_from_this<TransferSession>
 
     boost::asio::posix::stream_descriptor stream_;
     boost::asio::steady_timer deadline_;
+    boost::asio::steady_timer progressTimer_;
     std::ofstream output_;
     fs::path imagePath_;
     std::chrono::seconds timeout_;
+    std::chrono::seconds progressInterval_;
     std::vector<uint8_t> prefix_;
     size_t payloadOffset_;
     uint32_t expectedCrc_;
+    uint64_t payloadTotal_;
+    std::move_only_function<void(uint8_t progress) const> onProgress_;
     std::move_only_function<void(bool ok) const> onComplete_;
     std::array<char, k_transfer_buf_size> buf_{};
     uint32_t crcState_{0xFFFFFFFF};
     size_t payloadBytes_{0};
+    size_t reportedBytes_{0};
+    uint8_t lastProgress_{0};
     bool finished_{false};
     bool committed_{false};
 };
@@ -996,7 +1134,15 @@ void VectorManager::onTeardownComplete(bool ok, UniqueFd read_fd,
         std::shared_ptr<TransferSession> session =
             std::make_shared<TransferSession>(
                 io_, std::move(read_fd), image_path,
-                platformCfg_.transferInactivityTimeout, std::move(prefix), comp,
+                platformCfg_.transferInactivityTimeout,
+                platformCfg_.transferProgressInterval, std::move(prefix), comp,
+                [weak = weak_from_this()](uint8_t progress) {
+                    std::shared_ptr<VectorManager> self = weak.lock();
+                    if (self)
+                    {
+                        self->publisher_.publishActivationProgress(progress);
+                    }
+                },
                 [weak = weak_from_this()](bool xfer_ok) {
                     if (auto self = weak.lock())
                     {
