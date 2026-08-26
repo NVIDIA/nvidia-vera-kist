@@ -208,6 +208,7 @@ struct IstPlatformConfig
     HookPaths hooks;
     StoragePaths storage;
     std::chrono::seconds transferInactivityTimeout{60};
+    std::chrono::seconds transferProgressInterval{120};
 };
 
 /**
@@ -418,6 +419,8 @@ struct PldmComponentInfo
     uint32_t offset;
     // Stored CRC-32 of the component payload, taken from the package header.
     uint32_t payloadCrc;
+    // Declared payload length, or 0 if unknown.  Progress reporting only.
+    uint64_t payloadSize{0};
 };
 
 class IstService : public std::enable_shared_from_this<IstService>

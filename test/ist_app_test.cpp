@@ -17,12 +17,14 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <boost/asio/steady_timer.hpp>
 #include <ist_app.hpp>
 #include <ist_errors.hpp>
 #include <ist_results.hpp>
 #include <sdbusplus/exception.hpp>
 
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
@@ -166,6 +168,7 @@ TEST(IstPlatformConfigTest, DefaultValues)
     EXPECT_TRUE(cfg.storage.resultStoragePath.empty());
     EXPECT_TRUE(cfg.itmLibDir.empty());
     EXPECT_EQ(cfg.transferInactivityTimeout, std::chrono::seconds(60));
+    EXPECT_EQ(cfg.transferProgressInterval, std::chrono::seconds(120));
 }
 
 // ----------------
@@ -2206,6 +2209,48 @@ std::vector<uint8_t> build_pldm_package(const std::vector<uint8_t>& payload)
     return package;
 }
 
+std::vector<uint8_t>
+    build_pldm_package_with_component_info(const std::vector<uint8_t>& payload)
+{
+    constexpr uint16_t header_size = 106;
+    constexpr uint8_t revision = 4;
+    constexpr size_t device_record_offset = 37;
+    constexpr uint16_t device_record_length = 32;
+    constexpr size_t component_info_offset = 72;
+
+    std::vector<uint8_t> hdr(header_size, 0);
+    std::memcpy(hdr.data(), k_test_pldm_package_id.data(),
+                k_test_pldm_package_id.size());
+    hdr[16] = revision;
+    write_u16_le(&hdr[17], header_size);
+    write_u16_le(&hdr[32], 8); // ComponentBitmapBitLength
+    hdr[35] = 0;               // PackageVersionStringLength
+    hdr[36] = 1;               // DeviceIDRecordCount
+
+    write_u16_le(&hdr[device_record_offset], device_record_length);
+    hdr[device_record_offset + 2] = 1;  // DescriptorCount
+    hdr[device_record_offset + 11] = 1; // ApplicableComponents
+    write_ist_vectors_component_descriptor(hdr, device_record_offset + 12);
+
+    hdr[69] = 0;               // DownstreamDeviceIDRecordCount
+    write_u16_le(&hdr[70], 1); // ComponentImageCount
+    write_u32_le(&hdr[component_info_offset + 12], header_size);
+    write_u32_le(&hdr[component_info_offset + 16],
+                 static_cast<uint32_t>(payload.size()));
+
+    uint32_t payload_crc = test_crc32(payload.data(), payload.size());
+    write_u32_le(&hdr[header_size - 4], payload_crc);
+
+    uint32_t header_crc = test_crc32(hdr.data(), header_size - 8);
+    write_u32_le(&hdr[header_size - 8], header_crc);
+
+    std::vector<uint8_t> package;
+    package.reserve(hdr.size() + payload.size());
+    package.insert(package.end(), hdr.begin(), hdr.end());
+    package.insert(package.end(), payload.begin(), payload.end());
+    return package;
+}
+
 } // namespace
 
 // ----------------
@@ -2308,6 +2353,80 @@ TEST_F(IstServiceTest, StartUpdateTimesOut)
     EXPECT_FALSE(fs::exists(image_path));
 
     ::close(fd);
+}
+
+TEST_F(IstServiceTest, StartUpdateReportsProgressFromDeclaredPayloadSize)
+{
+    IstPlatformConfig cfg;
+    ASSERT_TRUE(parsePlatformConfig(cfg, configPath_));
+    cfg.transferProgressInterval = std::chrono::seconds(1);
+    ASSERT_TRUE(service_->initialize(std::move(cfg)));
+
+    std::vector<uint8_t> payload(4096, 0xAB);
+    std::vector<uint8_t> pkg = build_pldm_package_with_component_info(payload);
+
+    std::vector<uint8_t> reported;
+    EXPECT_CALL(*publisher_, publishActivationProgress(::testing::_))
+        .WillRepeatedly(
+            [&reported](uint8_t progress) { reported.push_back(progress); });
+
+    int fd = begin_start_update();
+
+    size_t first = pkg.size() / 2;
+    ASSERT_EQ(::write(fd, pkg.data(), first), static_cast<ssize_t>(first));
+
+    boost::asio::steady_timer rest(io_, std::chrono::milliseconds(1500));
+    rest.async_wait([&pkg, first, fd](const boost::system::error_code&) {
+        size_t remaining = pkg.size() - first;
+        EXPECT_EQ(::write(fd, pkg.data() + first, remaining),
+                  static_cast<ssize_t>(remaining));
+        ::close(fd);
+    });
+
+    io_.run();
+
+    ASSERT_GE(reported.size(), 3U);
+    EXPECT_EQ(reported.front(), 0);
+    EXPECT_EQ(reported.back(), 100);
+    EXPECT_GE(reported[1], 40);
+    EXPECT_LE(reported[1], 60);
+}
+
+TEST_F(IstServiceTest, StartUpdateReportsProgressWithoutDeclaredPayloadSize)
+{
+    IstPlatformConfig cfg;
+    ASSERT_TRUE(parsePlatformConfig(cfg, configPath_));
+    cfg.transferProgressInterval = std::chrono::seconds(1);
+    ASSERT_TRUE(service_->initialize(std::move(cfg)));
+
+    std::vector<uint8_t> payload(4096, 0xAB);
+    std::vector<uint8_t> pkg = build_pldm_package(payload);
+
+    std::vector<uint8_t> reported;
+    EXPECT_CALL(*publisher_, publishActivationProgress(::testing::_))
+        .WillRepeatedly(
+            [&reported](uint8_t progress) { reported.push_back(progress); });
+
+    int fd = begin_start_update();
+
+    size_t first = pkg.size() / 2;
+    ASSERT_EQ(::write(fd, pkg.data(), first), static_cast<ssize_t>(first));
+
+    boost::asio::steady_timer rest(io_, std::chrono::milliseconds(1500));
+    rest.async_wait([&pkg, first, fd](const boost::system::error_code&) {
+        size_t remaining = pkg.size() - first;
+        EXPECT_EQ(::write(fd, pkg.data() + first, remaining),
+                  static_cast<ssize_t>(remaining));
+        ::close(fd);
+    });
+
+    io_.run();
+
+    ASSERT_GE(reported.size(), 3U);
+    EXPECT_EQ(reported.front(), 0);
+    EXPECT_EQ(reported.back(), 100);
+    EXPECT_GT(reported[1], 0);
+    EXPECT_LT(reported[1], 100);
 }
 
 TEST_F(IstServiceTest, StartUpdateAllowsNewTransferAfterCompletion)
@@ -3493,6 +3612,50 @@ TEST_F(IstServiceTest, CpuDiscoveryDeduplicatesRepresentations)
 
     ASSERT_TRUE(captured_cfg.customSocketList.has_value());
     EXPECT_EQ(*captured_cfg.customSocketList, "0,1");
+}
+
+TEST_F(IstServiceTest, CpuDiscoveryDeduplicatesSingleSocketRepresentations)
+{
+    init_from_file(configPath_);
+
+    // Single-CPU system: the one physical socket is still exposed under two
+    // paths (.../system/component/CPU_0 and .../system/cpu/CPU_0). Discovery
+    // must collapse these to socket 0 rather than reading [0, 0] and failing
+    // the contiguity check ("expected socket 1, found 0").
+    service_->setCpuDiscoverer([](CpuDoneCb done) {
+        done({"/xyz/openbmc_project/inventory/system/component/CPU_0",
+              "/xyz/openbmc_project/inventory/system/cpu/CPU_0"});
+    });
+
+    IstTestConfig captured_cfg;
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootAssert hook"),
+                         ::testing::_, ::testing::_, ::testing::_))
+        .WillOnce([](const std::string&, const std::string&, DoneCb done,
+                     const std::vector<std::string>&,
+                     std::chrono::seconds) { done(true); });
+    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+        .WillOnce([](DoneCb done) { done(true); });
+    EXPECT_CALL(*itmRunner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
+                                      ::testing::_))
+        .WillOnce([&](const IstTestConfig& cfg, const IstPlatformConfig&,
+                      ItmDoneCb done, ProgressCb) {
+            captured_cfg = cfg;
+            done(0);
+        });
+    EXPECT_CALL(*hookRunner_,
+                asyncRun(::testing::_, StrEq("istBootDeassert hook"),
+                         ::testing::_, ::testing::_, ::testing::_))
+        .WillOnce([](const std::string&, const std::string&, DoneCb done,
+                     const std::vector<std::string>&,
+                     std::chrono::seconds) { done(true); });
+
+    start_ist();
+    io_.run();
+    io_.restart();
+
+    ASSERT_TRUE(captured_cfg.customSocketList.has_value());
+    EXPECT_EQ(*captured_cfg.customSocketList, "0");
 }
 
 TEST_F(IstServiceTest, CpuDiscoveryNonContiguousSocketsFails)
