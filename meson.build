@@ -147,6 +147,29 @@ if not libarchive_dep.found()
     libarchive_dep = libarchive_proj.get_variable('libarchive_dep')
 endif
 
+# Shared-memory telemetry, so IST vector state reaches the HealthMetrics
+# metric report. Optional so standalone builds work without the internal
+# nvidia-tal package; product builds get it via the recipe's DEPENDS.
+nvidia_tal_dep = dependency(
+    'nvidia-tal',
+    required: false,
+    include_type: 'system',
+)
+if nvidia_tal_dep.found()
+    add_project_arguments('-DNVIDIA_SHMEM', language: 'cpp')
+endif
+
+# tal.hpp drags in boost::interprocess, whose segment_manager templates call
+# typeid, so it cannot build under the project-wide -fno-rtti. Confined to its
+# own target to keep RTTI out of the rest of the binary.
+ist_shm_a = static_library(
+    'ist_shm_a',
+    'src/shm_telemetry.cpp',
+    dependencies: [nvidia_tal_dep],
+    include_directories: 'include',
+    cpp_args: ['-frtti'],
+)
+
 ist_app_a = static_library(
     'ist_app_a',
     'src/ist_app.cpp',
@@ -165,6 +188,7 @@ ist_app_a = static_library(
         libcrypto_dep,
     ],
     include_directories: 'include',
+    link_with: [ist_shm_a],
 )
 
 executable(

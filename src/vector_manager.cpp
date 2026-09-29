@@ -829,11 +829,10 @@ VectorManager::VectorManager(boost::asio::io_context& io,
 
 void VectorManager::mountVectorsOnStartup()
 {
-    if (!mountImages())
-    {
-        publisher_.publishActivation(k_activation_failed);
-    }
+    const bool mounted = mountImages();
     readAndPublishVersion();
+    publisher_.publishActivation(mounted ? k_activation_active
+                                         : k_activation_failed);
 }
 
 std::string VectorManager::startUpdate(UniqueFd image,
