@@ -2912,6 +2912,19 @@ TEST_F(IstServiceTest, InitNoImageDoesNotPublishActivationActive)
     ASSERT_TRUE(init_from_file(configPath_));
 }
 
+// Telemetry consumers read Version alongside the activation state, so the
+// version has to be in place before the state that advertises it.
+TEST_F(IstServiceTest, InitPublishesVersionBeforeActivation)
+{
+    std::ofstream(tmpDir_ / "vectors" / "version.txt") << "1.2.3";
+
+    ::testing::InSequence seq;
+    EXPECT_CALL(*publisher_, publishVersion("1.2.3")).Times(1);
+    EXPECT_CALL(*publisher_, publishActivation(StrEq(k_activation_failed)))
+        .Times(1);
+    ASSERT_TRUE(init_from_file(configPath_));
+}
+
 // ----------------
 // Event log emission tests
 // ----------------

@@ -17,6 +17,7 @@
 #include <boost/asio/post.hpp>
 #include <ist_app.hpp>
 #include <sdbusplus/asio/connection.hpp>
+#include <shm_telemetry.hpp>
 
 #include <chrono>
 #include <cstdint>
@@ -35,6 +36,8 @@ class DbusStatePublisher final : public StatePublisher
                        const std::string& ist_path) :
         server_(server), conn_(std::move(conn)), swPath_(sw_path)
     {
+        init_shm_telemetry();
+
         globalStateIface_ =
             server_.add_interface(ist_path, "com.nvidia.vera.ist.State");
         globalStateIface_->register_property("IstInProgress", false);
@@ -49,8 +52,11 @@ class DbusStatePublisher final : public StatePublisher
             sw_path, "xyz.openbmc_project.Software.Activation");
         activationIface_->register_property("Activation",
                                             std::string(k_activation_active));
-        activationIface_->register_property("Functional", true);
         activationIface_->initialize();
+
+        opStatusIface_ = server_.add_interface(sw_path, k_op_status_iface);
+        opStatusIface_->register_property("Functional", true);
+        opStatusIface_->initialize();
     }
 
     void createRunObject(const std::string& run_path,
@@ -154,12 +160,16 @@ class DbusStatePublisher final : public StatePublisher
 
     void publishActivation(std::string_view state) override
     {
+        const bool functional = (state == k_activation_active);
         if (activationIface_)
         {
             activationIface_->set_property("Activation", std::string(state));
-            activationIface_->set_property("Functional",
-                                           state == k_activation_active);
         }
+        if (opStatusIface_)
+        {
+            opStatusIface_->set_property("Functional", functional);
+        }
+        publish_functional_on_shm(swPath_, functional);
     }
 
     void createActivationProgress() override
@@ -251,6 +261,7 @@ class DbusStatePublisher final : public StatePublisher
     std::shared_ptr<sdbusplus::asio::dbus_interface> runResultsIface_;
     std::shared_ptr<sdbusplus::asio::dbus_interface> swVersionIface_;
     std::shared_ptr<sdbusplus::asio::dbus_interface> activationIface_;
+    std::shared_ptr<sdbusplus::asio::dbus_interface> opStatusIface_;
     std::shared_ptr<sdbusplus::asio::dbus_interface> activationProgressIface_;
 };
 
