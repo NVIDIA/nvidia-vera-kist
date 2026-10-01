@@ -334,6 +334,22 @@ class HookRunner
   public:
     static constexpr std::chrono::seconds defaultTimeout{120};
 
+    // The reset hooks wait for the CPU MCTP endpoints and reset again if they
+    // do not come back, so they need room for two resets and two waits: about
+    // 30s per reset of both boards, plus IST_EID_TIMEOUT_S (45s) each time,
+    // so 150s.
+    //
+    // The CAK bypass hook does that same recovery, which costs it a wait more
+    // than the reset hooks because it starts with one: 120s before it even
+    // begins waiting on IST_CAK_TIMEOUT_S. That wait can then overrun its own
+    // 120s by one round of Bypass calls, since it only checks the deadline
+    // between iterations. Budget 300s of hook.
+    //
+    // These are deliberately not the default, because a hook that resets
+    // nothing but hangs for minutes should still be caught.
+    static constexpr std::chrono::seconds k_reset_system_timeout{240};
+    static constexpr std::chrono::seconds k_cak_bypass_timeout{360};
+
     virtual ~HookRunner() = default;
     virtual void asyncRun(const std::string& cmd, std::string what,
                           std::move_only_function<void(bool ok) const> done,
