@@ -658,7 +658,8 @@ void IstService::onPowerCycleDone(bool ok)
             return;
         }
         hookRunner_->asyncRun(
-            cak_script, "CAK bypass", [self = shared_from_this()](bool ok_cak) {
+            cak_script, "CAK bypass",
+            [self = shared_from_this()](bool ok_cak) {
                 if (!ok_cak)
                 {
                     std::cerr << "CAK bypass hook failed, aborting IST\n";
@@ -668,7 +669,8 @@ void IstService::onPowerCycleDone(bool ok)
                     return;
                 }
                 self->startItmRun();
-            });
+            },
+            {}, HookRunner::k_cak_bypass_timeout);
         return;
     }
 
@@ -829,7 +831,7 @@ void IstService::onDeassertDone(int itm_exit, bool ok_deassert)
             [self = shared_from_this(), itm_exit](bool ok_reset) {
                 self->onResetDone(itm_exit, ok_reset);
             },
-            {"--skip-cak"});
+            {"--skip-cak"}, HookRunner::k_reset_system_timeout);
     }
     else
     {
