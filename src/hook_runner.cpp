@@ -16,11 +16,13 @@
  */
 #include <unistd.h>
 
+#include <boost/asio/posix/stream_descriptor.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/process/v2/process.hpp>
 #include <boost/process/v2/stdio.hpp>
 #include <ist_app.hpp>
 
+#include <array>
 #include <chrono>
 #include <csignal>
 #include <cstring>
@@ -32,6 +34,10 @@
 namespace bpv2 = boost::process::v2;
 
 static constexpr std::chrono::seconds k_grace_timeout{5};
+
+// A page. Output is forwarded verbatim, so this only bounds how much one read
+// can carry; it does not split or truncate the hook's lines.
+static constexpr size_t k_output_buf_size = 4096;
 
 // Boost.Process v2 extension: make the child its own process group leader
 // so the hook runner can signal the entire group on timeout.
@@ -47,6 +53,47 @@ struct ProcessGroupSetup
         }
         return {};
     }
+};
+
+// A hook's own messages are the only diagnostics these scripts produce, and
+// discarding them hid two root causes: only the hooks kist_itm launches were
+// visible, by way of its summary log.
+//
+// Written through std::cout rather than an inherited descriptor so the service
+// log tee picks them up as well. TeeStreambuf sits at the iostream layer, which
+// a child writing straight to fd 1 would bypass, reaching the journal only.
+class HookOutput final : public std::enable_shared_from_this<HookOutput>
+{
+  public:
+    HookOutput(boost::asio::io_context& io, int pipe_read_fd) :
+        stream_(io, pipe_read_fd)
+    {}
+
+    void start()
+    {
+        read_next();
+    }
+
+  private:
+    void read_next()
+    {
+        stream_.async_read_some(
+            boost::asio::buffer(buf_),
+            [self = shared_from_this()](const boost::system::error_code& ec,
+                                        std::size_t n) {
+                if (ec)
+                {
+                    return; // EOF or pipe closed
+                }
+                std::cout.write(self->buf_.data(),
+                                static_cast<std::streamsize>(n));
+                std::cout.flush();
+                self->read_next();
+            });
+    }
+
+    boost::asio::posix::stream_descriptor stream_;
+    std::array<char, k_output_buf_size> buf_{};
 };
 
 class HookProcess final : public std::enable_shared_from_this<HookProcess>
@@ -214,12 +261,25 @@ void HookRunnerImpl::asyncRun(const std::string& cmd, std::string what,
         return hp->is_finished();
     });
 
+    int pipe_fds[2];
+    if (::pipe(pipe_fds) < 0)
+    {
+        std::cerr << "Failed to create pipe for " << what
+                  << " output: " << strerror(errno) << '\n';
+        done(false);
+        return;
+    }
+    UniqueFd pipe_read(pipe_fds[0]);
+    UniqueFd pipe_write(pipe_fds[1]);
+
     std::shared_ptr<bpv2::process> proc;
     try
     {
         proc = std::make_shared<bpv2::process>(
             io_, cmd, std::move(args),
-            bpv2::process_stdio{.in = nullptr, .out = nullptr, .err = nullptr},
+            bpv2::process_stdio{.in = nullptr,
+                                .out = pipe_write.get(),
+                                .err = pipe_write.get()},
             ProcessGroupSetup{});
     }
     catch (const std::exception& e)
@@ -228,6 +288,10 @@ void HookRunnerImpl::asyncRun(const std::string& cmd, std::string what,
         done(false);
         return;
     }
+
+    // Closed in the parent so HookOutput sees EOF when the hook exits.
+    pipe_write = UniqueFd();
+    std::make_shared<HookOutput>(io_, pipe_read.release())->start();
 
     std::shared_ptr<HookProcess> hp =
         std::make_shared<HookProcess>(io_, std::move(what), std::move(done));

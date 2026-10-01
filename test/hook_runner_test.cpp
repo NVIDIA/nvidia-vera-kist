@@ -21,6 +21,8 @@
 
 #include <chrono>
 #include <filesystem>
+#include <iostream>
+#include <sstream>
 #include <string>
 
 #include <gtest/gtest.h>
@@ -80,6 +82,31 @@ TEST_F(HookRunnerTest, NonZeroExitReportsFailure)
     io_.run();
     ASSERT_TRUE(called);
     EXPECT_FALSE(result);
+}
+
+// A hook the service launches directly produces no other diagnostics, so its
+// output has to travel through std::cout specifically: that is where
+// installServiceLogTee() splits the stream into the journal and
+// IST_service.log. Writing to an inherited descriptor would reach neither tee.
+TEST_F(HookRunnerTest, HookOutputReachesStdout)
+{
+    std::ostringstream captured;
+    std::streambuf* orig = std::cout.rdbuf(captured.rdbuf());
+
+    bool called = false;
+    runner_->asyncRun(
+        "/bin/bash", "test-output",
+        [&](bool ok) {
+            (void)ok;
+            called = true;
+        },
+        {"-c", "echo on-stdout; echo on-stderr >&2"}, 10s);
+    io_.run();
+    std::cout.rdbuf(orig);
+
+    ASSERT_TRUE(called);
+    EXPECT_NE(captured.str().find("on-stdout"), std::string::npos);
+    EXPECT_NE(captured.str().find("on-stderr"), std::string::npos);
 }
 
 TEST_F(HookRunnerTest, BadCommandReportsFailure)
