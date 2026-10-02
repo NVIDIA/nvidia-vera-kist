@@ -204,7 +204,8 @@ struct IstPlatformConfig
     std::filesystem::path itmBinaryPath{"/bin/kist_itm"};
     std::filesystem::path itmLibDir;
     std::string archSubDir{KIST_ARCH_SUBDIR};
-    std::filesystem::path signingKeyPath{"/etc/ist/kist_itm_verify_key.pem"};
+    std::filesystem::path signingKeyPath{
+        "/usr/share/ist/kist_itm_verify_key.pem"};
     HookPaths hooks;
     StoragePaths storage;
     std::chrono::seconds transferInactivityTimeout{60};

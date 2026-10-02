@@ -39,8 +39,8 @@ IMAGE_INSTALL:append = " nvidia-vera-kist"
 Board-specific `.bbappend` files should install:
 
 - `/etc/ist/platform_cfg.json` — runtime configuration
-- `/etc/ist/kist_itm_verify_key.pem` — ECDSA-P384 public key for `kist_itm`
-  signature verification
+- `/usr/share/ist/kist_itm_verify_key.pem` — ECDSA-P384 public key for
+  `kist_itm` signature verification
 - Hook scripts referenced by `hookPaths` in the platform configuration
 
 ### Runtime Configuration

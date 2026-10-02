@@ -1452,7 +1452,7 @@ TEST_F(IstServiceTest, InitializeRejectsHookDirOutsideTrustedRoot)
     fs::path outside = fs::temp_directory_path() /
                        ("ist_untrusted_" + std::to_string(::getpid()));
     fs::create_directories(outside / "hooks");
-    std::ofstream(outside / "hooks" / "deassert.sh");
+    std::ofstream hook_stub(outside / "hooks" / "deassert.sh");
 
     write_config(R"({
         "hookDirectory": ")" +
