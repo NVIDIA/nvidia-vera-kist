@@ -419,7 +419,10 @@ std::unique_ptr<StatePublisher>
 // safely capture shared_from_this().
 // ----------------
 
-bool parsePlatformConfig(IstPlatformConfig& out, const std::string& path);
+inline constexpr std::string_view trusted_hook_root = "/usr/share/ist/hooks";
+
+bool parsePlatformConfig(IstPlatformConfig& out, const std::string& path,
+                         std::string_view hook_root = trusted_hook_root);
 void resolveItmPaths(IstPlatformConfig& cfg);
 
 struct PldmComponentInfo;

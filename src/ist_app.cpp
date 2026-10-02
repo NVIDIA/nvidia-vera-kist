@@ -238,7 +238,8 @@ void resolveItmPaths(IstPlatformConfig& cfg)
     cfg.itmLibDir.clear();
 }
 
-bool parsePlatformConfig(IstPlatformConfig& out, const std::string& path)
+bool parsePlatformConfig(IstPlatformConfig& out, const std::string& path,
+                         std::string_view hook_root)
 {
     std::ifstream f(path);
     if (!f)
@@ -270,6 +271,14 @@ bool parsePlatformConfig(IstPlatformConfig& out, const std::string& path)
     {
         std::cerr << "hookDirectory does not exist or is not a directory: "
                   << out.hookDir << '\n';
+        return false;
+    }
+
+    if (!is_path_within(out.hookDir, fs::path(hook_root)))
+    {
+        std::cerr << "hookDirectory '" << out.hookDir
+                  << "' resolves outside the trusted hook root '" << hook_root
+                  << "'\n";
         return false;
     }
 
