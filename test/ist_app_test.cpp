@@ -341,7 +341,7 @@ class IstServiceTest : public ::testing::Test
     bool init_from_file(const std::string& path)
     {
         IstPlatformConfig cfg;
-        if (!parsePlatformConfig(cfg, path))
+        if (!parsePlatformConfig(cfg, path, (tmpDir_ / "hooks").string()))
         {
             return false;
         }
@@ -1447,6 +1447,28 @@ TEST_F(IstServiceTest, InitializeRejectsNonexistentHookDir)
     EXPECT_FALSE(init_from_file(configPath_));
 }
 
+TEST_F(IstServiceTest, InitializeRejectsHookDirOutsideTrustedRoot)
+{
+    fs::path outside = fs::temp_directory_path() /
+                       ("ist_untrusted_" + std::to_string(::getpid()));
+    fs::create_directories(outside / "hooks");
+    std::ofstream(outside / "hooks" / "deassert.sh");
+
+    write_config(R"({
+        "hookDirectory": ")" +
+                 (outside / "hooks").string() + R"(",
+        "hookPaths": {
+            "istBootDeassert": ")" +
+                 (outside / "hooks/deassert.sh").string() + R"("
+        },
+        "storageConfig": {},
+        "softwareInventoryId": "IST_Vectors"
+    })");
+    EXPECT_FALSE(init_from_file(configPath_));
+
+    fs::remove_all(outside);
+}
+
 TEST_F(IstServiceTest, InitializeRejectsEmptyHookPath)
 {
     write_config(R"({
@@ -2341,7 +2363,8 @@ TEST_F(IstServiceTest, StartUpdateEmptyTransferCleansUp)
 TEST_F(IstServiceTest, StartUpdateTimesOut)
 {
     IstPlatformConfig cfg;
-    ASSERT_TRUE(parsePlatformConfig(cfg, configPath_));
+    ASSERT_TRUE(
+        parsePlatformConfig(cfg, configPath_, (tmpDir_ / "hooks").string()));
     cfg.transferInactivityTimeout = std::chrono::seconds(1);
     ASSERT_TRUE(service_->initialize(std::move(cfg)));
 
@@ -2358,7 +2381,8 @@ TEST_F(IstServiceTest, StartUpdateTimesOut)
 TEST_F(IstServiceTest, StartUpdateReportsProgressFromDeclaredPayloadSize)
 {
     IstPlatformConfig cfg;
-    ASSERT_TRUE(parsePlatformConfig(cfg, configPath_));
+    ASSERT_TRUE(
+        parsePlatformConfig(cfg, configPath_, (tmpDir_ / "hooks").string()));
     cfg.transferProgressInterval = std::chrono::seconds(1);
     ASSERT_TRUE(service_->initialize(std::move(cfg)));
 
@@ -2395,7 +2419,8 @@ TEST_F(IstServiceTest, StartUpdateReportsProgressFromDeclaredPayloadSize)
 TEST_F(IstServiceTest, StartUpdateReportsProgressWithoutDeclaredPayloadSize)
 {
     IstPlatformConfig cfg;
-    ASSERT_TRUE(parsePlatformConfig(cfg, configPath_));
+    ASSERT_TRUE(
+        parsePlatformConfig(cfg, configPath_, (tmpDir_ / "hooks").string()));
     cfg.transferProgressInterval = std::chrono::seconds(1);
     ASSERT_TRUE(service_->initialize(std::move(cfg)));
 
