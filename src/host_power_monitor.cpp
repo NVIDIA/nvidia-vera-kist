@@ -62,8 +62,8 @@ void HostPowerMonitorImpl::asyncWaitForPowerCycle(
     match_ = std::make_unique<sdbusplus::bus::match_t>(
         static_cast<sdbusplus::bus_t&>(*conn_),
         sdbusplus::bus::match::rules::propertiesChanged(
-            "/xyz/openbmc_project/state/host0",
-            "xyz.openbmc_project.State.Host"),
+            "/xyz/openbmc_project/state/chassis0",
+            "xyz.openbmc_project.State.Chassis"),
         [weak = weak_from_this()](sdbusplus::message_t& msg) {
             auto self = weak.lock();
             if (!self)
@@ -73,7 +73,7 @@ void HostPowerMonitorImpl::asyncWaitForPowerCycle(
             self->on_properties_changed(msg);
         });
 
-    // Read the current host state in case it is already off
+    // Read the current chassis state in case it is already off
     read_current_state();
 
     timer_.expires_after(std::chrono::minutes(10));
@@ -105,8 +105,8 @@ void HostPowerMonitorImpl::read_current_state()
             }
             if (ec)
             {
-                std::cerr << "Failed to read CurrentHostState: " << ec.message()
-                          << '\n';
+                std::cerr << "Failed to read CurrentPowerState: "
+                          << ec.message() << '\n';
                 return;
             }
             const std::string* state = std::get_if<std::string>(&value);
@@ -115,9 +115,10 @@ void HostPowerMonitorImpl::read_current_state()
                 self->on_state_changed(*state);
             }
         },
-        "xyz.openbmc_project.State.Host", "/xyz/openbmc_project/state/host0",
+        "xyz.openbmc_project.State.Chassis0",
+        "/xyz/openbmc_project/state/chassis0",
         "org.freedesktop.DBus.Properties", "Get",
-        "xyz.openbmc_project.State.Host", "CurrentHostState");
+        "xyz.openbmc_project.State.Chassis", "CurrentPowerState");
 }
 
 void HostPowerMonitorImpl::on_properties_changed(sdbusplus::message_t& msg)
@@ -135,7 +136,7 @@ void HostPowerMonitorImpl::on_properties_changed(sdbusplus::message_t& msg)
         return;
     }
     auto it = std::ranges::find_if(
-        props, [](const auto& p) { return p.first == "CurrentHostState"; });
+        props, [](const auto& p) { return p.first == "CurrentPowerState"; });
     if (it != props.end())
     {
         const std::string* state = std::get_if<std::string>(&it->second);
@@ -148,14 +149,15 @@ void HostPowerMonitorImpl::on_properties_changed(sdbusplus::message_t& msg)
 
 void HostPowerMonitorImpl::on_state_changed(const std::string& state)
 {
-    if (!sawOff_ && state == "xyz.openbmc_project.State.Host.HostState.Off")
+    if (!sawOff_ && state == "xyz.openbmc_project.State.Chassis.PowerState.Off")
     {
         sawOff_ = true;
     }
     else if (sawOff_ &&
-             state == "xyz.openbmc_project.State.Host.HostState.Running")
+             state == "xyz.openbmc_project.State.Chassis.PowerState.On")
     {
-        std::cout << "Detected power cycle (host state: " << state << ")\n";
+        std::cout << "Detected power cycle (chassis power state: " << state
+                  << ")\n";
         finish(true);
     }
 }
