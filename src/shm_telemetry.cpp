@@ -24,22 +24,14 @@
 #include <vector>
 #endif
 
-#ifdef NVIDIA_SHMEM
-namespace
-{
-bool shm_ready = false;
-}
-#endif
-
 void init_shm_telemetry()
 {
 #ifdef NVIDIA_SHMEM
-    shm_ready = tal::TelemetryAggregator::namespaceInit(
-        tal::ProcessType::Producer, "nvidia-vera-kist");
-    if (!shm_ready)
+    if (!tal::TelemetryAggregator::namespaceInit(tal::ProcessType::Producer,
+                                                 "nvidia-vera-kist"))
     {
-        std::cerr << "Failed to init shared memory telemetry; IST vector "
-                     "state will be absent from metric reports\n";
+        std::cerr << "Shared memory telemetry init reported a failure; test "
+                     "vector state may be absent from metric reports\n";
     }
 #endif
 }
@@ -48,11 +40,6 @@ void publish_functional_on_shm([[maybe_unused]] const std::string& object_path,
                                [[maybe_unused]] bool functional)
 {
 #ifdef NVIDIA_SHMEM
-    if (!shm_ready)
-    {
-        return;
-    }
-
     std::vector<uint8_t> smbus_data;
     nv::sensor_aggregation::DbusVariantType value{functional};
     uint64_t timestamp = static_cast<uint64_t>(

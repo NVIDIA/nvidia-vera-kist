@@ -24,6 +24,6 @@
 inline constexpr const char* k_op_status_iface =
     "xyz.openbmc_project.State.Decorator.OperationalStatus";
 
-// Both are no-ops when built without nvidia-tal, and after a failed init.
+// Both are no-ops when built without nvidia-tal.
 void init_shm_telemetry();
 void publish_functional_on_shm(const std::string& object_path, bool functional);
