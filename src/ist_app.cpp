@@ -594,8 +594,7 @@ void IstService::on_ist_boot_assert_done(bool ok)
     {
         std::cerr << "Failed to assert IST boot\n";
         state_.progress = 0;
-        transition_to(IstStage::idle, IstStatus::failed,
-                      "category=HOOK, reason=ist_boot_assert_failed");
+        fail_run_with_archive("category=HOOK, reason=ist_boot_assert_failed");
         return;
     }
 
@@ -862,6 +861,24 @@ void IstService::on_deassert_done(int itm_exit, bool ok_deassert)
         });
 }
 
+void IstService::fail_run_with_archive(std::string_view error_info)
+{
+    emit_ist_error(error_info);
+    transition_to(IstStage::cleanup);
+
+    fs::path results_dir = platform_cfg_.storage.result_storage_path;
+    archive_results_async(io_, results_dir, [weak = weak_from_this()](bool ok) {
+        if (!ok)
+        {
+            std::cerr << "IST: results archiving failed\n";
+        }
+        if (auto self = weak.lock())
+        {
+            self->transition_to(IstStage::idle, IstStatus::failed);
+        }
+    });
+}
+
 void IstService::on_reset_done(int itm_exit, bool ok_reset)
 {
     if (!ok_reset)
@@ -968,8 +985,7 @@ void IstService::on_signature_verify_done(bool ok)
     if (!ok)
     {
         std::cerr << "IST binary/library signature verification failed\n";
-        transition_to(
-            IstStage::idle, IstStatus::failed,
+        fail_run_with_archive(
             "category=SECURITY, reason=signature_verification_failed");
         return;
     }
@@ -1002,8 +1018,7 @@ void IstService::on_cpu_discovery_done(
     if (cpu_paths.empty())
     {
         std::cerr << "No CPUs discovered via Entity Manager\n";
-        transition_to(IstStage::idle, IstStatus::failed,
-                      "category=DISCOVERY, reason=no_cpus_found");
+        fail_run_with_archive("category=DISCOVERY, reason=no_cpus_found");
         return;
     }
 
@@ -1015,8 +1030,8 @@ void IstService::on_cpu_discovery_done(
         if (pos == std::string::npos || pos + 1 >= cpu_name.size())
         {
             std::cerr << "Cannot extract socket number from: " << path << '\n';
-            transition_to(IstStage::idle, IstStatus::failed,
-                          "category=DISCOVERY, reason=package_parse_failed");
+            fail_run_with_archive(
+                "category=DISCOVERY, reason=package_parse_failed");
             return;
         }
         std::string_view digits(cpu_name.data() + pos + 1,
@@ -1027,8 +1042,8 @@ void IstService::on_cpu_discovery_done(
         if (ec != std::errc{} || ptr != digits.data() + digits.size())
         {
             std::cerr << "Cannot parse socket number from: " << path << '\n';
-            transition_to(IstStage::idle, IstStatus::failed,
-                          "category=DISCOVERY, reason=package_parse_failed");
+            fail_run_with_archive(
+                "category=DISCOVERY, reason=package_parse_failed");
             return;
         }
         socket_ids.push_back(id);
@@ -1049,8 +1064,8 @@ void IstService::on_cpu_discovery_done(
         {
             std::cerr << "Non-contiguous CPU sockets detected (expected socket "
                       << i << ", found " << socket_ids[i] << ")\n";
-            transition_to(IstStage::idle, IstStatus::failed,
-                          "category=DISCOVERY, reason=non_contiguous_packages");
+            fail_run_with_archive(
+                "category=DISCOVERY, reason=non_contiguous_packages");
             return;
         }
     }

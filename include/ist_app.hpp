@@ -524,6 +524,7 @@ class IstService : public std::enable_shared_from_this<IstService>
     void emit_ist_event_log(int itm_exit);
     void on_deassert_done(int itm_exit, bool ok_deassert);
     void on_reset_done(int itm_exit, bool ok_reset);
+    void fail_run_with_archive(std::string_view error_info);
 
     boost::asio::io_context& io_;
     std::unique_ptr<StatePublisher> publisher_;

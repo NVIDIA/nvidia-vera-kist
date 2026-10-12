@@ -800,9 +800,38 @@ TEST_F(IstServiceTest, AssertHookFailureTransitionsToFailed)
 
     // Simulate hook failure
     assert_done(false);
+    io_.run();
+    io_.restart();
 
     EXPECT_EQ(service_->state().status, IstStatus::failed);
     EXPECT_EQ(service_->state().stage, IstStage::idle);
+}
+
+TEST_F(IstServiceTest, SetupFailureArchivesResults)
+{
+    init_from_file(config_path_);
+
+    std::move_only_function<void(bool) const> assert_done;
+    EXPECT_CALL(*hook_runner_,
+                async_run(::testing::_, StrEq("istBootAssert hook"),
+                          ::testing::_, ::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::string&, DoneCb done,
+                      const std::vector<std::string>&,
+                      std::chrono::seconds) { assert_done = std::move(done); });
+
+    // Boot mode was never asserted, so cleanup must not try to unwind it
+    EXPECT_CALL(*hook_runner_,
+                async_run(::testing::_, StrEq("istBootDeassert hook"),
+                          ::testing::_, ::testing::_, ::testing::_))
+        .Times(0);
+
+    start_ist();
+    assert_done(false);
+    io_.run();
+    io_.restart();
+
+    EXPECT_EQ(service_->state().stage, IstStage::idle);
+    EXPECT_TRUE(fs::exists(tmp_dir_ / "results" / "ist_results.tar.gz"));
 }
 
 TEST_F(IstServiceTest, AssertHookSuccessWaitsForPowerCycle)
@@ -876,6 +905,8 @@ TEST_F(IstServiceTest, ReSignalTimerCancelledOnAssertFailure)
     EXPECT_CALL(*publisher_, re_signal_stage()).Times(0);
 
     assert_done(false);
+    io_.run();
+    io_.restart();
     EXPECT_EQ(service_->state().stage, IstStage::idle);
 
     io_.run_for(std::chrono::seconds(3));
@@ -2007,6 +2038,8 @@ TEST_F(IstServiceTest, RunObjectCreatedOnFailure)
     ParamMap params;
     start_ist(params);
     assert_done(false);
+    io_.run();
+    io_.restart();
 
     EXPECT_EQ(service_->state().status, IstStatus::failed);
 }
@@ -2028,6 +2061,8 @@ TEST_F(IstServiceTest, RunCounterIncrementsAfterFailure)
     ParamMap params1;
     std::string path1 = start_ist(params1);
     assert_done1(false);
+    io_.run();
+    io_.restart();
     EXPECT_EQ(path1, "/com/nvidia/vera/ist/runs/0");
 
     // Second run: counter should still be 1, not reset
@@ -2114,6 +2149,8 @@ TEST_F(IstServiceTest, SecondRunAfterFailureWorks)
     ParamMap params1;
     start_ist(params1);
     assert_done1(false);
+    io_.run();
+    io_.restart();
 
     EXPECT_EQ(service_->state().status, IstStatus::failed);
     EXPECT_EQ(service_->state().stage, IstStage::idle);
@@ -3812,7 +3849,7 @@ TEST_F(IstServiceTest, ServiceLogCapturesCerrOutput)
     // Force a cerr write while tee is active
     std::cerr << "test_service_log_message\n";
 
-    // Simulate failure to drive to idle (removes tee)
+    // Read before the cleanup archive runs, which takes the loose log file
     assert_done(false);
 
     fs::path log_path = tmp_dir_ / "results" / "IST_service.log";
@@ -3836,18 +3873,15 @@ TEST_F(IstServiceTest, ServiceLogTeeRemovedOnIdle)
                       std::chrono::seconds) { assert_done = std::move(done); });
 
     start_ist();
+    std::streambuf* teed = std::cerr.rdbuf();
 
     // Drive to idle
     assert_done(false);
+    io_.run();
+    io_.restart();
     EXPECT_EQ(service_->state().stage, IstStage::idle);
 
-    // Write after tee removed — should NOT appear in log
-    std::cerr << "after_tee_removed\n";
-
-    fs::path log_path = tmp_dir_ / "results" / "IST_service.log";
-    std::ifstream f(log_path);
-    std::string content((std::istreambuf_iterator<char>(f)), {});
-    EXPECT_EQ(content.find("after_tee_removed"), std::string::npos);
+    EXPECT_NE(std::cerr.rdbuf(), teed);
 }
 
 // ----------------
