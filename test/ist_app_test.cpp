@@ -919,6 +919,8 @@ TEST_F(IstServiceTest, PowerCycleFailureRunsDeassertThenFails)
     ASSERT_TRUE(deassert_done);
 
     deassert_done(true);
+    io_.run();
+    io_.restart();
 
     EXPECT_EQ(service_->state().status, IstStatus::failed);
     EXPECT_EQ(service_->state().stage, IstStage::idle);
@@ -1054,6 +1056,8 @@ TEST_F(IstServiceTest, CakBypassFailureAbortsIst)
     ASSERT_TRUE(deassert_done);
 
     deassert_done(true);
+    io_.run();
+    io_.restart();
 
     EXPECT_EQ(service_->state().status, IstStatus::failed);
     EXPECT_EQ(service_->state().stage, IstStage::idle);
@@ -1184,6 +1188,8 @@ TEST_F(IstServiceTest, ItmSuccessCompletesWithCleanup)
     EXPECT_EQ(service_->state().stage, IstStage::cleanup);
 
     deassert_done(true); // Deassert succeeded
+    io_.run();
+    io_.restart();
 
     EXPECT_EQ(service_->state().status, IstStatus::completed);
     EXPECT_EQ(service_->state().stage, IstStage::idle);
@@ -1232,6 +1238,8 @@ TEST_F(IstServiceTest, ItmFailureResultsInFailedStatus)
     EXPECT_EQ(service_->state().stage, IstStage::cleanup);
 
     deassert_done(true);
+    io_.run();
+    io_.restart();
 
     EXPECT_EQ(service_->state().status, IstStatus::failed);
     EXPECT_EQ(service_->state().stage, IstStage::idle);
@@ -1279,6 +1287,8 @@ TEST_F(IstServiceTest, CleanupDeassertFailureStaysInFailed)
 
     // Deassert hook fails
     deassert_done(false);
+    io_.run();
+    io_.restart();
 
     EXPECT_EQ(service_->state().status, IstStatus::failed);
     EXPECT_EQ(service_->state().stage, IstStage::idle);
@@ -1334,6 +1344,8 @@ TEST_F(IstServiceTest, AutoRebootCallsResetHook)
     io_.run();
     io_.restart();
     deassert_done(true);
+    io_.run();
+    io_.restart();
 
     // Reset hook should have been called
     ASSERT_TRUE(reset_done);
@@ -1600,6 +1612,8 @@ TEST_F(IstServiceTest, AutoRebootResetFailureTransitionsToFailed)
     io_.run();
     io_.restart();
     deassert_done(true);
+    io_.run();
+    io_.restart();
 
     // Reset hook fails
     reset_done(false);
@@ -1658,6 +1672,8 @@ TEST_F(IstServiceTest, AutoRebootWithItmFailureStillFailed)
     io_.restart();
 
     deassert_done(true);
+    io_.run();
+    io_.restart();
 
     // Reset succeeds but ITM had failed
     reset_done(true);
@@ -1727,6 +1743,8 @@ TEST_F(IstServiceTest, AutoRebootFailsWhenResetHookMissing)
     io_.run();
     io_.restart();
     deassert_done(true);
+    io_.run();
+    io_.restart();
 
     // resetSystem hook is missing -> should fail in cleanup
     EXPECT_EQ(service_->state().status, IstStatus::failed);
@@ -1860,6 +1878,8 @@ TEST_F(IstServiceTest, SecondRunAfterCompletionWorks)
     io_.run();
     io_.restart();
     deassert_done1(true);
+    io_.run();
+    io_.restart();
 
     EXPECT_EQ(service_->state().status, IstStatus::completed);
     EXPECT_EQ(service_->state().stage, IstStage::idle);
@@ -1909,6 +1929,8 @@ TEST_F(IstServiceTest, SecondRunAfterCompletionWorks)
     io_.run();
     io_.restart();
     deassert_done2(true);
+    io_.run();
+    io_.restart();
 
     EXPECT_EQ(service_->state().status, IstStatus::completed);
     EXPECT_EQ(service_->state().stage, IstStage::idle);
@@ -2137,6 +2159,8 @@ TEST_F(IstServiceTest, SecondRunAfterFailureWorks)
     io_.run();
     io_.restart();
     deassert_done2(true);
+    io_.run();
+    io_.restart();
 
     EXPECT_EQ(service_->state().status, IstStatus::completed);
     EXPECT_EQ(service_->state().stage, IstStage::idle);
@@ -3011,6 +3035,8 @@ TEST_F(IstServiceTest, ItmMismatchEmitsEventLog)
     io_.restart();
 
     deassert_done(true);
+    io_.run();
+    io_.restart();
 
     EXPECT_EQ(service_->state().status, IstStatus::failed);
     EXPECT_EQ(service_->state().stage, IstStage::idle);
@@ -3070,6 +3096,8 @@ TEST_F(IstServiceTest, ItmPlatformErrorEmitsEventLog)
     io_.restart();
 
     deassert_done(true);
+    io_.run();
+    io_.restart();
 
     EXPECT_EQ(service_->state().status, IstStatus::failed);
     EXPECT_EQ(service_->state().stage, IstStage::idle);
@@ -3129,6 +3157,8 @@ TEST_F(IstServiceTest, PlatformErrorIncludesMarkerFiles)
     io_.run();
     io_.restart();
     deassert_done(true);
+    io_.run();
+    io_.restart();
 
     fs::remove_all("/tmp/ist/err_marker");
 }
@@ -3259,6 +3289,8 @@ TEST_F(IstServiceTest, ItmSuccessDoesNotEmitEventLog)
     io_.restart();
 
     deassert_done(true);
+    io_.run();
+    io_.restart();
 
     EXPECT_EQ(service_->state().status, IstStatus::completed);
     EXPECT_EQ(service_->state().stage, IstStage::idle);
@@ -3309,6 +3341,8 @@ TEST_F(IstServiceTest, ItmInfraFailureDoesNotEmitEventLog)
     io_.restart();
 
     deassert_done(true);
+    io_.run();
+    io_.restart();
 
     EXPECT_EQ(service_->state().status, IstStatus::failed);
     EXPECT_EQ(service_->state().stage, IstStage::idle);
@@ -3962,6 +3996,8 @@ TEST_F(IstServiceTest, ErrorHookDeassertFailed)
     io_.run();
     io_.restart();
     deassert_done(false);
+    io_.run();
+    io_.restart();
     std::string err = testing::internal::GetCapturedStderr();
 
     EXPECT_THAT(
@@ -4112,6 +4148,8 @@ TEST_F(IstServiceTest, ErrorHookCakBypassFailed)
     io_.run();
     io_.restart();
     deassert_done(true);
+    io_.run();
+    io_.restart();
     std::string err = testing::internal::GetCapturedStderr();
 
     EXPECT_THAT(err, ::testing::HasSubstr(
@@ -4150,6 +4188,8 @@ TEST_F(IstServiceTest, ErrorPowerCycleNotDetected)
     io_.run();
     io_.restart();
     deassert_done(true);
+    io_.run();
+    io_.restart();
     std::string err = testing::internal::GetCapturedStderr();
 
     EXPECT_THAT(err,
@@ -4197,6 +4237,8 @@ TEST_F(IstServiceTest, ErrorItmExitCode)
     io_.run();
     io_.restart();
     deassert_done(true);
+    io_.run();
+    io_.restart();
     std::string err = testing::internal::GetCapturedStderr();
 
     EXPECT_THAT(err,
@@ -4243,6 +4285,8 @@ TEST_F(IstServiceTest, ErrorItmSwTimeout)
     io_.run();
     io_.restart();
     deassert_done(true);
+    io_.run();
+    io_.restart();
     std::string err = testing::internal::GetCapturedStderr();
 
     EXPECT_THAT(err, ::testing::HasSubstr(
@@ -4305,6 +4349,8 @@ TEST_F(IstServiceTest, ErrorDoubleFailureItmAndDeassert)
     io_.run();
     io_.restart();
     deassert_done(false);
+    io_.run();
+    io_.restart();
     std::string err = testing::internal::GetCapturedStderr();
 
     EXPECT_THAT(err,

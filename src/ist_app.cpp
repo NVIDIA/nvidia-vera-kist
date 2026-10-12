@@ -46,6 +46,11 @@ static constexpr int32_t max_sw_timeout_sec = 7200;
 // Static helpers
 // ---------------------
 
+static void emit_ist_error(std::string_view info)
+{
+    std::cerr << "IST_ERROR: " << info << '\n';
+}
+
 static fs::path json_path(const json& obj, const char* key)
 {
     if (obj.contains(key) && obj[key].is_string())
@@ -160,7 +165,7 @@ void IstService::transition_to(IstStage stage, IstStatus status,
     {
         if (status != IstStatus::completed && !error_info.empty())
         {
-            std::cerr << "IST_ERROR: " << error_info << '\n';
+            emit_ist_error(error_info);
         }
         remove_service_log_tee();
     }
@@ -732,33 +737,49 @@ void IstService::run_ist_cleanup(int itm_exit)
     emit_ist_event_log(itm_exit);
     for (const auto& info : failure_info_)
     {
-        std::cerr << "IST_ERROR: " << info << '\n';
+        emit_ist_error(info);
     }
     failure_info_.clear();
     transition_to(IstStage::cleanup);
 
-    fs::path results_dir = platform_cfg_.storage.result_storage_path;
-    archive_results_async(
-        io_, results_dir, [weak = weak_from_this(), itm_exit](bool ok) {
-            if (!ok)
-            {
-                std::cerr << "IST: results archiving failed\n";
-            }
-            if (auto self = weak.lock())
-            {
-                self->on_archive_done(itm_exit);
-            }
-        });
-}
-
-void IstService::on_archive_done(int itm_exit)
-{
     const fs::path& hook_cmd = platform_cfg_.hooks.ist_boot_deassert;
     hook_runner_->async_run(
         hook_cmd, "istBootDeassert hook",
         [self = shared_from_this(), itm_exit](bool ok_deassert) {
             self->on_deassert_done(itm_exit, ok_deassert);
         });
+}
+
+void IstService::on_archive_done(int itm_exit, bool ok_deassert)
+{
+    if (!ok_deassert)
+    {
+        transition_to(IstStage::idle, IstStatus::failed);
+        return;
+    }
+
+    if (test_.auto_reboot_on_complete)
+    {
+        const fs::path& reset_cmd = platform_cfg_.hooks.reset_system;
+        if (reset_cmd.empty())
+        {
+            std::cerr << "resetSystem hook not found, failing cleanup\n";
+            transition_to(IstStage::idle, IstStatus::failed,
+                          "category=HOOK, reason=reset_system_not_found");
+            return;
+        }
+        hook_runner_->async_run(
+            reset_cmd, "resetSystem hook",
+            [self = shared_from_this(), itm_exit](bool ok_reset) {
+                self->on_reset_done(itm_exit, ok_reset);
+            },
+            {"--skip-cak"}, HookRunner::k_reset_system_timeout);
+    }
+    else
+    {
+        transition_to(IstStage::idle,
+                      itm_exit == 0 ? IstStatus::completed : IstStatus::failed);
+    }
 }
 
 void IstService::emit_ist_event_log(int itm_exit)
@@ -823,33 +844,22 @@ void IstService::on_deassert_done(int itm_exit, bool ok_deassert)
     if (!ok_deassert)
     {
         std::cerr << "istBootDeassert hook failed during cleanup\n";
-        transition_to(IstStage::idle, IstStatus::failed,
-                      "category=HOOK, reason=ist_boot_deassert_failed");
-        return;
+        emit_ist_error("category=HOOK, reason=ist_boot_deassert_failed");
     }
 
-    if (test_.auto_reboot_on_complete)
-    {
-        const fs::path& reset_cmd = platform_cfg_.hooks.reset_system;
-        if (reset_cmd.empty())
-        {
-            std::cerr << "resetSystem hook not found, failing cleanup\n";
-            transition_to(IstStage::idle, IstStatus::failed,
-                          "category=HOOK, reason=reset_system_not_found");
-            return;
-        }
-        hook_runner_->async_run(
-            reset_cmd, "resetSystem hook",
-            [self = shared_from_this(), itm_exit](bool ok_reset) {
-                self->on_reset_done(itm_exit, ok_reset);
-            },
-            {"--skip-cak"}, HookRunner::k_reset_system_timeout);
-    }
-    else
-    {
-        transition_to(IstStage::idle,
-                      itm_exit == 0 ? IstStatus::completed : IstStatus::failed);
-    }
+    fs::path results_dir = platform_cfg_.storage.result_storage_path;
+    archive_results_async(
+        io_, results_dir,
+        [weak = weak_from_this(), itm_exit, ok_deassert](bool ok) {
+            if (!ok)
+            {
+                std::cerr << "IST: results archiving failed\n";
+            }
+            if (auto self = weak.lock())
+            {
+                self->on_archive_done(itm_exit, ok_deassert);
+            }
+        });
 }
 
 void IstService::on_reset_done(int itm_exit, bool ok_reset)
