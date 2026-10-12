@@ -520,7 +520,7 @@ class IstService : public std::enable_shared_from_this<IstService>
     void on_power_cycle_done(bool ok);
     void start_itm_run();
     void run_ist_cleanup(int itm_exit);
-    void on_archive_done(int itm_exit);
+    void on_archive_done(int itm_exit, bool ok_deassert);
     void emit_ist_event_log(int itm_exit);
     void on_deassert_done(int itm_exit, bool ok_deassert);
     void on_reset_done(int itm_exit, bool ok_reset);
