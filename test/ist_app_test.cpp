@@ -147,30 +147,30 @@ TEST(IstStateTest, DefaultValues)
 TEST(IstTestConfigTest, DefaultValues)
 {
     IstTestConfig cfg;
-    EXPECT_FALSE(cfg.customTestList.has_value());
-    EXPECT_FALSE(cfg.customSocketList.has_value());
-    EXPECT_FALSE(cfg.swTimeoutSec.has_value());
-    EXPECT_FALSE(cfg.continueOnFail.has_value());
-    EXPECT_FALSE(cfg.saveResOnFail.has_value());
-    EXPECT_FALSE(cfg.saveResOnPass.has_value());
-    EXPECT_FALSE(cfg.autoRebootOnComplete);
+    EXPECT_FALSE(cfg.custom_test_list.has_value());
+    EXPECT_FALSE(cfg.custom_socket_list.has_value());
+    EXPECT_FALSE(cfg.sw_timeout_sec.has_value());
+    EXPECT_FALSE(cfg.continue_on_fail.has_value());
+    EXPECT_FALSE(cfg.save_res_on_fail.has_value());
+    EXPECT_FALSE(cfg.save_res_on_pass.has_value());
+    EXPECT_FALSE(cfg.auto_reboot_on_complete);
 }
 
 TEST(IstPlatformConfigTest, DefaultValues)
 {
     IstPlatformConfig cfg;
-    EXPECT_TRUE(cfg.softwareInventoryId.empty());
-    EXPECT_TRUE(cfg.hookDir.empty());
-    EXPECT_TRUE(cfg.hooks.istBootAssert.empty());
-    EXPECT_TRUE(cfg.hooks.istBootDeassert.empty());
-    EXPECT_TRUE(cfg.hooks.resetSystem.empty());
-    EXPECT_TRUE(cfg.hooks.errorCheck.empty());
-    EXPECT_TRUE(cfg.storage.vectorMountPath.empty());
-    EXPECT_TRUE(cfg.storage.vectorStoragePath.empty());
-    EXPECT_TRUE(cfg.storage.resultStoragePath.empty());
-    EXPECT_TRUE(cfg.itmLibDir.empty());
-    EXPECT_EQ(cfg.transferInactivityTimeout, std::chrono::seconds(60));
-    EXPECT_EQ(cfg.transferProgressInterval, std::chrono::seconds(120));
+    EXPECT_TRUE(cfg.software_inventory_id.empty());
+    EXPECT_TRUE(cfg.hook_dir.empty());
+    EXPECT_TRUE(cfg.hooks.ist_boot_assert.empty());
+    EXPECT_TRUE(cfg.hooks.ist_boot_deassert.empty());
+    EXPECT_TRUE(cfg.hooks.reset_system.empty());
+    EXPECT_TRUE(cfg.hooks.error_check.empty());
+    EXPECT_TRUE(cfg.storage.vector_mount_path.empty());
+    EXPECT_TRUE(cfg.storage.vector_storage_path.empty());
+    EXPECT_TRUE(cfg.storage.result_storage_path.empty());
+    EXPECT_TRUE(cfg.itm_lib_dir.empty());
+    EXPECT_EQ(cfg.transfer_inactivity_timeout, std::chrono::seconds(60));
+    EXPECT_EQ(cfg.transfer_progress_interval, std::chrono::seconds(120));
 }
 
 // ----------------
@@ -180,11 +180,11 @@ TEST(IstPlatformConfigTest, DefaultValues)
 TEST(ResolveItmPathsTest, EmptyVectorMountPathIsNoop)
 {
     IstPlatformConfig cfg;
-    cfg.archSubDir = "aarch64";
-    fs::path original = cfg.itmBinaryPath;
+    cfg.arch_sub_dir = "aarch64";
+    fs::path original = cfg.itm_binary_path;
     resolve_itm_paths(cfg);
-    EXPECT_EQ(cfg.itmBinaryPath, original);
-    EXPECT_TRUE(cfg.itmLibDir.empty());
+    EXPECT_EQ(cfg.itm_binary_path, original);
+    EXPECT_TRUE(cfg.itm_lib_dir.empty());
 }
 
 TEST(ResolveItmPathsTest, FallsBackToFlatLayoutWhenNoArchSubDir)
@@ -194,11 +194,11 @@ TEST(ResolveItmPathsTest, FallsBackToFlatLayoutWhenNoArchSubDir)
     fs::create_directories(tmp_dir / "vectors");
 
     IstPlatformConfig cfg;
-    cfg.storage.vectorMountPath = tmp_dir / "vectors";
+    cfg.storage.vector_mount_path = tmp_dir / "vectors";
     resolve_itm_paths(cfg);
 
-    EXPECT_EQ(cfg.itmBinaryPath, tmp_dir / "vectors" / "kist_itm");
-    EXPECT_TRUE(cfg.itmLibDir.empty());
+    EXPECT_EQ(cfg.itm_binary_path, tmp_dir / "vectors" / "kist_itm");
+    EXPECT_TRUE(cfg.itm_lib_dir.empty());
 
     fs::remove_all(tmp_dir);
 }
@@ -210,12 +210,12 @@ TEST(ResolveItmPathsTest, FallsBackToFlatLayoutWhenArchDirMissing)
     fs::create_directories(tmp_dir / "vectors");
 
     IstPlatformConfig cfg;
-    cfg.storage.vectorMountPath = tmp_dir / "vectors";
-    cfg.archSubDir = "aarch64";
+    cfg.storage.vector_mount_path = tmp_dir / "vectors";
+    cfg.arch_sub_dir = "aarch64";
     resolve_itm_paths(cfg);
 
-    EXPECT_EQ(cfg.itmBinaryPath, tmp_dir / "vectors" / "kist_itm");
-    EXPECT_TRUE(cfg.itmLibDir.empty());
+    EXPECT_EQ(cfg.itm_binary_path, tmp_dir / "vectors" / "kist_itm");
+    EXPECT_TRUE(cfg.itm_lib_dir.empty());
 
     fs::remove_all(tmp_dir);
 }
@@ -230,13 +230,13 @@ TEST(ResolveItmPathsTest, UsesArchSpecificPathsWhenArchDirExists)
                            "lib");
 
     IstPlatformConfig cfg;
-    cfg.storage.vectorMountPath = tmp_dir / "vectors";
-    cfg.archSubDir = "aarch64";
+    cfg.storage.vector_mount_path = tmp_dir / "vectors";
+    cfg.arch_sub_dir = "aarch64";
     resolve_itm_paths(cfg);
 
-    EXPECT_EQ(cfg.itmBinaryPath, tmp_dir / "vectors" / "kist_itm" / "aarch64" /
-                                     "bin" / "kist_itm");
-    EXPECT_EQ(cfg.itmLibDir,
+    EXPECT_EQ(cfg.itm_binary_path, tmp_dir / "vectors" / "kist_itm" /
+                                       "aarch64" / "bin" / "kist_itm");
+    EXPECT_EQ(cfg.itm_lib_dir,
               tmp_dir / "vectors" / "kist_itm" / "aarch64" / "lib");
 
     fs::remove_all(tmp_dir);
@@ -252,17 +252,17 @@ TEST(ResolveItmPathsTest, ClearsLibDirOnFallback)
                            "lib");
 
     IstPlatformConfig cfg;
-    cfg.storage.vectorMountPath = tmp_dir / "vectors";
-    cfg.archSubDir = "aarch64";
+    cfg.storage.vector_mount_path = tmp_dir / "vectors";
+    cfg.arch_sub_dir = "aarch64";
     resolve_itm_paths(cfg);
-    EXPECT_FALSE(cfg.itmLibDir.empty());
+    EXPECT_FALSE(cfg.itm_lib_dir.empty());
 
     // Simulate fallback by removing the arch dir and re-resolving
     fs::remove_all(tmp_dir / "vectors" / "kist_itm" / "aarch64");
     resolve_itm_paths(cfg);
 
-    EXPECT_EQ(cfg.itmBinaryPath, tmp_dir / "vectors" / "kist_itm");
-    EXPECT_TRUE(cfg.itmLibDir.empty());
+    EXPECT_EQ(cfg.itm_binary_path, tmp_dir / "vectors" / "kist_itm");
+    EXPECT_TRUE(cfg.itm_lib_dir.empty());
 
     fs::remove_all(tmp_dir);
 }
@@ -1387,19 +1387,19 @@ TEST_F(IstServiceTest, StartIstPassesTestParams)
     io_.run();
     io_.restart();
 
-    ASSERT_TRUE(captured_cfg.customTestList.has_value());
-    EXPECT_EQ(*captured_cfg.customTestList, "test1,test2");
-    ASSERT_TRUE(captured_cfg.customSocketList.has_value());
-    EXPECT_EQ(*captured_cfg.customSocketList, "0,1");
-    ASSERT_TRUE(captured_cfg.continueOnFail.has_value());
-    EXPECT_TRUE(*captured_cfg.continueOnFail);
-    ASSERT_TRUE(captured_cfg.saveResOnPass.has_value());
-    EXPECT_TRUE(*captured_cfg.saveResOnPass);
-    ASSERT_TRUE(captured_cfg.saveResOnFail.has_value());
-    EXPECT_FALSE(*captured_cfg.saveResOnFail);
-    ASSERT_TRUE(captured_cfg.swTimeoutSec.has_value());
-    EXPECT_EQ(*captured_cfg.swTimeoutSec, 600);
-    EXPECT_FALSE(captured_cfg.autoRebootOnComplete);
+    ASSERT_TRUE(captured_cfg.custom_test_list.has_value());
+    EXPECT_EQ(*captured_cfg.custom_test_list, "test1,test2");
+    ASSERT_TRUE(captured_cfg.custom_socket_list.has_value());
+    EXPECT_EQ(*captured_cfg.custom_socket_list, "0,1");
+    ASSERT_TRUE(captured_cfg.continue_on_fail.has_value());
+    EXPECT_TRUE(*captured_cfg.continue_on_fail);
+    ASSERT_TRUE(captured_cfg.save_res_on_pass.has_value());
+    EXPECT_TRUE(*captured_cfg.save_res_on_pass);
+    ASSERT_TRUE(captured_cfg.save_res_on_fail.has_value());
+    EXPECT_FALSE(*captured_cfg.save_res_on_fail);
+    ASSERT_TRUE(captured_cfg.sw_timeout_sec.has_value());
+    EXPECT_EQ(*captured_cfg.sw_timeout_sec, 600);
+    EXPECT_FALSE(captured_cfg.auto_reboot_on_complete);
 }
 
 TEST_F(IstServiceTest, SwTimeoutClampedToRange)
@@ -1436,8 +1436,8 @@ TEST_F(IstServiceTest, SwTimeoutClampedToRange)
     io_.run();
     io_.restart();
 
-    ASSERT_TRUE(captured_cfg.swTimeoutSec.has_value());
-    EXPECT_EQ(*captured_cfg.swTimeoutSec, 60); // clamped to min
+    ASSERT_TRUE(captured_cfg.sw_timeout_sec.has_value());
+    EXPECT_EQ(*captured_cfg.sw_timeout_sec, 60); // clamped to min
 }
 
 TEST_F(IstServiceTest, InitializeRejectsNonexistentHookDir)
@@ -1547,8 +1547,8 @@ TEST_F(IstServiceTest, SwTimeoutClampedToMax)
     io_.run();
     io_.restart();
 
-    ASSERT_TRUE(captured_cfg.swTimeoutSec.has_value());
-    EXPECT_EQ(*captured_cfg.swTimeoutSec, 7200); // clamped to max
+    ASSERT_TRUE(captured_cfg.sw_timeout_sec.has_value());
+    EXPECT_EQ(*captured_cfg.sw_timeout_sec, 7200); // clamped to max
 }
 
 TEST_F(IstServiceTest, AutoRebootResetFailureTransitionsToFailed)
@@ -1884,8 +1884,8 @@ TEST_F(IstServiceTest, SecondRunAfterCompletionWorks)
         .WillOnce([&](const IstTestConfig& cfg, const IstPlatformConfig&,
                       ItmDoneCb done, ProgressCb) {
             // Verify old params are NOT carried over
-            EXPECT_FALSE(cfg.customTestList.has_value() &&
-                         *cfg.customTestList == "testA");
+            EXPECT_FALSE(cfg.custom_test_list.has_value() &&
+                         *cfg.custom_test_list == "testA");
             itm_done2 = std::move(done);
         });
 
@@ -2368,7 +2368,7 @@ TEST_F(IstServiceTest, StartUpdateTimesOut)
     IstPlatformConfig cfg;
     ASSERT_TRUE(parse_platform_config(cfg, config_path_,
                                       (tmp_dir_ / "hooks").string()));
-    cfg.transferInactivityTimeout = std::chrono::seconds(1);
+    cfg.transfer_inactivity_timeout = std::chrono::seconds(1);
     ASSERT_TRUE(service_->initialize(std::move(cfg)));
 
     int fd = begin_start_update();
@@ -2386,7 +2386,7 @@ TEST_F(IstServiceTest, StartUpdateReportsProgressFromDeclaredPayloadSize)
     IstPlatformConfig cfg;
     ASSERT_TRUE(parse_platform_config(cfg, config_path_,
                                       (tmp_dir_ / "hooks").string()));
-    cfg.transferProgressInterval = std::chrono::seconds(1);
+    cfg.transfer_progress_interval = std::chrono::seconds(1);
     ASSERT_TRUE(service_->initialize(std::move(cfg)));
 
     std::vector<uint8_t> payload(4096, 0xAB);
@@ -2424,7 +2424,7 @@ TEST_F(IstServiceTest, StartUpdateReportsProgressWithoutDeclaredPayloadSize)
     IstPlatformConfig cfg;
     ASSERT_TRUE(parse_platform_config(cfg, config_path_,
                                       (tmp_dir_ / "hooks").string()));
-    cfg.transferProgressInterval = std::chrono::seconds(1);
+    cfg.transfer_progress_interval = std::chrono::seconds(1);
     ASSERT_TRUE(service_->initialize(std::move(cfg)));
 
     std::vector<uint8_t> payload(4096, 0xAB);
@@ -3470,8 +3470,8 @@ TEST_F(IstServiceTest, CpuDiscoverySetsTwoCpuSocketList)
     io_.run();
     io_.restart();
 
-    ASSERT_TRUE(captured_cfg.customSocketList.has_value());
-    EXPECT_EQ(*captured_cfg.customSocketList, "0,1");
+    ASSERT_TRUE(captured_cfg.custom_socket_list.has_value());
+    EXPECT_EQ(*captured_cfg.custom_socket_list, "0,1");
 }
 
 TEST_F(IstServiceTest, CpuDiscoverySetsOneCpuSocketList)
@@ -3509,8 +3509,8 @@ TEST_F(IstServiceTest, CpuDiscoverySetsOneCpuSocketList)
     io_.run();
     io_.restart();
 
-    ASSERT_TRUE(captured_cfg.customSocketList.has_value());
-    EXPECT_EQ(*captured_cfg.customSocketList, "0");
+    ASSERT_TRUE(captured_cfg.custom_socket_list.has_value());
+    EXPECT_EQ(*captured_cfg.custom_socket_list, "0");
 }
 
 TEST_F(IstServiceTest, CpuDiscoveryEmptyFailsIst)
@@ -3565,8 +3565,8 @@ TEST_F(IstServiceTest, UserSocketListSkipsCpuDiscovery)
     io_.restart();
 
     EXPECT_FALSE(discoverer_called);
-    ASSERT_TRUE(captured_cfg.customSocketList.has_value());
-    EXPECT_EQ(*captured_cfg.customSocketList, "3");
+    ASSERT_TRUE(captured_cfg.custom_socket_list.has_value());
+    EXPECT_EQ(*captured_cfg.custom_socket_list, "3");
 }
 
 TEST_F(IstServiceTest, CpuDiscoveryOutOfOrderPathsSorted)
@@ -3605,8 +3605,8 @@ TEST_F(IstServiceTest, CpuDiscoveryOutOfOrderPathsSorted)
     io_.run();
     io_.restart();
 
-    ASSERT_TRUE(captured_cfg.customSocketList.has_value());
-    EXPECT_EQ(*captured_cfg.customSocketList, "0,1");
+    ASSERT_TRUE(captured_cfg.custom_socket_list.has_value());
+    EXPECT_EQ(*captured_cfg.custom_socket_list, "0,1");
 }
 
 TEST_F(IstServiceTest, CpuDiscoveryDeduplicatesRepresentations)
@@ -3651,8 +3651,8 @@ TEST_F(IstServiceTest, CpuDiscoveryDeduplicatesRepresentations)
     io_.run();
     io_.restart();
 
-    ASSERT_TRUE(captured_cfg.customSocketList.has_value());
-    EXPECT_EQ(*captured_cfg.customSocketList, "0,1");
+    ASSERT_TRUE(captured_cfg.custom_socket_list.has_value());
+    EXPECT_EQ(*captured_cfg.custom_socket_list, "0,1");
 }
 
 TEST_F(IstServiceTest, CpuDiscoveryDeduplicatesSingleSocketRepresentations)
@@ -3695,8 +3695,8 @@ TEST_F(IstServiceTest, CpuDiscoveryDeduplicatesSingleSocketRepresentations)
     io_.run();
     io_.restart();
 
-    ASSERT_TRUE(captured_cfg.customSocketList.has_value());
-    EXPECT_EQ(*captured_cfg.customSocketList, "0");
+    ASSERT_TRUE(captured_cfg.custom_socket_list.has_value());
+    EXPECT_EQ(*captured_cfg.custom_socket_list, "0");
 }
 
 TEST_F(IstServiceTest, CpuDiscoveryNonContiguousSocketsFails)

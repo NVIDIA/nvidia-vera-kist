@@ -175,7 +175,7 @@ void IstService::install_service_log_tee()
     }
 
     fs::path log_path =
-        platform_cfg_.storage.resultStoragePath / "IST_service.log";
+        platform_cfg_.storage.result_storage_path / "IST_service.log";
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
     service_log_fd_ = UniqueFd(::open(
         log_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644));
@@ -217,26 +217,26 @@ void IstService::remove_service_log_tee()
 
 void resolve_itm_paths(IstPlatformConfig& cfg)
 {
-    if (cfg.storage.vectorMountPath.empty())
+    if (cfg.storage.vector_mount_path.empty())
     {
         return;
     }
 
-    if (!cfg.archSubDir.empty())
+    if (!cfg.arch_sub_dir.empty())
     {
         fs::path arch_dir =
-            cfg.storage.vectorMountPath / "kist_itm" / cfg.archSubDir;
+            cfg.storage.vector_mount_path / "kist_itm" / cfg.arch_sub_dir;
         std::error_code ec;
         if (fs::is_directory(arch_dir, ec) && !ec)
         {
-            cfg.itmBinaryPath = arch_dir / "bin" / "kist_itm";
-            cfg.itmLibDir = arch_dir / "lib";
+            cfg.itm_binary_path = arch_dir / "bin" / "kist_itm";
+            cfg.itm_lib_dir = arch_dir / "lib";
             return;
         }
     }
 
-    cfg.itmBinaryPath = cfg.storage.vectorMountPath / "kist_itm";
-    cfg.itmLibDir.clear();
+    cfg.itm_binary_path = cfg.storage.vector_mount_path / "kist_itm";
+    cfg.itm_lib_dir.clear();
 }
 
 bool parse_platform_config(IstPlatformConfig& out, const std::string& path,
@@ -265,19 +265,19 @@ bool parse_platform_config(IstPlatformConfig& out, const std::string& path,
         std::cerr << "hookDirectory missing or not a string\n";
         return false;
     }
-    out.hookDir = d["hookDirectory"].get<std::string>();
+    out.hook_dir = d["hookDirectory"].get<std::string>();
 
     std::error_code fs_ec;
-    if (!fs::is_directory(out.hookDir, fs_ec) || fs_ec)
+    if (!fs::is_directory(out.hook_dir, fs_ec) || fs_ec)
     {
         std::cerr << "hookDirectory does not exist or is not a directory: "
-                  << out.hookDir << '\n';
+                  << out.hook_dir << '\n';
         return false;
     }
 
-    if (!is_path_within(out.hookDir, fs::path(hook_root)))
+    if (!is_path_within(out.hook_dir, fs::path(hook_root)))
     {
-        std::cerr << "hookDirectory '" << out.hookDir
+        std::cerr << "hookDirectory '" << out.hook_dir
                   << "' resolves outside the trusted hook root '" << hook_root
                   << "'\n";
         return false;
@@ -298,18 +298,18 @@ bool parse_platform_config(IstPlatformConfig& out, const std::string& path,
                   << "\n";
         return false;
     }
-    out.softwareInventoryId = std::move(id);
+    out.software_inventory_id = std::move(id);
 
     json hp = d.value("hookPaths", json::object());
-    out.hooks.istBootAssert = json_path(hp, "istBootAssert");
-    out.hooks.istBootDeassert = json_path(hp, "istBootDeassert");
-    out.hooks.resetSystem = json_path(hp, "resetSystem");
-    out.hooks.errorCheck = json_path(hp, "errorCheck");
+    out.hooks.ist_boot_assert = json_path(hp, "istBootAssert");
+    out.hooks.ist_boot_deassert = json_path(hp, "istBootDeassert");
+    out.hooks.reset_system = json_path(hp, "resetSystem");
+    out.hooks.error_check = json_path(hp, "errorCheck");
 
     json sc = d.value("storageConfig", json::object());
-    out.storage.vectorMountPath = json_path(sc, "vectorMountPath");
-    out.storage.vectorStoragePath = json_path(sc, "vectorStoragePath");
-    out.storage.resultStoragePath = json_path(sc, "resultStoragePath");
+    out.storage.vector_mount_path = json_path(sc, "vectorMountPath");
+    out.storage.vector_storage_path = json_path(sc, "vectorStoragePath");
+    out.storage.result_storage_path = json_path(sc, "resultStoragePath");
 
     resolve_itm_paths(out);
 
@@ -317,10 +317,10 @@ bool parse_platform_config(IstPlatformConfig& out, const std::string& path,
     // and ensure non-empty paths are within hookDirectory.
     for (const auto& [name, hookPath] :
          {std::pair<const char*, const fs::path&>{"istBootAssert",
-                                                  out.hooks.istBootAssert},
-          {"istBootDeassert", out.hooks.istBootDeassert},
-          {"resetSystem", out.hooks.resetSystem},
-          {"errorCheck", out.hooks.errorCheck}})
+                                                  out.hooks.ist_boot_assert},
+          {"istBootDeassert", out.hooks.ist_boot_deassert},
+          {"resetSystem", out.hooks.reset_system},
+          {"errorCheck", out.hooks.error_check}})
     {
         if (hookPath.empty())
         {
@@ -331,10 +331,11 @@ bool parse_platform_config(IstPlatformConfig& out, const std::string& path,
             }
             continue;
         }
-        if (!is_path_within(hookPath, out.hookDir))
+        if (!is_path_within(hookPath, out.hook_dir))
         {
             std::cerr << "Hook '" << name << "' path '" << hookPath
-                      << "' is outside hookDirectory '" << out.hookDir << "'\n";
+                      << "' is outside hookDirectory '" << out.hook_dir
+                      << "'\n";
             return false;
         }
     }
@@ -344,23 +345,23 @@ bool parse_platform_config(IstPlatformConfig& out, const std::string& path,
 
 void IstService::print_ist_platform_config() const
 {
-    std::cout << "istHookPath:    " << platform_cfg_.hookDir << '\n';
-    std::cout << "itmBinaryPath:  " << platform_cfg_.itmBinaryPath << '\n';
-    std::cout << "itmLibDir:      " << platform_cfg_.itmLibDir << '\n';
+    std::cout << "istHookPath:    " << platform_cfg_.hook_dir << '\n';
+    std::cout << "itmBinaryPath:  " << platform_cfg_.itm_binary_path << '\n';
+    std::cout << "itmLibDir:      " << platform_cfg_.itm_lib_dir << '\n';
     std::cout << "hooks:\n";
-    std::cout << "  istBootAssert = " << platform_cfg_.hooks.istBootAssert
+    std::cout << "  istBootAssert = " << platform_cfg_.hooks.ist_boot_assert
               << '\n';
-    std::cout << "  istBootDeassert = " << platform_cfg_.hooks.istBootDeassert
+    std::cout << "  istBootDeassert = " << platform_cfg_.hooks.ist_boot_deassert
               << '\n';
-    std::cout << "  resetSystem = " << platform_cfg_.hooks.resetSystem << '\n';
-    std::cout << "  errorCheck = " << platform_cfg_.hooks.errorCheck << '\n';
+    std::cout << "  resetSystem = " << platform_cfg_.hooks.reset_system << '\n';
+    std::cout << "  errorCheck = " << platform_cfg_.hooks.error_check << '\n';
     std::cout << "storage:\n";
-    std::cout << "  vectorMountPath = " << platform_cfg_.storage.vectorMountPath
-              << '\n';
+    std::cout << "  vectorMountPath = "
+              << platform_cfg_.storage.vector_mount_path << '\n';
     std::cout << "  vectorStoragePath = "
-              << platform_cfg_.storage.vectorStoragePath << '\n';
+              << platform_cfg_.storage.vector_storage_path << '\n';
     std::cout << "  resultStoragePath = "
-              << platform_cfg_.storage.resultStoragePath << '\n';
+              << platform_cfg_.storage.result_storage_path << '\n';
 }
 
 bool IstService::initialize(IstPlatformConfig cfg)
@@ -375,7 +376,7 @@ bool IstService::initialize(IstPlatformConfig cfg)
     print_ist_platform_config();
 
     // Deassert IST boot on startup as a safety measure (e.g. after crash)
-    const fs::path& hook_cmd = platform_cfg_.hooks.istBootDeassert;
+    const fs::path& hook_cmd = platform_cfg_.hooks.ist_boot_deassert;
     if (!hook_cmd.empty())
     {
         hook_runner_->async_run(
@@ -417,7 +418,7 @@ bool IstService::get_ist_params(const ParamMap& test_params)
         {
             if (const int* i = std::get_if<int>(&val))
             {
-                test_.swTimeoutSec =
+                test_.sw_timeout_sec =
                     std::clamp(static_cast<int32_t>(*i), min_sw_timeout_sec,
                                max_sw_timeout_sec);
             }
@@ -432,7 +433,7 @@ bool IstService::get_ist_params(const ParamMap& test_params)
         {
             if (const std::string* s = std::get_if<std::string>(&val))
             {
-                test_.customTestList = *s;
+                test_.custom_test_list = *s;
             }
             else
             {
@@ -445,7 +446,7 @@ bool IstService::get_ist_params(const ParamMap& test_params)
         {
             if (const std::string* s = std::get_if<std::string>(&val))
             {
-                test_.customSocketList = *s;
+                test_.custom_socket_list = *s;
             }
             else
             {
@@ -458,7 +459,7 @@ bool IstService::get_ist_params(const ParamMap& test_params)
         {
             if (const bool* b = std::get_if<bool>(&val))
             {
-                test_.continueOnFail = *b;
+                test_.continue_on_fail = *b;
             }
             else
             {
@@ -471,7 +472,7 @@ bool IstService::get_ist_params(const ParamMap& test_params)
         {
             if (const bool* b = std::get_if<bool>(&val))
             {
-                test_.saveResOnPass = *b;
+                test_.save_res_on_pass = *b;
             }
             else
             {
@@ -484,7 +485,7 @@ bool IstService::get_ist_params(const ParamMap& test_params)
         {
             if (const bool* b = std::get_if<bool>(&val))
             {
-                test_.saveResOnFail = *b;
+                test_.save_res_on_fail = *b;
             }
             else
             {
@@ -497,7 +498,7 @@ bool IstService::get_ist_params(const ParamMap& test_params)
         {
             if (const bool* b = std::get_if<bool>(&val))
             {
-                test_.autoRebootOnComplete = *b;
+                test_.auto_reboot_on_complete = *b;
             }
             else
             {
@@ -517,16 +518,16 @@ bool IstService::get_ist_params(const ParamMap& test_params)
 
 bool IstService::collateral_verification()
 {
-    if (platform_cfg_.storage.vectorMountPath.empty())
+    if (platform_cfg_.storage.vector_mount_path.empty())
     {
         std::cerr << "vectorMountPath not configured in platform config!\n";
         return false;
     }
     std::error_code fs_ec;
-    if (!fs::exists(platform_cfg_.storage.vectorMountPath, fs_ec) || fs_ec)
+    if (!fs::exists(platform_cfg_.storage.vector_mount_path, fs_ec) || fs_ec)
     {
         std::cerr << "Vector storage path '"
-                  << platform_cfg_.storage.vectorMountPath
+                  << platform_cfg_.storage.vector_mount_path
                   << "' does not exist or is inaccessible";
         if (fs_ec)
         {
@@ -538,19 +539,20 @@ bool IstService::collateral_verification()
 
     resolve_itm_paths(platform_cfg_);
 
-    if (!fs::exists(platform_cfg_.itmBinaryPath, fs_ec) || fs_ec)
+    if (!fs::exists(platform_cfg_.itm_binary_path, fs_ec) || fs_ec)
     {
-        std::cerr << "IST binary '" << platform_cfg_.itmBinaryPath
+        std::cerr << "IST binary '" << platform_cfg_.itm_binary_path
                   << "' not found; test vectors may not be mounted\n";
         return false;
     }
 
-    fs::path golden_res = platform_cfg_.storage.vectorMountPath / "GOLDEN_RES";
+    fs::path golden_res =
+        platform_cfg_.storage.vector_mount_path / "GOLDEN_RES";
     if (!fs::exists(golden_res, fs_ec) || fs_ec ||
         fs::is_empty(golden_res, fs_ec) || fs_ec)
     {
         std::cerr << "GOLDEN_RES not found or empty under '"
-                  << platform_cfg_.storage.vectorMountPath
+                  << platform_cfg_.storage.vector_mount_path
                   << "'; test vectors may not be mounted\n";
         return false;
     }
@@ -560,13 +562,13 @@ bool IstService::collateral_verification()
 
 bool IstService::prepare_result_storage()
 {
-    if (platform_cfg_.storage.resultStoragePath.empty())
+    if (platform_cfg_.storage.result_storage_path.empty())
     {
         std::cerr << "resultStoragePath not configured in platform config!\n";
         return false;
     }
     std::error_code fs_ec;
-    fs::create_directories(platform_cfg_.storage.resultStoragePath, fs_ec);
+    fs::create_directories(platform_cfg_.storage.result_storage_path, fs_ec);
     if (fs_ec)
     {
         std::cerr << "Failed to create results directory: " << fs_ec.message()
@@ -653,15 +655,15 @@ void IstService::on_power_cycle_done(bool ok)
     transition_to(IstStage::running_ist);
 
     std::filesystem::path cak_script =
-        platform_cfg_.hookDir / "ist_cak_bypass.sh";
+        platform_cfg_.hook_dir / "ist_cak_bypass.sh";
     std::error_code ec;
     if (std::filesystem::exists(cak_script, ec) && !ec)
     {
-        if (!is_path_within(cak_script, platform_cfg_.hookDir))
+        if (!is_path_within(cak_script, platform_cfg_.hook_dir))
         {
             std::cerr << "CAK bypass script '" << cak_script.string()
                       << "' resolves outside hookDirectory '"
-                      << platform_cfg_.hookDir.string() << "'\n";
+                      << platform_cfg_.hook_dir.string() << "'\n";
             failure_info_.emplace_back(
                 "category=SECURITY, reason=cak_bypass_path_escape");
             run_ist_cleanup(-1);
@@ -735,7 +737,7 @@ void IstService::run_ist_cleanup(int itm_exit)
     failure_info_.clear();
     transition_to(IstStage::cleanup);
 
-    fs::path results_dir = platform_cfg_.storage.resultStoragePath;
+    fs::path results_dir = platform_cfg_.storage.result_storage_path;
     archive_results_async(
         io_, results_dir, [weak = weak_from_this(), itm_exit](bool ok) {
             if (!ok)
@@ -751,7 +753,7 @@ void IstService::run_ist_cleanup(int itm_exit)
 
 void IstService::on_archive_done(int itm_exit)
 {
-    const fs::path& hook_cmd = platform_cfg_.hooks.istBootDeassert;
+    const fs::path& hook_cmd = platform_cfg_.hooks.ist_boot_deassert;
     hook_runner_->async_run(
         hook_cmd, "istBootDeassert hook",
         [self = shared_from_this(), itm_exit](bool ok_deassert) {
@@ -797,18 +799,18 @@ void IstService::emit_ist_event_log(int itm_exit)
         {"IST_RESULT", result},
         {"IST_MESSAGE", message},
     };
-    if (test_.continueOnFail.has_value())
+    if (test_.continue_on_fail.has_value())
     {
         additional_data["IST_CONTINUE_ON_FAIL"] =
-            *test_.continueOnFail ? "true" : "false";
+            *test_.continue_on_fail ? "true" : "false";
     }
-    if (test_.customTestList.has_value())
+    if (test_.custom_test_list.has_value())
     {
-        additional_data["IST_TEST_LIST"] = *test_.customTestList;
+        additional_data["IST_TEST_LIST"] = *test_.custom_test_list;
     }
-    if (test_.customSocketList.has_value())
+    if (test_.custom_socket_list.has_value())
     {
-        additional_data["IST_PACKAGE_LIST"] = *test_.customSocketList;
+        additional_data["IST_PACKAGE_LIST"] = *test_.custom_socket_list;
     }
 
     publisher_->emit_event_log(
@@ -826,9 +828,9 @@ void IstService::on_deassert_done(int itm_exit, bool ok_deassert)
         return;
     }
 
-    if (test_.autoRebootOnComplete)
+    if (test_.auto_reboot_on_complete)
     {
-        const fs::path& reset_cmd = platform_cfg_.hooks.resetSystem;
+        const fs::path& reset_cmd = platform_cfg_.hooks.reset_system;
         if (reset_cmd.empty())
         {
             std::cerr << "resetSystem hook not found, failing cleanup\n";
@@ -907,7 +909,7 @@ std::string IstService::start_ist(const ParamMap& test_params)
         throw ist_err::InternalFailure{};
     }
 
-    const fs::path& hook_cmd = platform_cfg_.hooks.istBootAssert;
+    const fs::path& hook_cmd = platform_cfg_.hooks.ist_boot_assert;
     if (hook_cmd.empty())
     {
         transition_to(IstStage::idle, IstStatus::failed,
@@ -915,7 +917,7 @@ std::string IstService::start_ist(const ParamMap& test_params)
         throw ist_err::InternalFailure{};
     }
 
-    const fs::path& deassert_cmd = platform_cfg_.hooks.istBootDeassert;
+    const fs::path& deassert_cmd = platform_cfg_.hooks.ist_boot_deassert;
     if (deassert_cmd.empty())
     {
         transition_to(IstStage::idle, IstStatus::failed,
@@ -931,7 +933,7 @@ std::string IstService::start_ist(const ParamMap& test_params)
 
     std::error_code ec;
     for (const auto& entry :
-         fs::directory_iterator(platform_cfg_.storage.resultStoragePath, ec))
+         fs::directory_iterator(platform_cfg_.storage.result_storage_path, ec))
     {
         std::error_code rm_ec;
         fs::remove_all(entry.path(), rm_ec);
@@ -962,10 +964,10 @@ void IstService::on_signature_verify_done(bool ok)
         return;
     }
 
-    if (test_.customSocketList.has_value())
+    if (test_.custom_socket_list.has_value())
     {
         std::cout << "Using user-provided socket list: "
-                  << *test_.customSocketList << '\n';
+                  << *test_.custom_socket_list << '\n';
         launch_boot_assert();
         return;
     }
@@ -1052,11 +1054,10 @@ void IstService::on_cpu_discovery_done(
         }
         socket_list += std::to_string(socket_ids[i]);
     }
-    test_.customSocketList = std::move(socket_list);
+    test_.custom_socket_list = std::move(socket_list);
     std::cout << "Discovered " << socket_ids.size() << " CPU socket(s) from "
-              << cpu_paths.size()
-              << " inventory path(s), socket list: " << *test_.customSocketList
-              << '\n';
+              << cpu_paths.size() << " inventory path(s), socket list: "
+              << *test_.custom_socket_list << '\n';
 
     launch_boot_assert();
 }
@@ -1065,7 +1066,7 @@ void IstService::launch_boot_assert()
 {
     transition_to(IstStage::pending_ist_boot);
 
-    const fs::path& hook_cmd = platform_cfg_.hooks.istBootAssert;
+    const fs::path& hook_cmd = platform_cfg_.hooks.ist_boot_assert;
     hook_runner_->async_run(hook_cmd, "istBootAssert hook",
                             [self = shared_from_this()](bool hook_ok) {
                                 self->on_ist_boot_assert_done(hook_ok);

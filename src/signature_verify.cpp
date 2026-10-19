@@ -257,9 +257,9 @@ static std::optional<std::vector<VerifyTarget>>
     collect_files_to_verify(const IstPlatformConfig& cfg)
 {
     std::error_code ec;
-    if (!fs::exists(cfg.signingKeyPath, ec) || ec)
+    if (!fs::exists(cfg.signing_key_path, ec) || ec)
     {
-        std::cerr << "Verification key not found: " << cfg.signingKeyPath
+        std::cerr << "Verification key not found: " << cfg.signing_key_path
                   << '\n';
         return std::nullopt;
     }
@@ -267,7 +267,7 @@ static std::optional<std::vector<VerifyTarget>>
     std::vector<VerifyTarget> targets;
     std::set<fs::path> verified_real;
 
-    fs::path binary_sig = cfg.itmBinaryPath;
+    fs::path binary_sig = cfg.itm_binary_path;
     binary_sig += ".sig";
     if (!fs::exists(binary_sig, ec) || ec)
     {
@@ -275,21 +275,21 @@ static std::optional<std::vector<VerifyTarget>>
                   << '\n';
         return std::nullopt;
     }
-    targets.push_back({cfg.itmBinaryPath, binary_sig});
-    fs::path binary_real = fs::canonical(cfg.itmBinaryPath, ec);
+    targets.push_back({cfg.itm_binary_path, binary_sig});
+    fs::path binary_real = fs::canonical(cfg.itm_binary_path, ec);
     if (!ec)
     {
         verified_real.insert(binary_real);
     }
 
-    if (cfg.itmLibDir.empty())
+    if (cfg.itm_lib_dir.empty())
     {
         return targets;
     }
-    bool is_dir = fs::is_directory(cfg.itmLibDir, ec);
+    bool is_dir = fs::is_directory(cfg.itm_lib_dir, ec);
     if (ec)
     {
-        std::cerr << "Cannot access lib directory '" << cfg.itmLibDir
+        std::cerr << "Cannot access lib directory '" << cfg.itm_lib_dir
                   << "': " << ec.message() << '\n';
         return std::nullopt;
     }
@@ -300,7 +300,7 @@ static std::optional<std::vector<VerifyTarget>>
 
     std::vector<fs::path> symlinks;
 
-    for (const auto& entry : fs::directory_iterator(cfg.itmLibDir, ec))
+    for (const auto& entry : fs::directory_iterator(cfg.itm_lib_dir, ec))
     {
         if (ec)
         {
@@ -394,7 +394,7 @@ bool verify_itm_signatures(const IstPlatformConfig& cfg)
     }
     for (const VerifyTarget& t : *targets)
     {
-        if (!verify_file_signature(t.file, t.sig, cfg.signingKeyPath))
+        if (!verify_file_signature(t.file, t.sig, cfg.signing_key_path))
         {
             return false;
         }
@@ -465,7 +465,7 @@ class SignatureVerifySession :
                 return;
             }
             const VerifyTarget& t = targets_[index_];
-            if (!verifier_.init(t.file, t.sig, cfg_.signingKeyPath))
+            if (!verifier_.init(t.file, t.sig, cfg_.signing_key_path))
             {
                 finish(false);
                 return;

@@ -248,9 +248,9 @@ TEST_F(SignatureVerifyTest, VerifyAllPassesWithSignedBinaryAndLibs)
     create_signed_lib("libusb-1.0.so.0.4.0", "fake libusb content");
 
     IstPlatformConfig cfg;
-    cfg.itmBinaryPath = binary_path_;
-    cfg.itmLibDir = tmp_dir_ / "lib";
-    cfg.signingKeyPath = pub_key_path_;
+    cfg.itm_binary_path = binary_path_;
+    cfg.itm_lib_dir = tmp_dir_ / "lib";
+    cfg.signing_key_path = pub_key_path_;
 
     EXPECT_TRUE(verify_itm_signatures(cfg));
 }
@@ -260,9 +260,9 @@ TEST_F(SignatureVerifyTest, VerifyAllFailsWhenBinarySigMissing)
     fs::remove(fs::path(binary_path_).concat(".sig"));
 
     IstPlatformConfig cfg;
-    cfg.itmBinaryPath = binary_path_;
-    cfg.itmLibDir = tmp_dir_ / "lib";
-    cfg.signingKeyPath = pub_key_path_;
+    cfg.itm_binary_path = binary_path_;
+    cfg.itm_lib_dir = tmp_dir_ / "lib";
+    cfg.signing_key_path = pub_key_path_;
 
     EXPECT_FALSE(verify_itm_signatures(cfg));
 }
@@ -273,9 +273,9 @@ TEST_F(SignatureVerifyTest, VerifyAllFailsWhenLibSigMissing)
     std::ofstream(lib_path) << "lib content";
 
     IstPlatformConfig cfg;
-    cfg.itmBinaryPath = binary_path_;
-    cfg.itmLibDir = tmp_dir_ / "lib";
-    cfg.signingKeyPath = pub_key_path_;
+    cfg.itm_binary_path = binary_path_;
+    cfg.itm_lib_dir = tmp_dir_ / "lib";
+    cfg.signing_key_path = pub_key_path_;
 
     EXPECT_FALSE(verify_itm_signatures(cfg));
 }
@@ -287,9 +287,9 @@ TEST_F(SignatureVerifyTest, VerifyAllFailsWhenLibTampered)
     std::ofstream(tmp_dir_ / "lib" / "libcrypto.so.3") << "tampered content";
 
     IstPlatformConfig cfg;
-    cfg.itmBinaryPath = binary_path_;
-    cfg.itmLibDir = tmp_dir_ / "lib";
-    cfg.signingKeyPath = pub_key_path_;
+    cfg.itm_binary_path = binary_path_;
+    cfg.itm_lib_dir = tmp_dir_ / "lib";
+    cfg.signing_key_path = pub_key_path_;
 
     EXPECT_FALSE(verify_itm_signatures(cfg));
 }
@@ -297,8 +297,8 @@ TEST_F(SignatureVerifyTest, VerifyAllFailsWhenLibTampered)
 TEST_F(SignatureVerifyTest, VerifyFailsWhenKeyNotOnDisk)
 {
     IstPlatformConfig cfg;
-    cfg.itmBinaryPath = binary_path_;
-    cfg.itmLibDir = tmp_dir_ / "lib";
+    cfg.itm_binary_path = binary_path_;
+    cfg.itm_lib_dir = tmp_dir_ / "lib";
 
     EXPECT_FALSE(verify_itm_signatures(cfg));
 }
@@ -306,9 +306,9 @@ TEST_F(SignatureVerifyTest, VerifyFailsWhenKeyNotOnDisk)
 TEST_F(SignatureVerifyTest, VerifyPassesWithEmptyLibDir)
 {
     IstPlatformConfig cfg;
-    cfg.itmBinaryPath = binary_path_;
-    cfg.itmLibDir = "";
-    cfg.signingKeyPath = pub_key_path_;
+    cfg.itm_binary_path = binary_path_;
+    cfg.itm_lib_dir = "";
+    cfg.signing_key_path = pub_key_path_;
 
     EXPECT_TRUE(verify_itm_signatures(cfg));
 }
@@ -323,9 +323,9 @@ TEST_F(SignatureVerifyTest, VerifyPassesWithSymlinkToSignedLib)
     create_lib_symlink("libusb-1.0.so.0", "libusb-1.0.so.0.5.0");
 
     IstPlatformConfig cfg;
-    cfg.itmBinaryPath = binary_path_;
-    cfg.itmLibDir = tmp_dir_ / "lib";
-    cfg.signingKeyPath = pub_key_path_;
+    cfg.itm_binary_path = binary_path_;
+    cfg.itm_lib_dir = tmp_dir_ / "lib";
+    cfg.signing_key_path = pub_key_path_;
 
     EXPECT_TRUE(verify_itm_signatures(cfg));
 }
@@ -337,9 +337,9 @@ TEST_F(SignatureVerifyTest, VerifyPassesWithSymlinkChain)
     create_lib_symlink("libusb-1.0.so", "libusb-1.0.so.0");
 
     IstPlatformConfig cfg;
-    cfg.itmBinaryPath = binary_path_;
-    cfg.itmLibDir = tmp_dir_ / "lib";
-    cfg.signingKeyPath = pub_key_path_;
+    cfg.itm_binary_path = binary_path_;
+    cfg.itm_lib_dir = tmp_dir_ / "lib";
+    cfg.signing_key_path = pub_key_path_;
 
     EXPECT_TRUE(verify_itm_signatures(cfg));
 }
@@ -351,9 +351,9 @@ TEST_F(SignatureVerifyTest, VerifyFailsWhenSymlinkResolvesOutsideVerifiedSet)
     create_lib_symlink("libusb-1.0.so.0", outside);
 
     IstPlatformConfig cfg;
-    cfg.itmBinaryPath = binary_path_;
-    cfg.itmLibDir = tmp_dir_ / "lib";
-    cfg.signingKeyPath = pub_key_path_;
+    cfg.itm_binary_path = binary_path_;
+    cfg.itm_lib_dir = tmp_dir_ / "lib";
+    cfg.signing_key_path = pub_key_path_;
 
     EXPECT_FALSE(verify_itm_signatures(cfg));
 }
@@ -363,9 +363,9 @@ TEST_F(SignatureVerifyTest, VerifyFailsWhenSymlinkDangling)
     create_lib_symlink("libusb-1.0.so.0", "does-not-exist.so.0.5.0");
 
     IstPlatformConfig cfg;
-    cfg.itmBinaryPath = binary_path_;
-    cfg.itmLibDir = tmp_dir_ / "lib";
-    cfg.signingKeyPath = pub_key_path_;
+    cfg.itm_binary_path = binary_path_;
+    cfg.itm_lib_dir = tmp_dir_ / "lib";
+    cfg.signing_key_path = pub_key_path_;
 
     EXPECT_FALSE(verify_itm_signatures(cfg));
 }
@@ -375,9 +375,9 @@ TEST_F(SignatureVerifyTest, VerifyPassesWhenSymlinkResolvesToBinary)
     create_lib_symlink("kist_itm.link", binary_path_);
 
     IstPlatformConfig cfg;
-    cfg.itmBinaryPath = binary_path_;
-    cfg.itmLibDir = tmp_dir_ / "lib";
-    cfg.signingKeyPath = pub_key_path_;
+    cfg.itm_binary_path = binary_path_;
+    cfg.itm_lib_dir = tmp_dir_ / "lib";
+    cfg.signing_key_path = pub_key_path_;
 
     EXPECT_TRUE(verify_itm_signatures(cfg));
 }
@@ -391,9 +391,9 @@ TEST_F(SignatureVerifyTest, VerifyPassesWithMixedRealAndSymlinkedLibs)
     create_lib_symlink("libusb-1.0.so", "libusb-1.0.so.0");
 
     IstPlatformConfig cfg;
-    cfg.itmBinaryPath = binary_path_;
-    cfg.itmLibDir = tmp_dir_ / "lib";
-    cfg.signingKeyPath = pub_key_path_;
+    cfg.itm_binary_path = binary_path_;
+    cfg.itm_lib_dir = tmp_dir_ / "lib";
+    cfg.signing_key_path = pub_key_path_;
 
     EXPECT_TRUE(verify_itm_signatures(cfg));
 }

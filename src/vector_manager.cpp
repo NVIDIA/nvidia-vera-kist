@@ -292,17 +292,17 @@ static bool validate_pldm_header(const std::vector<uint8_t>& hdr,
         return false;
     }
 
-    comp.payloadCrc = read_u32_le(&hdr[header_size - 4]);
+    comp.payload_crc = read_u32_le(&hdr[header_size - 4]);
     comp.offset = header_size;
 
     uint64_t package_size = package_size_from_header(hdr, header_size);
-    comp.payloadSize =
+    comp.payload_size =
         package_size > header_size ? package_size - header_size : 0;
 
     std::cerr << "PLDM revision 0x" << std::hex
               << static_cast<unsigned>(revision) << std::dec << ", header size "
               << header_size << "; payload starts at offset " << comp.offset
-              << " and spans " << comp.payloadSize << " bytes\n";
+              << " and spans " << comp.payload_size << " bytes\n";
     return true;
 }
 
@@ -559,8 +559,8 @@ class TransferSession : public std::enable_shared_from_this<TransferSession>
         stream_(io, read_fd.release()), deadline_(io), progress_timer_(io),
         image_path_(std::move(image_path)), timeout_(timeout),
         progress_interval_(progress_interval), prefix_(std::move(prefix)),
-        payload_offset_(comp.offset), expected_crc_(comp.payloadCrc),
-        payload_total_(comp.payloadSize), on_progress_(std::move(on_progress)),
+        payload_offset_(comp.offset), expected_crc_(comp.payload_crc),
+        payload_total_(comp.payload_size), on_progress_(std::move(on_progress)),
         on_complete_(std::move(on_complete))
     {
         // Overwrite in place (no room for a temp copy): once the validated
@@ -843,7 +843,7 @@ std::string VectorManager::start_update(UniqueFd image,
         std::cerr << "StartUpdate rejected: an update is already in progress\n";
         throw ist_err::Unavailable{};
     }
-    if (platform_cfg_.storage.vectorStoragePath.empty())
+    if (platform_cfg_.storage.vector_storage_path.empty())
     {
         std::cerr << "StartUpdate rejected: vector storage path is empty\n";
         throw ist_err::InternalFailure{};
@@ -862,14 +862,14 @@ std::string VectorManager::start_update(UniqueFd image,
     (void)apply_time; // Immediate and OnReset are accepted; apply is always
                       // immediate.
 
-    const fs::path& storage_path = platform_cfg_.storage.vectorStoragePath;
+    const fs::path& storage_path = platform_cfg_.storage.vector_storage_path;
     fs::path image_path = storage_path / k_image_file_name;
 
     update_in_progress_ = true;
 
     std::shared_ptr<PldmHeaderPeekSession> peek =
         std::make_shared<PldmHeaderPeekSession>(
-            io_, std::move(image), platform_cfg_.transferInactivityTimeout,
+            io_, std::move(image), platform_cfg_.transfer_inactivity_timeout,
             [weak = weak_from_this(),
              image_path](bool ok, std::vector<uint8_t> prefix, UniqueFd read_fd,
                          PldmComponentInfo comp) {
@@ -884,7 +884,7 @@ std::string VectorManager::start_update(UniqueFd image,
     peek->start();
 
     return std::format("/xyz/openbmc_project/inventory_software/{}",
-                       platform_cfg_.softwareInventoryId);
+                       platform_cfg_.software_inventory_id);
 }
 
 void VectorManager::on_transfer_complete(bool ok)
@@ -906,7 +906,7 @@ void VectorManager::on_transfer_complete(bool ok)
 
 bool VectorManager::teardown_mounts()
 {
-    const fs::path& mount_path = platform_cfg_.storage.vectorMountPath;
+    const fs::path& mount_path = platform_cfg_.storage.vector_mount_path;
 
     if (mount_path.empty())
     {
@@ -936,8 +936,8 @@ bool VectorManager::teardown_mounts()
 
 bool VectorManager::mount_images()
 {
-    const fs::path& storage_path = platform_cfg_.storage.vectorStoragePath;
-    const fs::path& mount_path = platform_cfg_.storage.vectorMountPath;
+    const fs::path& storage_path = platform_cfg_.storage.vector_storage_path;
+    const fs::path& mount_path = platform_cfg_.storage.vector_mount_path;
 
     if (storage_path.empty() || mount_path.empty())
     {
@@ -1041,7 +1041,7 @@ bool VectorManager::mount_images()
 
 void VectorManager::read_and_publish_version()
 {
-    const fs::path& mount_path = platform_cfg_.storage.vectorMountPath;
+    const fs::path& mount_path = platform_cfg_.storage.vector_mount_path;
     if (mount_path.empty())
     {
         std::cerr << "vectorMountPath not configured; skipping version read\n";
@@ -1134,8 +1134,9 @@ void VectorManager::on_teardown_complete(bool ok, UniqueFd read_fd,
         std::shared_ptr<TransferSession> session =
             std::make_shared<TransferSession>(
                 io_, std::move(read_fd), image_path,
-                platform_cfg_.transferInactivityTimeout,
-                platform_cfg_.transferProgressInterval, std::move(prefix), comp,
+                platform_cfg_.transfer_inactivity_timeout,
+                platform_cfg_.transfer_progress_interval, std::move(prefix),
+                comp,
                 [weak = weak_from_this()](uint8_t progress) {
                     std::shared_ptr<VectorManager> self = weak.lock();
                     if (self)
@@ -1178,7 +1179,7 @@ void VectorManager::on_mount_complete(bool ok)
 
 void VectorManager::ensure_mounted()
 {
-    const fs::path& mount_path = platform_cfg_.storage.vectorMountPath;
+    const fs::path& mount_path = platform_cfg_.storage.vector_mount_path;
     if (mount_path.empty())
     {
         return;
