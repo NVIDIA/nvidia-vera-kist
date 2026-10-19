@@ -35,21 +35,21 @@ class HookRunnerTest : public ::testing::Test
   protected:
     void SetUp() override
     {
-        tmpDir_ = fs::temp_directory_path() /
-                  ("hook_test_" + std::to_string(::getpid()));
-        fs::create_directories(tmpDir_);
+        tmp_dir_ = fs::temp_directory_path() /
+                   ("hook_test_" + std::to_string(::getpid()));
+        fs::create_directories(tmp_dir_);
         runner_ = makeHookRunner(io_);
     }
 
     void TearDown() override
     {
         std::error_code ec;
-        fs::remove_all(tmpDir_, ec);
+        fs::remove_all(tmp_dir_, ec);
     }
 
     boost::asio::io_context io_;
     std::unique_ptr<HookRunner> runner_;
-    fs::path tmpDir_;
+    fs::path tmp_dir_;
 };
 
 TEST_F(HookRunnerTest, NormalExitReportsSuccess)
@@ -155,7 +155,7 @@ TEST_F(HookRunnerTest, TimeoutKillsProcess)
 
 TEST_F(HookRunnerTest, TimeoutAllowsTrapCleanup)
 {
-    fs::path marker = tmpDir_ / "cleanup_ran";
+    fs::path marker = tmp_dir_ / "cleanup_ran";
     std::string script =
         "trap 'touch " + marker.string() + "; exit 0' TERM; sleep 999";
 

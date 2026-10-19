@@ -49,7 +49,7 @@ class VectorManager : public std::enable_shared_from_this<VectorManager>
 
     bool inProgress() const
     {
-        return updateInProgress_;
+        return update_in_progress_;
     }
 
     // Mount any existing on-disk vectors at service startup and publish the
@@ -83,9 +83,9 @@ class VectorManager : public std::enable_shared_from_this<VectorManager>
 
     boost::asio::io_context& io_;
     StatePublisher& publisher_;
-    const IstPlatformConfig& platformCfg_;
+    const IstPlatformConfig& platform_cfg_;
 
-    bool updateInProgress_{false};
-    std::shared_ptr<TransferSession> activeTransfer_;
-    std::shared_ptr<PldmHeaderPeekSession> activeHeaderPeek_;
+    bool update_in_progress_{false};
+    std::shared_ptr<TransferSession> active_transfer_;
+    std::shared_ptr<PldmHeaderPeekSession> active_header_peek_;
 };

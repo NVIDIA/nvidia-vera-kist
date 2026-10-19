@@ -50,14 +50,14 @@ class HostPowerMonitorImpl final :
     boost::asio::steady_timer timer_;
     std::unique_ptr<sdbusplus::bus::match_t> match_;
     std::move_only_function<void(bool) const> done_;
-    bool sawOff_{false};
+    bool saw_off_{false};
 };
 
 void HostPowerMonitorImpl::asyncWaitForPowerCycle(
     std::move_only_function<void(bool) const> done)
 {
     done_ = std::move(done);
-    sawOff_ = false;
+    saw_off_ = false;
 
     match_ = std::make_unique<sdbusplus::bus::match_t>(
         static_cast<sdbusplus::bus_t&>(*conn_),
@@ -149,11 +149,12 @@ void HostPowerMonitorImpl::on_properties_changed(sdbusplus::message_t& msg)
 
 void HostPowerMonitorImpl::on_state_changed(const std::string& state)
 {
-    if (!sawOff_ && state == "xyz.openbmc_project.State.Chassis.PowerState.Off")
+    if (!saw_off_ &&
+        state == "xyz.openbmc_project.State.Chassis.PowerState.Off")
     {
-        sawOff_ = true;
+        saw_off_ = true;
     }
-    else if (sawOff_ &&
+    else if (saw_off_ &&
              state == "xyz.openbmc_project.State.Chassis.PowerState.On")
     {
         std::cout << "Detected power cycle (chassis power state: " << state

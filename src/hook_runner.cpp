@@ -149,7 +149,7 @@ class HookProcess final : public std::enable_shared_from_this<HookProcess>
             return;
         }
         std::cerr << what_ << " exceeded timeout, sending SIGTERM\n";
-        timedOut_ = true;
+        timed_out_ = true;
         if (::kill(-pid_, SIGTERM) != 0)
         {
             std::cerr << what_ << " kill(SIGTERM) failed: " << strerror(errno)
@@ -190,7 +190,7 @@ class HookProcess final : public std::enable_shared_from_this<HookProcess>
         grace_.cancel();
         proc_.reset();
 
-        if (timedOut_)
+        if (timed_out_)
         {
             std::cerr << what_ << " killed due to timeout\n";
             finish(false);
@@ -227,7 +227,7 @@ class HookProcess final : public std::enable_shared_from_this<HookProcess>
     pid_t pid_{0};
     std::string what_;
     std::move_only_function<void(bool) const> done_;
-    bool timedOut_{false};
+    bool timed_out_{false};
     bool finished_{false};
 
   public:

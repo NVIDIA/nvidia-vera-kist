@@ -114,36 +114,36 @@ class SignatureVerifyTest : public ::testing::Test
   protected:
     void SetUp() override
     {
-        tmpDir_ = fs::temp_directory_path() /
-                  ("sig_test_" + std::to_string(getpid()) + "_" +
-                   std::to_string(counter++));
-        fs::create_directories(tmpDir_ / "bin");
-        fs::create_directories(tmpDir_ / "lib");
+        tmp_dir_ = fs::temp_directory_path() /
+                   ("sig_test_" + std::to_string(getpid()) + "_" +
+                    std::to_string(counter++));
+        fs::create_directories(tmp_dir_ / "bin");
+        fs::create_directories(tmp_dir_ / "lib");
 
-        keyPair_ = std::make_unique<TestKeyPair>();
-        pubKeyPath_ = tmpDir_ / "pub.pem";
-        keyPair_->write_public_key(pubKeyPath_);
+        key_pair_ = std::make_unique<TestKeyPair>();
+        pub_key_path_ = tmp_dir_ / "pub.pem";
+        key_pair_->write_public_key(pub_key_path_);
 
         // Create a test binary
-        binaryPath_ = tmpDir_ / "bin" / "kist_itm";
-        std::ofstream(binaryPath_) << "test binary content for signing";
+        binary_path_ = tmp_dir_ / "bin" / "kist_itm";
+        std::ofstream(binary_path_) << "test binary content for signing";
 
         // Sign it
-        sign_file(binaryPath_, fs::path(binaryPath_).concat(".sig"),
-                  keyPair_->pkey);
+        sign_file(binary_path_, fs::path(binary_path_).concat(".sig"),
+                  key_pair_->pkey);
     }
 
     void create_signed_lib(const std::string& name, const std::string& content)
     {
-        fs::path lib_path = tmpDir_ / "lib" / name;
+        fs::path lib_path = tmp_dir_ / "lib" / name;
         std::ofstream(lib_path) << content;
-        sign_file(lib_path, fs::path(lib_path).concat(".sig"), keyPair_->pkey);
+        sign_file(lib_path, fs::path(lib_path).concat(".sig"), key_pair_->pkey);
     }
 
     void create_lib_symlink(const std::string& link_name,
                             const fs::path& target)
     {
-        fs::path link_path = tmpDir_ / "lib" / link_name;
+        fs::path link_path = tmp_dir_ / "lib" / link_name;
         std::error_code ec;
         fs::create_symlink(target, link_path, ec);
         ASSERT_FALSE(ec) << "failed to create symlink " << link_path << ": "
@@ -152,13 +152,13 @@ class SignatureVerifyTest : public ::testing::Test
 
     void TearDown() override
     {
-        fs::remove_all(tmpDir_);
+        fs::remove_all(tmp_dir_);
     }
 
-    fs::path tmpDir_;
-    fs::path pubKeyPath_;
-    fs::path binaryPath_;
-    std::unique_ptr<TestKeyPair> keyPair_;
+    fs::path tmp_dir_;
+    fs::path pub_key_path_;
+    fs::path binary_path_;
+    std::unique_ptr<TestKeyPair> key_pair_;
     static inline int counter = 0;
 };
 
@@ -168,14 +168,14 @@ class SignatureVerifyTest : public ::testing::Test
 
 TEST_F(SignatureVerifyTest, ValidSignature)
 {
-    fs::path sig_path = binaryPath_;
+    fs::path sig_path = binary_path_;
     sig_path += ".sig";
-    EXPECT_TRUE(verifyFileSignature(binaryPath_, sig_path, pubKeyPath_));
+    EXPECT_TRUE(verifyFileSignature(binary_path_, sig_path, pub_key_path_));
 }
 
 TEST_F(SignatureVerifyTest, CorruptedSignature)
 {
-    fs::path sig_path = binaryPath_;
+    fs::path sig_path = binary_path_;
     sig_path += ".sig";
 
     // Corrupt the signature by overwriting with garbage base64
@@ -183,59 +183,59 @@ TEST_F(SignatureVerifyTest, CorruptedSignature)
                                "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
                                "AAAAAAAAAA==";
 
-    EXPECT_FALSE(verifyFileSignature(binaryPath_, sig_path, pubKeyPath_));
+    EXPECT_FALSE(verifyFileSignature(binary_path_, sig_path, pub_key_path_));
 }
 
 TEST_F(SignatureVerifyTest, MissingSigFile)
 {
-    fs::path sig_path = tmpDir_ / "nonexistent.sig";
-    EXPECT_FALSE(verifyFileSignature(binaryPath_, sig_path, pubKeyPath_));
+    fs::path sig_path = tmp_dir_ / "nonexistent.sig";
+    EXPECT_FALSE(verifyFileSignature(binary_path_, sig_path, pub_key_path_));
 }
 
 TEST_F(SignatureVerifyTest, TamperedDataFile)
 {
-    fs::path sig_path = binaryPath_;
+    fs::path sig_path = binary_path_;
     sig_path += ".sig";
 
     // Modify the binary after signing
-    std::ofstream(binaryPath_, std::ios::app) << "tampered";
+    std::ofstream(binary_path_, std::ios::app) << "tampered";
 
-    EXPECT_FALSE(verifyFileSignature(binaryPath_, sig_path, pubKeyPath_));
+    EXPECT_FALSE(verifyFileSignature(binary_path_, sig_path, pub_key_path_));
 }
 
 TEST_F(SignatureVerifyTest, InvalidBase64InSigFile)
 {
-    fs::path sig_path = binaryPath_;
+    fs::path sig_path = binary_path_;
     sig_path += ".sig";
 
     std::ofstream(sig_path) << "this is not valid base64!!!@#$%";
 
-    EXPECT_FALSE(verifyFileSignature(binaryPath_, sig_path, pubKeyPath_));
+    EXPECT_FALSE(verifyFileSignature(binary_path_, sig_path, pub_key_path_));
 }
 
 TEST_F(SignatureVerifyTest, WrongKey)
 {
-    fs::path sig_path = binaryPath_;
+    fs::path sig_path = binary_path_;
     sig_path += ".sig";
 
     // Generate a different key pair
     TestKeyPair other_key;
-    fs::path other_pub = tmpDir_ / "other_pub.pem";
+    fs::path other_pub = tmp_dir_ / "other_pub.pem";
     other_key.write_public_key(other_pub);
 
-    EXPECT_FALSE(verifyFileSignature(binaryPath_, sig_path, other_pub));
+    EXPECT_FALSE(verifyFileSignature(binary_path_, sig_path, other_pub));
 }
 
 TEST_F(SignatureVerifyTest, EmptySigFile)
 {
-    fs::path sig_path = binaryPath_;
+    fs::path sig_path = binary_path_;
     sig_path += ".sig";
 
     // Truncate the sig file to zero bytes
     std::ofstream ofs(sig_path, std::ios::trunc);
     ofs.close();
 
-    EXPECT_FALSE(verifyFileSignature(binaryPath_, sig_path, pubKeyPath_));
+    EXPECT_FALSE(verifyFileSignature(binary_path_, sig_path, pub_key_path_));
 }
 
 // ----------------
@@ -248,34 +248,34 @@ TEST_F(SignatureVerifyTest, VerifyAllPassesWithSignedBinaryAndLibs)
     create_signed_lib("libusb-1.0.so.0.4.0", "fake libusb content");
 
     IstPlatformConfig cfg;
-    cfg.itmBinaryPath = binaryPath_;
-    cfg.itmLibDir = tmpDir_ / "lib";
-    cfg.signingKeyPath = pubKeyPath_;
+    cfg.itmBinaryPath = binary_path_;
+    cfg.itmLibDir = tmp_dir_ / "lib";
+    cfg.signingKeyPath = pub_key_path_;
 
     EXPECT_TRUE(verifyItmSignatures(cfg));
 }
 
 TEST_F(SignatureVerifyTest, VerifyAllFailsWhenBinarySigMissing)
 {
-    fs::remove(fs::path(binaryPath_).concat(".sig"));
+    fs::remove(fs::path(binary_path_).concat(".sig"));
 
     IstPlatformConfig cfg;
-    cfg.itmBinaryPath = binaryPath_;
-    cfg.itmLibDir = tmpDir_ / "lib";
-    cfg.signingKeyPath = pubKeyPath_;
+    cfg.itmBinaryPath = binary_path_;
+    cfg.itmLibDir = tmp_dir_ / "lib";
+    cfg.signingKeyPath = pub_key_path_;
 
     EXPECT_FALSE(verifyItmSignatures(cfg));
 }
 
 TEST_F(SignatureVerifyTest, VerifyAllFailsWhenLibSigMissing)
 {
-    fs::path lib_path = tmpDir_ / "lib" / "libcrypto.so.3";
+    fs::path lib_path = tmp_dir_ / "lib" / "libcrypto.so.3";
     std::ofstream(lib_path) << "lib content";
 
     IstPlatformConfig cfg;
-    cfg.itmBinaryPath = binaryPath_;
-    cfg.itmLibDir = tmpDir_ / "lib";
-    cfg.signingKeyPath = pubKeyPath_;
+    cfg.itmBinaryPath = binary_path_;
+    cfg.itmLibDir = tmp_dir_ / "lib";
+    cfg.signingKeyPath = pub_key_path_;
 
     EXPECT_FALSE(verifyItmSignatures(cfg));
 }
@@ -284,12 +284,12 @@ TEST_F(SignatureVerifyTest, VerifyAllFailsWhenLibTampered)
 {
     create_signed_lib("libcrypto.so.3", "original content");
 
-    std::ofstream(tmpDir_ / "lib" / "libcrypto.so.3") << "tampered content";
+    std::ofstream(tmp_dir_ / "lib" / "libcrypto.so.3") << "tampered content";
 
     IstPlatformConfig cfg;
-    cfg.itmBinaryPath = binaryPath_;
-    cfg.itmLibDir = tmpDir_ / "lib";
-    cfg.signingKeyPath = pubKeyPath_;
+    cfg.itmBinaryPath = binary_path_;
+    cfg.itmLibDir = tmp_dir_ / "lib";
+    cfg.signingKeyPath = pub_key_path_;
 
     EXPECT_FALSE(verifyItmSignatures(cfg));
 }
@@ -297,8 +297,8 @@ TEST_F(SignatureVerifyTest, VerifyAllFailsWhenLibTampered)
 TEST_F(SignatureVerifyTest, VerifyFailsWhenKeyNotOnDisk)
 {
     IstPlatformConfig cfg;
-    cfg.itmBinaryPath = binaryPath_;
-    cfg.itmLibDir = tmpDir_ / "lib";
+    cfg.itmBinaryPath = binary_path_;
+    cfg.itmLibDir = tmp_dir_ / "lib";
 
     EXPECT_FALSE(verifyItmSignatures(cfg));
 }
@@ -306,9 +306,9 @@ TEST_F(SignatureVerifyTest, VerifyFailsWhenKeyNotOnDisk)
 TEST_F(SignatureVerifyTest, VerifyPassesWithEmptyLibDir)
 {
     IstPlatformConfig cfg;
-    cfg.itmBinaryPath = binaryPath_;
+    cfg.itmBinaryPath = binary_path_;
     cfg.itmLibDir = "";
-    cfg.signingKeyPath = pubKeyPath_;
+    cfg.signingKeyPath = pub_key_path_;
 
     EXPECT_TRUE(verifyItmSignatures(cfg));
 }
@@ -323,9 +323,9 @@ TEST_F(SignatureVerifyTest, VerifyPassesWithSymlinkToSignedLib)
     create_lib_symlink("libusb-1.0.so.0", "libusb-1.0.so.0.5.0");
 
     IstPlatformConfig cfg;
-    cfg.itmBinaryPath = binaryPath_;
-    cfg.itmLibDir = tmpDir_ / "lib";
-    cfg.signingKeyPath = pubKeyPath_;
+    cfg.itmBinaryPath = binary_path_;
+    cfg.itmLibDir = tmp_dir_ / "lib";
+    cfg.signingKeyPath = pub_key_path_;
 
     EXPECT_TRUE(verifyItmSignatures(cfg));
 }
@@ -337,23 +337,23 @@ TEST_F(SignatureVerifyTest, VerifyPassesWithSymlinkChain)
     create_lib_symlink("libusb-1.0.so", "libusb-1.0.so.0");
 
     IstPlatformConfig cfg;
-    cfg.itmBinaryPath = binaryPath_;
-    cfg.itmLibDir = tmpDir_ / "lib";
-    cfg.signingKeyPath = pubKeyPath_;
+    cfg.itmBinaryPath = binary_path_;
+    cfg.itmLibDir = tmp_dir_ / "lib";
+    cfg.signingKeyPath = pub_key_path_;
 
     EXPECT_TRUE(verifyItmSignatures(cfg));
 }
 
 TEST_F(SignatureVerifyTest, VerifyFailsWhenSymlinkResolvesOutsideVerifiedSet)
 {
-    fs::path outside = tmpDir_ / "unsigned_payload.so";
+    fs::path outside = tmp_dir_ / "unsigned_payload.so";
     std::ofstream(outside) << "unsigned content";
     create_lib_symlink("libusb-1.0.so.0", outside);
 
     IstPlatformConfig cfg;
-    cfg.itmBinaryPath = binaryPath_;
-    cfg.itmLibDir = tmpDir_ / "lib";
-    cfg.signingKeyPath = pubKeyPath_;
+    cfg.itmBinaryPath = binary_path_;
+    cfg.itmLibDir = tmp_dir_ / "lib";
+    cfg.signingKeyPath = pub_key_path_;
 
     EXPECT_FALSE(verifyItmSignatures(cfg));
 }
@@ -363,21 +363,21 @@ TEST_F(SignatureVerifyTest, VerifyFailsWhenSymlinkDangling)
     create_lib_symlink("libusb-1.0.so.0", "does-not-exist.so.0.5.0");
 
     IstPlatformConfig cfg;
-    cfg.itmBinaryPath = binaryPath_;
-    cfg.itmLibDir = tmpDir_ / "lib";
-    cfg.signingKeyPath = pubKeyPath_;
+    cfg.itmBinaryPath = binary_path_;
+    cfg.itmLibDir = tmp_dir_ / "lib";
+    cfg.signingKeyPath = pub_key_path_;
 
     EXPECT_FALSE(verifyItmSignatures(cfg));
 }
 
 TEST_F(SignatureVerifyTest, VerifyPassesWhenSymlinkResolvesToBinary)
 {
-    create_lib_symlink("kist_itm.link", binaryPath_);
+    create_lib_symlink("kist_itm.link", binary_path_);
 
     IstPlatformConfig cfg;
-    cfg.itmBinaryPath = binaryPath_;
-    cfg.itmLibDir = tmpDir_ / "lib";
-    cfg.signingKeyPath = pubKeyPath_;
+    cfg.itmBinaryPath = binary_path_;
+    cfg.itmLibDir = tmp_dir_ / "lib";
+    cfg.signingKeyPath = pub_key_path_;
 
     EXPECT_TRUE(verifyItmSignatures(cfg));
 }
@@ -391,9 +391,9 @@ TEST_F(SignatureVerifyTest, VerifyPassesWithMixedRealAndSymlinkedLibs)
     create_lib_symlink("libusb-1.0.so", "libusb-1.0.so.0");
 
     IstPlatformConfig cfg;
-    cfg.itmBinaryPath = binaryPath_;
-    cfg.itmLibDir = tmpDir_ / "lib";
-    cfg.signingKeyPath = pubKeyPath_;
+    cfg.itmBinaryPath = binary_path_;
+    cfg.itmLibDir = tmp_dir_ / "lib";
+    cfg.signingKeyPath = pub_key_path_;
 
     EXPECT_TRUE(verifyItmSignatures(cfg));
 }

@@ -463,11 +463,11 @@ class IstService : public std::enable_shared_from_this<IstService>
     }
     const std::string& softwareInventoryId() const
     {
-        return platformCfg_.softwareInventoryId;
+        return platform_cfg_.softwareInventoryId;
     }
     const std::string& currentRunPath() const
     {
-        return currentRunPath_;
+        return current_run_path_;
     }
     /**
      * Override the function used to verify kist_itm binary and library
@@ -526,29 +526,29 @@ class IstService : public std::enable_shared_from_this<IstService>
     boost::asio::io_context& io_;
     std::unique_ptr<StatePublisher> publisher_;
 
-    IstPlatformConfig platformCfg_;
+    IstPlatformConfig platform_cfg_;
     IstTestConfig test_;
     IstState state_;
     bool initialized_{false};
-    uint64_t runCounter_{0};
-    std::string currentRunPath_;
-    ResultsFdCb resultsFdCb_;
+    uint64_t run_counter_{0};
+    std::string current_run_path_;
+    ResultsFdCb results_fd_cb_;
 
-    std::unique_ptr<HookRunner> hookRunner_;
-    std::shared_ptr<HostPowerMonitor> powerMonitor_;
-    std::unique_ptr<ItmRunner> itmRunner_;
-    SignatureVerifier signatureVerifier_;
-    CpuDiscoverer cpuDiscoverer_;
-    std::shared_ptr<VectorManager> vectorManager_;
-    boost::asio::steady_timer reSignalTimer_;
+    std::unique_ptr<HookRunner> hook_runner_;
+    std::shared_ptr<HostPowerMonitor> power_monitor_;
+    std::unique_ptr<ItmRunner> itm_runner_;
+    SignatureVerifier signature_verifier_;
+    CpuDiscoverer cpu_discoverer_;
+    std::shared_ptr<VectorManager> vector_manager_;
+    boost::asio::steady_timer re_signal_timer_;
 
-    std::vector<std::string> failureInfo_;
+    std::vector<std::string> failure_info_;
 
-    UniqueFd serviceLogFd_;
-    std::unique_ptr<TeeStreambuf> coutTee_;
-    std::unique_ptr<TeeStreambuf> cerrTee_;
-    std::streambuf* origCoutBuf_{nullptr};
-    std::streambuf* origCerrBuf_{nullptr};
+    UniqueFd service_log_fd_;
+    std::unique_ptr<TeeStreambuf> cout_tee_;
+    std::unique_ptr<TeeStreambuf> cerr_tee_;
+    std::streambuf* orig_cout_buf_{nullptr};
+    std::streambuf* orig_cerr_buf_{nullptr};
 
     void installServiceLogTee();
     void removeServiceLogTee();

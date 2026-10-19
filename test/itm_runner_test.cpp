@@ -33,24 +33,24 @@ class ItmRunnerTest : public ::testing::Test
   protected:
     void SetUp() override
     {
-        tmpDir_ = fs::temp_directory_path() /
-                  ("itm_test_" + std::to_string(::getpid()));
-        fs::create_directories(tmpDir_);
+        tmp_dir_ = fs::temp_directory_path() /
+                   ("itm_test_" + std::to_string(::getpid()));
+        fs::create_directories(tmp_dir_);
         runner_ = makeItmRunner(io_);
 
-        platform_.storage.resultStoragePath = tmpDir_;
+        platform_.storage.resultStoragePath = tmp_dir_;
     }
 
     void TearDown() override
     {
         std::error_code ec;
-        fs::remove_all(tmpDir_, ec);
+        fs::remove_all(tmp_dir_, ec);
     }
 
     // Write a small shell script and return its path.
     fs::path write_script(const std::string& name, const std::string& body)
     {
-        fs::path path = tmpDir_ / name;
+        fs::path path = tmp_dir_ / name;
         std::ofstream f(path);
         f << "#!/bin/bash\n" << body << '\n';
         f.close();
@@ -70,35 +70,35 @@ class ItmRunnerTest : public ::testing::Test
         runner_->asyncRun(
             cfg, platform_,
             [&](int code) {
-                exitCode_ = code;
+                exit_code_ = code;
                 called_ = true;
             },
-            [&](uint8_t p) { lastProgress_ = p; });
+            [&](uint8_t p) { last_progress_ = p; });
         io_.run();
     }
 
     boost::asio::io_context io_;
     std::unique_ptr<ItmRunner> runner_;
-    fs::path tmpDir_;
+    fs::path tmp_dir_;
     IstPlatformConfig platform_;
 
-    int exitCode_{-999};
+    int exit_code_{-999};
     bool called_{false};
-    uint8_t lastProgress_{0};
+    uint8_t last_progress_{0};
 };
 
 TEST_F(ItmRunnerTest, NormalExitReportsZero)
 {
     run("exit 0");
     ASSERT_TRUE(called_);
-    EXPECT_EQ(exitCode_, 0);
+    EXPECT_EQ(exit_code_, 0);
 }
 
 TEST_F(ItmRunnerTest, NonZeroExitReportsExitCode)
 {
     run("exit 42");
     ASSERT_TRUE(called_);
-    EXPECT_EQ(exitCode_, 42);
+    EXPECT_EQ(exit_code_, 42);
 }
 
 TEST_F(ItmRunnerTest, LogOpenFailureReportsError)
@@ -111,14 +111,14 @@ TEST_F(ItmRunnerTest, LogOpenFailureReportsError)
     runner_->asyncRun(
         cfg, platform_,
         [&](int code) {
-            exitCode_ = code;
+            exit_code_ = code;
             called_ = true;
         },
         [&](uint8_t) {});
     io_.run();
 
     ASSERT_TRUE(called_);
-    EXPECT_NE(exitCode_, 0) << "Log open failure must not report success";
+    EXPECT_NE(exit_code_, 0) << "Log open failure must not report success";
 }
 
 TEST_F(ItmRunnerTest, EmptyResultStoragePathReportsError)
@@ -129,19 +129,19 @@ TEST_F(ItmRunnerTest, EmptyResultStoragePathReportsError)
     runner_->asyncRun(
         cfg, platform_,
         [&](int code) {
-            exitCode_ = code;
+            exit_code_ = code;
             called_ = true;
         },
         [&](uint8_t) {});
     io_.run();
 
     ASSERT_TRUE(called_);
-    EXPECT_NE(exitCode_, 0);
+    EXPECT_NE(exit_code_, 0);
 }
 
 TEST_F(ItmRunnerTest, BadBinaryReportsError)
 {
-    platform_.storage.resultStoragePath = tmpDir_;
+    platform_.storage.resultStoragePath = tmp_dir_;
     platform_.itmBinaryPath = "/nonexistent/binary";
 
     IstTestConfig cfg;
@@ -149,21 +149,21 @@ TEST_F(ItmRunnerTest, BadBinaryReportsError)
     runner_->asyncRun(
         cfg, platform_,
         [&](int code) {
-            exitCode_ = code;
+            exit_code_ = code;
             called_ = true;
         },
         [&](uint8_t) {});
     io_.run();
 
     ASSERT_TRUE(called_);
-    EXPECT_NE(exitCode_, 0);
+    EXPECT_NE(exit_code_, 0);
 }
 
 TEST_F(ItmRunnerTest, TimeoutReportsError)
 {
     run("sleep 999", /*timeout_sec=*/1);
     ASSERT_TRUE(called_);
-    EXPECT_NE(exitCode_, 0) << "Timed-out process must report error";
+    EXPECT_NE(exit_code_, 0) << "Timed-out process must report error";
 }
 
 TEST_F(ItmRunnerTest, ProgressIsReported)
@@ -171,10 +171,10 @@ TEST_F(ItmRunnerTest, ProgressIsReported)
     // The script writes the progress file after a brief delay so the poller
     // (which runs on a 1-second timer) has time to pick it up. We cannot
     // pre-write the file because asyncRun removes stale progress files.
-    std::string progress_path = (tmpDir_ / "progress.txt").string();
+    std::string progress_path = (tmp_dir_ / "progress.txt").string();
     run("sleep 1; echo '50 100' > " + progress_path + "; sleep 3", 10);
     ASSERT_TRUE(called_);
-    EXPECT_EQ(exitCode_, 0);
-    EXPECT_GE(lastProgress_, 50)
+    EXPECT_EQ(exit_code_, 0);
+    EXPECT_GE(last_progress_, 50)
         << "Progress poller should have reported at least 50%";
 }
