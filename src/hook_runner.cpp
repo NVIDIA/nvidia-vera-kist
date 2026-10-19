@@ -35,10 +35,6 @@ namespace bpv2 = boost::process::v2;
 
 static constexpr std::chrono::seconds k_grace_timeout{5};
 
-// A page. Output is forwarded verbatim, so this only bounds how much one read
-// can carry; it does not split or truncate the hook's lines.
-static constexpr size_t k_output_buf_size = 4096;
-
 // Boost.Process v2 extension: make the child its own process group leader
 // so the hook runner can signal the entire group on timeout.
 struct ProcessGroupSetup
