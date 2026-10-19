@@ -617,7 +617,7 @@ void IstService::onIstBootAssertDone(bool ok)
         }
     }
 
-    transitionTo(IstStage::pendingPowerCycle);
+    transitionTo(IstStage::pending_power_cycle);
 
     // Re-emit the Stage PropertiesChanged signal after a short delay.
     // The D-Bus client (bmcweb) registers its PropertiesChanged match only
@@ -650,7 +650,7 @@ void IstService::onPowerCycleDone(bool ok)
         return;
     }
 
-    transitionTo(IstStage::runningIst);
+    transitionTo(IstStage::running_ist);
 
     std::filesystem::path cak_script =
         platform_cfg_.hookDir / "ist_cak_bypass.sh";
@@ -689,7 +689,7 @@ void IstService::onPowerCycleDone(bool ok)
 
 void IstService::startItmRun()
 {
-    transitionTo(IstStage::runningIst);
+    transitionTo(IstStage::running_ist);
 
     itm_runner_->asyncRun(
         test_, platform_cfg_,
@@ -884,7 +884,7 @@ std::string IstService::startIST(const ParamMap& test_params)
 
     vector_manager_->ensureMounted();
 
-    transitionTo(IstStage::collateralVerification, IstStatus::inProgress);
+    transitionTo(IstStage::collateral_verification, IstStatus::in_progress);
 
     if (!getISTParams(test_params))
     {
@@ -1061,7 +1061,7 @@ void IstService::onCpuDiscoveryDone(const std::vector<std::string>& cpu_paths)
 
 void IstService::launchBootAssert()
 {
-    transitionTo(IstStage::pendingIstBoot);
+    transitionTo(IstStage::pending_ist_boot);
 
     const fs::path& hook_cmd = platform_cfg_.hooks.istBootAssert;
     hook_runner_->asyncRun(hook_cmd, "istBootAssert hook",

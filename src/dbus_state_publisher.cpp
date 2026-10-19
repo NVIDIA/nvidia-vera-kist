@@ -73,7 +73,7 @@ class DbusStatePublisher final : public StatePublisher
         run_prog_iface_ = server_.add_interface(
             run_path, "xyz.openbmc_project.Common.Progress");
         run_prog_iface_->register_property(
-            "Status", status_to_dbus_string(IstStatus::inProgress));
+            "Status", status_to_dbus_string(IstStatus::in_progress));
         run_prog_iface_->register_property("Progress", uint8_t{0});
         run_prog_iface_->register_property("StartTime", epoch_now());
         run_prog_iface_->register_property("CompletedTime", uint64_t{0});
@@ -122,7 +122,7 @@ class DbusStatePublisher final : public StatePublisher
             run_prog_iface_->set_property("Status",
                                           status_to_dbus_string(state.status));
             run_prog_iface_->set_property("Progress", state.progress);
-            if (state.status != IstStatus::inProgress)
+            if (state.status != IstStatus::in_progress)
             {
                 run_prog_iface_->set_property("CompletedTime", epoch_now());
             }
@@ -232,7 +232,7 @@ class DbusStatePublisher final : public StatePublisher
             "xyz.openbmc_project.Common.Progress.OperationStatus.";
         switch (s)
         {
-            case IstStatus::inProgress:
+            case IstStatus::in_progress:
                 return std::string(prefix) + "InProgress";
             case IstStatus::completed:
                 return std::string(prefix) + "Completed";
