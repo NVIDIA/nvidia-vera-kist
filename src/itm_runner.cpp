@@ -384,55 +384,56 @@ static std::vector<std::string>
 {
     std::vector<std::string> args;
 
-    if (!platform_cfg.itmLibDir.empty())
+    if (!platform_cfg.itm_lib_dir.empty())
     {
         args.emplace_back("/usr/bin/env");
-        args.emplace_back("LD_LIBRARY_PATH=" + platform_cfg.itmLibDir.string());
+        args.emplace_back("LD_LIBRARY_PATH=" +
+                          platform_cfg.itm_lib_dir.string());
     }
 
-    args.emplace_back(platform_cfg.itmBinaryPath);
+    args.emplace_back(platform_cfg.itm_binary_path);
 
-    if (!platform_cfg.storage.vectorMountPath.empty())
+    if (!platform_cfg.storage.vector_mount_path.empty())
     {
         args.emplace_back("--ist_package_path");
-        args.emplace_back(platform_cfg.storage.vectorMountPath);
+        args.emplace_back(platform_cfg.storage.vector_mount_path);
     }
-    if (!platform_cfg.storage.resultStoragePath.empty())
+    if (!platform_cfg.storage.result_storage_path.empty())
     {
         args.emplace_back("--ist_results_path");
-        args.emplace_back(platform_cfg.storage.resultStoragePath);
+        args.emplace_back(platform_cfg.storage.result_storage_path);
     }
-    if (!platform_cfg.hookDir.empty())
+    if (!platform_cfg.hook_dir.empty())
     {
         args.emplace_back("--ist_hook_path");
-        args.emplace_back(platform_cfg.hookDir);
+        args.emplace_back(platform_cfg.hook_dir);
     }
 
     // Optional test params
-    if (cfg.customTestList)
+    if (cfg.custom_test_list)
     {
         args.emplace_back("--custom_test_list");
-        args.emplace_back(*cfg.customTestList);
+        args.emplace_back(*cfg.custom_test_list);
     }
-    if (cfg.customSocketList)
+    if (cfg.custom_socket_list)
     {
         args.emplace_back("--custom_socket_list");
-        args.emplace_back(*cfg.customSocketList);
+        args.emplace_back(*cfg.custom_socket_list);
     }
-    if (cfg.continueOnFail)
+    if (cfg.continue_on_fail)
     {
         args.emplace_back("--ist_continueonfail");
-        args.emplace_back(*cfg.continueOnFail ? "yes" : "no");
+        args.emplace_back(*cfg.continue_on_fail ? "yes" : "no");
     }
-    if (cfg.saveResOnPass)
+    if (cfg.save_res_on_pass)
     {
         args.emplace_back("--ist_save_res_on_pass");
-        args.emplace_back(*cfg.saveResOnPass ? "enable" : "disable");
+        args.emplace_back(*cfg.save_res_on_pass ? "enable" : "disable");
     }
-    if (cfg.saveResOnFail)
+    if (cfg.save_res_on_fail)
     {
         args.emplace_back("--ist_save_res_on_fail");
-        args.emplace_back(*cfg.saveResOnFail ? "enable" : "disable");
+        args.emplace_back(*cfg.save_res_on_fail ? "enable" : "disable");
     }
 
     return args;
@@ -443,14 +444,14 @@ void ItmRunnerImpl::async_run(
     std::move_only_function<void(int) const> done,
     std::move_only_function<void(uint8_t) const> on_progress)
 {
-    if (platform_cfg.storage.resultStoragePath.empty())
+    if (platform_cfg.storage.result_storage_path.empty())
     {
         std::cerr << "resultStoragePath not found in platform config\n";
         done(-1);
         return;
     }
     fs::path progress_path =
-        platform_cfg.storage.resultStoragePath / "progress.txt";
+        platform_cfg.storage.result_storage_path / "progress.txt";
 
     // Remove stale progress file from a previous run so the poller
     // doesn't read old data and immediately report 100%.
@@ -459,7 +460,7 @@ void ItmRunnerImpl::async_run(
 
     std::vector<std::string> args = build_itm_args(cfg, platform_cfg);
 
-    fs::path log_path = platform_cfg.storage.resultStoragePath /
+    fs::path log_path = platform_cfg.storage.result_storage_path /
                         "execute_ist_IST_Package_Summary.log";
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
     UniqueFd log_fd(::open(log_path.c_str(),
@@ -511,7 +512,7 @@ void ItmRunnerImpl::async_run(
         io_, progress_path, std::move(on_progress));
     poller->start();
 
-    int timeout_sec = cfg.swTimeoutSec.value_or(45 * 60);
+    int timeout_sec = cfg.sw_timeout_sec.value_or(45 * 60);
 
     active_ = std::make_shared<ItmProcess>(io_, std::move(done));
     active_->start(std::move(proc), std::move(poller), std::move(tee),

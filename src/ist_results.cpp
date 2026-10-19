@@ -407,7 +407,7 @@ sdbusplus::message::unix_fd IstService::get_results_fd()
             EBUSY, "Cannot retrieve results while IST is in progress");
     }
 
-    const fs::path& results_dir = platform_cfg_.storage.resultStoragePath;
+    const fs::path& results_dir = platform_cfg_.storage.result_storage_path;
     if (results_dir.empty())
     {
         std::cerr << "IST: resultStoragePath not configured\n";

@@ -184,32 +184,32 @@ inline bool is_allowed_apply_time(std::string_view apply_time)
 
 struct HookPaths
 {
-    std::filesystem::path istBootAssert;
-    std::filesystem::path istBootDeassert;
-    std::filesystem::path resetSystem;
-    std::filesystem::path errorCheck;
+    std::filesystem::path ist_boot_assert;
+    std::filesystem::path ist_boot_deassert;
+    std::filesystem::path reset_system;
+    std::filesystem::path error_check;
 };
 
 struct StoragePaths
 {
-    std::filesystem::path vectorMountPath;
-    std::filesystem::path vectorStoragePath;
-    std::filesystem::path resultStoragePath;
+    std::filesystem::path vector_mount_path;
+    std::filesystem::path vector_storage_path;
+    std::filesystem::path result_storage_path;
 };
 
 struct IstPlatformConfig
 {
-    std::string softwareInventoryId;
-    std::filesystem::path hookDir;
-    std::filesystem::path itmBinaryPath{"/bin/kist_itm"};
-    std::filesystem::path itmLibDir;
-    std::string archSubDir{KIST_ARCH_SUBDIR};
-    std::filesystem::path signingKeyPath{
+    std::string software_inventory_id;
+    std::filesystem::path hook_dir;
+    std::filesystem::path itm_binary_path{"/bin/kist_itm"};
+    std::filesystem::path itm_lib_dir;
+    std::string arch_sub_dir{KIST_ARCH_SUBDIR};
+    std::filesystem::path signing_key_path{
         "/usr/share/ist/kist_itm_verify_key.pem"};
     HookPaths hooks;
     StoragePaths storage;
-    std::chrono::seconds transferInactivityTimeout{60};
-    std::chrono::seconds transferProgressInterval{120};
+    std::chrono::seconds transfer_inactivity_timeout{60};
+    std::chrono::seconds transfer_progress_interval{120};
 };
 
 /**
@@ -226,13 +226,13 @@ struct IstPlatformConfig
  */
 struct IstTestConfig
 {
-    std::optional<std::string> customTestList;
-    std::optional<std::string> customSocketList;
-    std::optional<int32_t> swTimeoutSec;
-    std::optional<bool> continueOnFail;
-    std::optional<bool> saveResOnFail;
-    std::optional<bool> saveResOnPass;
-    bool autoRebootOnComplete{false};
+    std::optional<std::string> custom_test_list;
+    std::optional<std::string> custom_socket_list;
+    std::optional<int32_t> sw_timeout_sec;
+    std::optional<bool> continue_on_fail;
+    std::optional<bool> save_res_on_fail;
+    std::optional<bool> save_res_on_pass;
+    bool auto_reboot_on_complete{false};
 };
 
 // ----------------
@@ -440,9 +440,9 @@ struct PldmComponentInfo
     // payload is streamed straight to the image file starting at offset 0.
     uint32_t offset;
     // Stored CRC-32 of the component payload, taken from the package header.
-    uint32_t payloadCrc;
+    uint32_t payload_crc;
     // Declared payload length, or 0 if unknown.  Progress reporting only.
-    uint64_t payloadSize{0};
+    uint64_t payload_size{0};
 };
 
 class IstService : public std::enable_shared_from_this<IstService>
@@ -465,7 +465,7 @@ class IstService : public std::enable_shared_from_this<IstService>
     }
     const std::string& software_inventory_id() const
     {
-        return platform_cfg_.softwareInventoryId;
+        return platform_cfg_.software_inventory_id;
     }
     const std::string& current_run_path() const
     {

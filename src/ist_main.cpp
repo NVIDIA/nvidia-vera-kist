@@ -102,7 +102,7 @@ int main(int, char**)
         return 1;
     }
 
-    std::string sw_path = sw_path_prefix + platform_cfg.softwareInventoryId;
+    std::string sw_path = sw_path_prefix + platform_cfg.software_inventory_id;
 
     static constexpr const char* ist_path = "/com/nvidia/vera/ist";
 

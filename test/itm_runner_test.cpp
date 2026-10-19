@@ -38,7 +38,7 @@ class ItmRunnerTest : public ::testing::Test
         fs::create_directories(tmp_dir_);
         runner_ = make_itm_runner(io_);
 
-        platform_.storage.resultStoragePath = tmp_dir_;
+        platform_.storage.result_storage_path = tmp_dir_;
     }
 
     void TearDown() override
@@ -63,10 +63,10 @@ class ItmRunnerTest : public ::testing::Test
     // as positional args, which it can ignore.
     void run(const std::string& script_body, int timeout_sec = 30)
     {
-        platform_.itmBinaryPath = write_script("itm_stub.sh", script_body);
+        platform_.itm_binary_path = write_script("itm_stub.sh", script_body);
 
         IstTestConfig cfg;
-        cfg.swTimeoutSec = timeout_sec;
+        cfg.sw_timeout_sec = timeout_sec;
         runner_->async_run(
             cfg, platform_,
             [&](int code) {
@@ -103,11 +103,11 @@ TEST_F(ItmRunnerTest, NonZeroExitReportsExitCode)
 
 TEST_F(ItmRunnerTest, LogOpenFailureReportsError)
 {
-    platform_.storage.resultStoragePath = "/nonexistent/path";
-    platform_.itmBinaryPath = "/bin/true";
+    platform_.storage.result_storage_path = "/nonexistent/path";
+    platform_.itm_binary_path = "/bin/true";
 
     IstTestConfig cfg;
-    cfg.swTimeoutSec = 30;
+    cfg.sw_timeout_sec = 30;
     runner_->async_run(
         cfg, platform_,
         [&](int code) {
@@ -123,7 +123,7 @@ TEST_F(ItmRunnerTest, LogOpenFailureReportsError)
 
 TEST_F(ItmRunnerTest, EmptyResultStoragePathReportsError)
 {
-    platform_.storage.resultStoragePath.clear();
+    platform_.storage.result_storage_path.clear();
 
     IstTestConfig cfg;
     runner_->async_run(
@@ -141,11 +141,11 @@ TEST_F(ItmRunnerTest, EmptyResultStoragePathReportsError)
 
 TEST_F(ItmRunnerTest, BadBinaryReportsError)
 {
-    platform_.storage.resultStoragePath = tmp_dir_;
-    platform_.itmBinaryPath = "/nonexistent/binary";
+    platform_.storage.result_storage_path = tmp_dir_;
+    platform_.itm_binary_path = "/nonexistent/binary";
 
     IstTestConfig cfg;
-    cfg.swTimeoutSec = 30;
+    cfg.sw_timeout_sec = 30;
     runner_->async_run(
         cfg, platform_,
         [&](int code) {
