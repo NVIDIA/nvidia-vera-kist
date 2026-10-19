@@ -827,16 +827,16 @@ VectorManager::VectorManager(boost::asio::io_context& io,
     io_(io), publisher_(publisher), platform_cfg_(cfg)
 {}
 
-void VectorManager::mountVectorsOnStartup()
+void VectorManager::mount_vectors_on_startup()
 {
-    const bool mounted = mountImages();
-    readAndPublishVersion();
-    publisher_.publishActivation(mounted ? k_activation_active
-                                         : k_activation_failed);
+    const bool mounted = mount_images();
+    read_and_publish_version();
+    publisher_.publish_activation(mounted ? k_activation_active
+                                          : k_activation_failed);
 }
 
-std::string VectorManager::startUpdate(UniqueFd image,
-                                       std::string_view apply_time)
+std::string VectorManager::start_update(UniqueFd image,
+                                        std::string_view apply_time)
 {
     if (update_in_progress_)
     {
@@ -853,7 +853,7 @@ std::string VectorManager::startUpdate(UniqueFd image,
         std::cerr << "StartUpdate rejected: invalid image fd\n";
         throw ist_err::InternalFailure{};
     }
-    if (!isAllowedApplyTime(apply_time))
+    if (!is_allowed_apply_time(apply_time))
     {
         std::cerr << "StartUpdate rejected: unsupported apply time '"
                   << apply_time << "'\n";
@@ -875,9 +875,9 @@ std::string VectorManager::startUpdate(UniqueFd image,
                          PldmComponentInfo comp) {
                 if (auto self = weak.lock())
                 {
-                    self->onHeaderPeekComplete(ok, std::move(prefix),
-                                               std::move(read_fd), comp,
-                                               image_path);
+                    self->on_header_peek_complete(ok, std::move(prefix),
+                                                  std::move(read_fd), comp,
+                                                  image_path);
                 }
             });
     active_header_peek_ = peek;
@@ -887,24 +887,24 @@ std::string VectorManager::startUpdate(UniqueFd image,
                        platform_cfg_.softwareInventoryId);
 }
 
-void VectorManager::onTransferComplete(bool ok)
+void VectorManager::on_transfer_complete(bool ok)
 {
     active_transfer_.reset();
     if (!ok)
     {
         std::cerr << "Image transfer failed\n";
-        finishUpdate(false);
+        finish_update(false);
         return;
     }
 
     std::cout << "Image transfer succeeded (payload verified); mounting\n";
-    publisher_.publishActivationProgress(100);
-    publisher_.removeActivationProgress();
+    publisher_.publish_activation_progress(100);
+    publisher_.remove_activation_progress();
 
-    onMountComplete(mountImages());
+    on_mount_complete(mount_images());
 }
 
-bool VectorManager::teardownMounts()
+bool VectorManager::teardown_mounts()
 {
     const fs::path& mount_path = platform_cfg_.storage.vectorMountPath;
 
@@ -934,7 +934,7 @@ bool VectorManager::teardownMounts()
     return ok;
 }
 
-bool VectorManager::mountImages()
+bool VectorManager::mount_images()
 {
     const fs::path& storage_path = platform_cfg_.storage.vectorStoragePath;
     const fs::path& mount_path = platform_cfg_.storage.vectorMountPath;
@@ -945,7 +945,7 @@ bool VectorManager::mountImages()
         return false;
     }
 
-    if (!teardownMounts())
+    if (!teardown_mounts())
     {
         std::cerr << "Cannot mount: failed to unmount existing images\n";
         return false;
@@ -1039,7 +1039,7 @@ bool VectorManager::mountImages()
     return true;
 }
 
-void VectorManager::readAndPublishVersion()
+void VectorManager::read_and_publish_version()
 {
     const fs::path& mount_path = platform_cfg_.storage.vectorMountPath;
     if (mount_path.empty())
@@ -1080,51 +1080,52 @@ void VectorManager::readAndPublishVersion()
         return;
     }
 
-    publisher_.publishVersion(version);
+    publisher_.publish_version(version);
     std::cout << "IST vector version: " << version << '\n';
 }
 
-void VectorManager::finishUpdate(bool ok)
+void VectorManager::finish_update(bool ok)
 {
-    publisher_.publishActivation(ok ? k_activation_active
-                                    : k_activation_failed);
-    publisher_.removeActivationProgress();
+    publisher_.publish_activation(ok ? k_activation_active
+                                     : k_activation_failed);
+    publisher_.remove_activation_progress();
     update_in_progress_ = false;
 }
 
-void VectorManager::onHeaderPeekComplete(bool ok, std::vector<uint8_t> prefix,
-                                         UniqueFd read_fd,
-                                         PldmComponentInfo comp,
-                                         const fs::path& image_path)
+void VectorManager::on_header_peek_complete(bool ok,
+                                            std::vector<uint8_t> prefix,
+                                            UniqueFd read_fd,
+                                            PldmComponentInfo comp,
+                                            const fs::path& image_path)
 {
     active_header_peek_.reset();
     if (!ok)
     {
-        finishUpdate(false);
+        finish_update(false);
         return;
     }
 
-    bool tear_ok = teardownMounts();
-    onTeardownComplete(tear_ok, std::move(read_fd), std::move(prefix), comp,
-                       image_path);
+    bool tear_ok = teardown_mounts();
+    on_teardown_complete(tear_ok, std::move(read_fd), std::move(prefix), comp,
+                         image_path);
 }
 
-void VectorManager::onTeardownComplete(bool ok, UniqueFd read_fd,
-                                       std::vector<uint8_t> prefix,
-                                       PldmComponentInfo comp,
-                                       const fs::path& image_path)
+void VectorManager::on_teardown_complete(bool ok, UniqueFd read_fd,
+                                         std::vector<uint8_t> prefix,
+                                         PldmComponentInfo comp,
+                                         const fs::path& image_path)
 {
     if (!ok)
     {
         std::cerr << "Failed to unmount existing images; rejecting update\n";
-        finishUpdate(false);
+        finish_update(false);
         return;
     }
 
     if (read_fd.get() < 0)
     {
         std::cerr << "Failed to start image transfer\n";
-        finishUpdate(false);
+        finish_update(false);
         return;
     }
 
@@ -1139,19 +1140,19 @@ void VectorManager::onTeardownComplete(bool ok, UniqueFd read_fd,
                     std::shared_ptr<VectorManager> self = weak.lock();
                     if (self)
                     {
-                        self->publisher_.publishActivationProgress(progress);
+                        self->publisher_.publish_activation_progress(progress);
                     }
                 },
                 [weak = weak_from_this()](bool xfer_ok) {
                     if (auto self = weak.lock())
                     {
-                        self->onTransferComplete(xfer_ok);
+                        self->on_transfer_complete(xfer_ok);
                     }
                 });
 
-        publisher_.publishActivation(k_activation_activating);
-        publisher_.createActivationProgress();
-        publisher_.publishActivationProgress(0);
+        publisher_.publish_activation(k_activation_activating);
+        publisher_.create_activation_progress();
+        publisher_.publish_activation_progress(0);
 
         active_transfer_ = session;
         session->start();
@@ -1159,23 +1160,23 @@ void VectorManager::onTeardownComplete(bool ok, UniqueFd read_fd,
     catch (const std::system_error& e)
     {
         std::cerr << "Failed to start transfer: " << e.what() << '\n';
-        finishUpdate(false);
+        finish_update(false);
     }
 }
 
-void VectorManager::onMountComplete(bool ok)
+void VectorManager::on_mount_complete(bool ok)
 {
     if (!ok)
     {
         std::cerr << "Failed to mount images after transfer\n";
-        finishUpdate(false);
+        finish_update(false);
         return;
     }
-    readAndPublishVersion();
-    finishUpdate(true);
+    read_and_publish_version();
+    finish_update(true);
 }
 
-void VectorManager::ensureMounted()
+void VectorManager::ensure_mounted()
 {
     const fs::path& mount_path = platform_cfg_.storage.vectorMountPath;
     if (mount_path.empty())
@@ -1192,9 +1193,9 @@ void VectorManager::ensureMounted()
     }
 
     std::cout << "Test vectors not mounted; attempting mount\n";
-    if (mountImages())
+    if (mount_images())
     {
-        readAndPublishVersion();
+        read_and_publish_version();
     }
 }
 
@@ -1202,7 +1203,7 @@ void VectorManager::ensureMounted()
 // IstService::startUpdate — service-level guard, then delegate
 // ----------------------------------------------------------------
 
-std::string IstService::startUpdate(int image_fd, std::string_view apply_time)
+std::string IstService::start_update(int image_fd, std::string_view apply_time)
 {
     // Take ownership immediately so the fd is closed on any early return/throw
     // below; on success it is moved into the update flow.
@@ -1215,8 +1216,8 @@ std::string IstService::startUpdate(int image_fd, std::string_view apply_time)
     if (state_.stage != IstStage::idle)
     {
         std::cerr << "StartUpdate rejected: IST is running (stage="
-                  << istStageToString(state_.stage) << ")\n";
+                  << ist_stage_to_string(state_.stage) << ")\n";
         throw ist_err::Unavailable{};
     }
-    return vector_manager_->startUpdate(std::move(image), apply_time);
+    return vector_manager_->start_update(std::move(image), apply_time);
 }

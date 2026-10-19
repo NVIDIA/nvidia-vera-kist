@@ -59,15 +59,15 @@ class DbusStatePublisher final : public StatePublisher
         op_status_iface_->initialize();
     }
 
-    void createRunObject(const std::string& run_path,
-                         ResultsFdCb results_fd_cb) override
+    void create_run_object(const std::string& run_path,
+                           ResultsFdCb results_fd_cb) override
     {
-        removeRunObject();
+        remove_run_object();
 
         run_state_iface_ =
             server_.add_interface(run_path, "com.nvidia.vera.ist.run.State");
-        run_state_iface_->register_property("Stage",
-                                            istStageToString(IstStage::idle));
+        run_state_iface_->register_property(
+            "Stage", ist_stage_to_string(IstStage::idle));
         run_state_iface_->initialize();
 
         run_prog_iface_ = server_.add_interface(
@@ -89,7 +89,7 @@ class DbusStatePublisher final : public StatePublisher
         }
     }
 
-    void removeRunObject() override
+    void remove_run_object() override
     {
         if (run_results_iface_)
         {
@@ -115,7 +115,7 @@ class DbusStatePublisher final : public StatePublisher
         if (run_state_iface_)
         {
             run_state_iface_->set_property("Stage",
-                                           istStageToString(state.stage));
+                                           ist_stage_to_string(state.stage));
         }
         if (run_prog_iface_)
         {
@@ -129,7 +129,7 @@ class DbusStatePublisher final : public StatePublisher
         }
     }
 
-    void reSignalStage() override
+    void re_signal_stage() override
     {
         if (run_state_iface_)
         {
@@ -137,7 +137,7 @@ class DbusStatePublisher final : public StatePublisher
         }
     }
 
-    void publishProgress(uint8_t progress) override
+    void publish_progress(uint8_t progress) override
     {
         if (run_prog_iface_)
         {
@@ -145,7 +145,7 @@ class DbusStatePublisher final : public StatePublisher
         }
     }
 
-    void publishVersion(const std::string& version) override
+    void publish_version(const std::string& version) override
     {
         if (sw_version_iface_)
         {
@@ -153,12 +153,12 @@ class DbusStatePublisher final : public StatePublisher
         }
         else
         {
-            std::cerr << "publishVersion: sw_version_iface_ is null, version="
+            std::cerr << "publish_version: sw_version_iface_ is null, version="
                       << version << '\n';
         }
     }
 
-    void publishActivation(std::string_view state) override
+    void publish_activation(std::string_view state) override
     {
         const bool functional = (state == k_activation_active);
         if (activation_iface_)
@@ -172,7 +172,7 @@ class DbusStatePublisher final : public StatePublisher
         publish_functional_on_shm(sw_path_, functional);
     }
 
-    void createActivationProgress() override
+    void create_activation_progress() override
     {
         if (activation_progress_iface_)
         {
@@ -184,7 +184,7 @@ class DbusStatePublisher final : public StatePublisher
         activation_progress_iface_->initialize();
     }
 
-    void publishActivationProgress(uint8_t progress) override
+    void publish_activation_progress(uint8_t progress) override
     {
         if (activation_progress_iface_)
         {
@@ -192,7 +192,7 @@ class DbusStatePublisher final : public StatePublisher
         }
     }
 
-    void removeActivationProgress() override
+    void remove_activation_progress() override
     {
         if (activation_progress_iface_)
         {
@@ -200,7 +200,7 @@ class DbusStatePublisher final : public StatePublisher
         }
     }
 
-    void emitEventLog(
+    void emit_event_log(
         const std::string& message, const std::string& severity,
         const std::map<std::string, std::string>& additional_data) override
     {
@@ -266,10 +266,10 @@ class DbusStatePublisher final : public StatePublisher
 };
 
 std::unique_ptr<StatePublisher>
-    makeDbusStatePublisher(sdbusplus::asio::object_server& server,
-                           std::shared_ptr<sdbusplus::asio::connection> conn,
-                           const std::string& sw_path,
-                           const std::string& ist_path)
+    make_dbus_state_publisher(sdbusplus::asio::object_server& server,
+                              std::shared_ptr<sdbusplus::asio::connection> conn,
+                              const std::string& sw_path,
+                              const std::string& ist_path)
 {
     return std::make_unique<DbusStatePublisher>(server, std::move(conn),
                                                 sw_path, ist_path);

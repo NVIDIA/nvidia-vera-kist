@@ -36,7 +36,7 @@ class ItmRunnerTest : public ::testing::Test
         tmp_dir_ = fs::temp_directory_path() /
                    ("itm_test_" + std::to_string(::getpid()));
         fs::create_directories(tmp_dir_);
-        runner_ = makeItmRunner(io_);
+        runner_ = make_itm_runner(io_);
 
         platform_.storage.resultStoragePath = tmp_dir_;
     }
@@ -67,7 +67,7 @@ class ItmRunnerTest : public ::testing::Test
 
         IstTestConfig cfg;
         cfg.swTimeoutSec = timeout_sec;
-        runner_->asyncRun(
+        runner_->async_run(
             cfg, platform_,
             [&](int code) {
                 exit_code_ = code;
@@ -108,7 +108,7 @@ TEST_F(ItmRunnerTest, LogOpenFailureReportsError)
 
     IstTestConfig cfg;
     cfg.swTimeoutSec = 30;
-    runner_->asyncRun(
+    runner_->async_run(
         cfg, platform_,
         [&](int code) {
             exit_code_ = code;
@@ -126,7 +126,7 @@ TEST_F(ItmRunnerTest, EmptyResultStoragePathReportsError)
     platform_.storage.resultStoragePath.clear();
 
     IstTestConfig cfg;
-    runner_->asyncRun(
+    runner_->async_run(
         cfg, platform_,
         [&](int code) {
             exit_code_ = code;
@@ -146,7 +146,7 @@ TEST_F(ItmRunnerTest, BadBinaryReportsError)
 
     IstTestConfig cfg;
     cfg.swTimeoutSec = 30;
-    runner_->asyncRun(
+    runner_->async_run(
         cfg, platform_,
         [&](int code) {
             exit_code_ = code;
@@ -170,7 +170,7 @@ TEST_F(ItmRunnerTest, ProgressIsReported)
 {
     // The script writes the progress file after a brief delay so the poller
     // (which runs on a 1-second timer) has time to pick it up. We cannot
-    // pre-write the file because asyncRun removes stale progress files.
+    // pre-write the file because async_run removes stale progress files.
     std::string progress_path = (tmp_dir_ / "progress.txt").string();
     run("sleep 1; echo '50 100' > " + progress_path + "; sleep 3", 10);
     ASSERT_TRUE(called_);

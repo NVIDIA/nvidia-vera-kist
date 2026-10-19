@@ -85,7 +85,7 @@ static sdbusplus::object_path start_ist_from_dbus(
     {
         params["istSaveResOnFail"] = (save_result_on_fail == "Enable");
     }
-    return {service->startIST(params)};
+    return {service->start_ist(params)};
 }
 
 int main(int, char**)
@@ -96,7 +96,7 @@ int main(int, char**)
     sdbusplus::asio::object_server server(conn);
 
     IstPlatformConfig platform_cfg;
-    if (!parsePlatformConfig(platform_cfg, config_path))
+    if (!parse_platform_config(platform_cfg, config_path))
     {
         std::cerr << "IST: failed to parse platform config, exiting\n";
         return 1;
@@ -107,8 +107,9 @@ int main(int, char**)
     static constexpr const char* ist_path = "/com/nvidia/vera/ist";
 
     std::shared_ptr<IstService> service = IstService::create(
-        io, makeDbusStatePublisher(server, conn, sw_path, ist_path),
-        makeHookRunner(io), makeHostPowerMonitor(io, conn), makeItmRunner(io));
+        io, make_dbus_state_publisher(server, conn, sw_path, ist_path),
+        make_hook_runner(io), make_host_power_monitor(io, conn),
+        make_itm_runner(io));
 
     if (!service->initialize(std::move(platform_cfg)))
     {
@@ -116,17 +117,17 @@ int main(int, char**)
         return 1;
     }
 
-    service->setResultsFdCallback(
+    service->set_results_fd_callback(
         [weak = std::weak_ptr<IstService>(service), &io]() {
             auto svc = weak.lock();
             if (!svc)
             {
                 throw ist_err::InternalFailure{};
             }
-            return return_and_post_close(svc->getResultsFd(), io);
+            return return_and_post_close(svc->get_results_fd(), io);
         });
 
-    service->setCpuDiscoverer(
+    service->set_cpu_discoverer(
         [conn](
             std::move_only_function<void(const std::vector<std::string>&) const>
                 done) {
@@ -190,7 +191,7 @@ int main(int, char**)
                 throw ist_err::InternalFailure{};
             }
             return sdbusplus::object_path(
-                service->startUpdate(owned.release(), apply_time));
+                service->start_update(owned.release(), apply_time));
         });
     update_iface->initialize();
 

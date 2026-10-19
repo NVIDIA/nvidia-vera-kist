@@ -172,7 +172,7 @@ inline constexpr std::string_view k_apply_time_immediate =
 inline constexpr std::string_view k_apply_time_on_reset =
     "xyz.openbmc_project.Software.ApplyTime.RequestedApplyTimes.OnReset";
 
-inline bool isAllowedApplyTime(std::string_view applyTime)
+inline bool is_allowed_apply_time(std::string_view applyTime)
 {
     return applyTime == k_apply_time_immediate ||
            applyTime == k_apply_time_on_reset;
@@ -259,7 +259,7 @@ enum class IstStage
     cleanup,
 };
 
-inline std::string istStageToString(IstStage s)
+inline std::string ist_stage_to_string(IstStage s)
 {
     switch (s)
     {
@@ -296,7 +296,7 @@ enum class IstStatus
     aborted,
 };
 
-inline std::string istStatusToString(IstStatus s)
+inline std::string ist_status_to_string(IstStatus s)
 {
     switch (s)
     {
@@ -352,17 +352,17 @@ class HookRunner
     static constexpr std::chrono::seconds k_cak_bypass_timeout{360};
 
     virtual ~HookRunner() = default;
-    virtual void asyncRun(const std::string& cmd, std::string what,
-                          std::move_only_function<void(bool ok) const> done,
-                          std::vector<std::string> args = {},
-                          std::chrono::seconds timeout = defaultTimeout) = 0;
+    virtual void async_run(const std::string& cmd, std::string what,
+                           std::move_only_function<void(bool ok) const> done,
+                           std::vector<std::string> args = {},
+                           std::chrono::seconds timeout = defaultTimeout) = 0;
 };
 
 class HostPowerMonitor
 {
   public:
     virtual ~HostPowerMonitor() = default;
-    virtual void asyncWaitForPowerCycle(
+    virtual void async_wait_for_power_cycle(
         std::move_only_function<void(bool ok) const> done) = 0;
 };
 
@@ -371,9 +371,10 @@ class ItmRunner
   public:
     virtual ~ItmRunner() = default;
     virtual void
-        asyncRun(const IstTestConfig& cfg, const IstPlatformConfig& platformCfg,
-                 std::move_only_function<void(int exitCode) const> done,
-                 std::move_only_function<void(uint8_t) const> onProgress) = 0;
+        async_run(const IstTestConfig& cfg,
+                  const IstPlatformConfig& platformCfg,
+                  std::move_only_function<void(int exitCode) const> done,
+                  std::move_only_function<void(uint8_t) const> onProgress) = 0;
 };
 
 using ResultsFdCb = std::function<sdbusplus::message::unix_fd()>;
@@ -382,18 +383,18 @@ class StatePublisher
 {
   public:
     virtual ~StatePublisher() = default;
-    virtual void createRunObject(const std::string& run_path,
-                                 ResultsFdCb results_fd_cb) = 0;
-    virtual void removeRunObject() = 0;
+    virtual void create_run_object(const std::string& run_path,
+                                   ResultsFdCb results_fd_cb) = 0;
+    virtual void remove_run_object() = 0;
     virtual void publish(const IstState& state) = 0;
-    virtual void reSignalStage() = 0;
-    virtual void publishProgress(uint8_t progress) = 0;
-    virtual void publishVersion(const std::string& version) = 0;
-    virtual void publishActivation(std::string_view state) = 0;
-    virtual void createActivationProgress() = 0;
-    virtual void publishActivationProgress(uint8_t progress) = 0;
-    virtual void removeActivationProgress() = 0;
-    virtual void emitEventLog(
+    virtual void re_signal_stage() = 0;
+    virtual void publish_progress(uint8_t progress) = 0;
+    virtual void publish_version(const std::string& version) = 0;
+    virtual void publish_activation(std::string_view state) = 0;
+    virtual void create_activation_progress() = 0;
+    virtual void publish_activation_progress(uint8_t progress) = 0;
+    virtual void remove_activation_progress() = 0;
+    virtual void emit_event_log(
         const std::string& message, const std::string& severity,
         const std::map<std::string, std::string>& additionalData) = 0;
 };
@@ -402,16 +403,16 @@ class StatePublisher
 // Factory functions
 // ----------------
 
-std::unique_ptr<HookRunner> makeHookRunner(boost::asio::io_context& io);
+std::unique_ptr<HookRunner> make_hook_runner(boost::asio::io_context& io);
 std::shared_ptr<HostPowerMonitor>
-    makeHostPowerMonitor(boost::asio::io_context& io,
-                         std::shared_ptr<sdbusplus::asio::connection> conn);
-std::unique_ptr<ItmRunner> makeItmRunner(boost::asio::io_context& io);
+    make_host_power_monitor(boost::asio::io_context& io,
+                            std::shared_ptr<sdbusplus::asio::connection> conn);
+std::unique_ptr<ItmRunner> make_itm_runner(boost::asio::io_context& io);
 std::unique_ptr<StatePublisher>
-    makeDbusStatePublisher(sdbusplus::asio::object_server& server,
-                           std::shared_ptr<sdbusplus::asio::connection> conn,
-                           const std::string& swPath,
-                           const std::string& istPath);
+    make_dbus_state_publisher(sdbusplus::asio::object_server& server,
+                              std::shared_ptr<sdbusplus::asio::connection> conn,
+                              const std::string& swPath,
+                              const std::string& istPath);
 
 // ----------------
 // IstService
@@ -422,9 +423,9 @@ std::unique_ptr<StatePublisher>
 
 inline constexpr std::string_view trusted_hook_root = "/usr/share/ist/hooks";
 
-bool parsePlatformConfig(IstPlatformConfig& out, const std::string& path,
-                         std::string_view hook_root = trusted_hook_root);
-void resolveItmPaths(IstPlatformConfig& cfg);
+bool parse_platform_config(IstPlatformConfig& out, const std::string& path,
+                           std::string_view hook_root = trusted_hook_root);
+void resolve_itm_paths(IstPlatformConfig& cfg);
 
 struct PldmComponentInfo;
 class TransferSession;
@@ -456,16 +457,16 @@ class IstService : public std::enable_shared_from_this<IstService>
                std::unique_ptr<ItmRunner> itmRunner);
 
     bool initialize(IstPlatformConfig cfg);
-    void printIstPlatformConfig() const;
+    void print_ist_platform_config() const;
     const IstState& state() const
     {
         return state_;
     }
-    const std::string& softwareInventoryId() const
+    const std::string& software_inventory_id() const
     {
         return platform_cfg_.softwareInventoryId;
     }
-    const std::string& currentRunPath() const
+    const std::string& current_run_path() const
     {
         return current_run_path_;
     }
@@ -473,12 +474,12 @@ class IstService : public std::enable_shared_from_this<IstService>
      * Override the function used to verify kist_itm binary and library
      * signatures before execution.  It is invoked with the platform config and
      * a completion callback that must be called once with the result.  Defaults
-     * to verifyItmSignaturesAsync.  Exposed so unit tests can bypass crypto
+     * to verify_itm_signatures_async.  Exposed so unit tests can bypass crypto
      * without real signing keys.
      */
     using SignatureVerifier = std::function<void(
         const IstPlatformConfig&, std::move_only_function<void(bool) const>)>;
-    void setSignatureVerifier(SignatureVerifier fn);
+    void set_signature_verifier(SignatureVerifier fn);
 
     /**
      * Async callback that discovers the CPU sockets present on the system.
@@ -489,12 +490,12 @@ class IstService : public std::enable_shared_from_this<IstService>
      */
     using CpuDiscoverer = std::function<void(
         std::move_only_function<void(const std::vector<std::string>&) const>)>;
-    void setCpuDiscoverer(CpuDiscoverer fn);
+    void set_cpu_discoverer(CpuDiscoverer fn);
 
-    void setResultsFdCallback(ResultsFdCb cb);
-    std::string startIST(const ParamMap& testParams);
-    std::string startUpdate(int imageFd, std::string_view applyTime);
-    sdbusplus::message::unix_fd getResultsFd();
+    void set_results_fd_callback(ResultsFdCb cb);
+    std::string start_ist(const ParamMap& testParams);
+    std::string start_update(int imageFd, std::string_view applyTime);
+    sdbusplus::message::unix_fd get_results_fd();
 
   private:
     IstService(boost::asio::io_context& io,
@@ -502,26 +503,26 @@ class IstService : public std::enable_shared_from_this<IstService>
                std::unique_ptr<HookRunner> hookRunner,
                std::shared_ptr<HostPowerMonitor> powerMonitor,
                std::unique_ptr<ItmRunner> itmRunner);
-    bool getISTParams(const ParamMap& testParams);
-    bool collateralVerification();
-    bool prepareResultStorage();
+    bool get_ist_params(const ParamMap& testParams);
+    bool collateral_verification();
+    bool prepare_result_storage();
 
-    void updateDbusState();
-    void transitionTo(IstStage stage);
-    void transitionTo(IstStage stage, IstStatus status,
-                      std::string_view error_info = {});
+    void update_dbus_state();
+    void transition_to(IstStage stage);
+    void transition_to(IstStage stage, IstStatus status,
+                       std::string_view error_info = {});
 
-    void onSignatureVerifyDone(bool ok);
-    void onCpuDiscoveryDone(const std::vector<std::string>& cpuPaths);
-    void launchBootAssert();
-    void onIstBootAssertDone(bool ok);
-    void onPowerCycleDone(bool ok);
-    void startItmRun();
-    void runIstCleanup(int itmExit);
-    void onArchiveDone(int itmExit);
-    void emitIstEventLog(int itmExit);
-    void onDeassertDone(int itmExit, bool okDeassert);
-    void onResetDone(int itmExit, bool okReset);
+    void on_signature_verify_done(bool ok);
+    void on_cpu_discovery_done(const std::vector<std::string>& cpuPaths);
+    void launch_boot_assert();
+    void on_ist_boot_assert_done(bool ok);
+    void on_power_cycle_done(bool ok);
+    void start_itm_run();
+    void run_ist_cleanup(int itmExit);
+    void on_archive_done(int itmExit);
+    void emit_ist_event_log(int itmExit);
+    void on_deassert_done(int itmExit, bool okDeassert);
+    void on_reset_done(int itmExit, bool okReset);
 
     boost::asio::io_context& io_;
     std::unique_ptr<StatePublisher> publisher_;
@@ -550,6 +551,6 @@ class IstService : public std::enable_shared_from_this<IstService>
     std::streambuf* orig_cout_buf_{nullptr};
     std::streambuf* orig_cerr_buf_{nullptr};
 
-    void installServiceLogTee();
-    void removeServiceLogTee();
+    void install_service_log_tee();
+    void remove_service_log_tee();
 };

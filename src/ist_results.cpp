@@ -219,7 +219,7 @@ class ArchiveWriter
     std::array<char, k_archive_buf_size> buf_{};
 };
 
-bool archiveResults(const fs::path& results_dir)
+bool archive_results(const fs::path& results_dir)
 {
     std::vector<fs::path> files = collect_result_files(results_dir);
     if (files.empty())
@@ -390,7 +390,7 @@ class ArchiveSession : public std::enable_shared_from_this<ArchiveSession>
     bool finished_ = false;
 };
 
-void archiveResultsAsync(
+void archive_results_async(
     boost::asio::io_context& io, fs::path results_dir,
     std::move_only_function<void(bool ok) const> on_complete)
 {
@@ -399,7 +399,7 @@ void archiveResultsAsync(
         ->start();
 }
 
-sdbusplus::message::unix_fd IstService::getResultsFd()
+sdbusplus::message::unix_fd IstService::get_results_fd()
 {
     if (state_.stage != IstStage::idle)
     {
