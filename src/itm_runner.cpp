@@ -364,7 +364,7 @@ class ItmRunnerImpl final : public ItmRunner
   public:
     explicit ItmRunnerImpl(boost::asio::io_context& io) : io_(io)
     {}
-    void asyncRun(
+    void async_run(
         const IstTestConfig& cfg, const IstPlatformConfig& platform_cfg,
         std::move_only_function<void(int) const> done,
         std::move_only_function<void(uint8_t) const> on_progress) override;
@@ -438,7 +438,7 @@ static std::vector<std::string>
     return args;
 }
 
-void ItmRunnerImpl::asyncRun(
+void ItmRunnerImpl::async_run(
     const IstTestConfig& cfg, const IstPlatformConfig& platform_cfg,
     std::move_only_function<void(int) const> done,
     std::move_only_function<void(uint8_t) const> on_progress)
@@ -518,7 +518,7 @@ void ItmRunnerImpl::asyncRun(
                    timeout_sec);
 }
 
-std::unique_ptr<ItmRunner> makeItmRunner(boost::asio::io_context& io)
+std::unique_ptr<ItmRunner> make_itm_runner(boost::asio::io_context& io)
 {
     return std::make_unique<ItmRunnerImpl>(io);
 }

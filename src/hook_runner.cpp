@@ -242,20 +242,20 @@ class HookRunnerImpl final : public HookRunner
   public:
     explicit HookRunnerImpl(boost::asio::io_context& io) : io_(io)
     {}
-    void asyncRun(const std::string& cmd, std::string what,
-                  std::move_only_function<void(bool) const> done,
-                  std::vector<std::string> args = {},
-                  std::chrono::seconds timeout = defaultTimeout) override;
+    void async_run(const std::string& cmd, std::string what,
+                   std::move_only_function<void(bool) const> done,
+                   std::vector<std::string> args = {},
+                   std::chrono::seconds timeout = defaultTimeout) override;
 
   private:
     boost::asio::io_context& io_;
     std::vector<std::shared_ptr<HookProcess>> active_;
 };
 
-void HookRunnerImpl::asyncRun(const std::string& cmd, std::string what,
-                              std::move_only_function<void(bool) const> done,
-                              std::vector<std::string> args,
-                              std::chrono::seconds timeout)
+void HookRunnerImpl::async_run(const std::string& cmd, std::string what,
+                               std::move_only_function<void(bool) const> done,
+                               std::vector<std::string> args,
+                               std::chrono::seconds timeout)
 {
     std::erase_if(active_, [](const std::shared_ptr<HookProcess>& hp) {
         return hp->is_finished();
@@ -299,7 +299,7 @@ void HookRunnerImpl::asyncRun(const std::string& cmd, std::string what,
     hp->start(std::move(proc), timeout);
 }
 
-std::unique_ptr<HookRunner> makeHookRunner(boost::asio::io_context& io)
+std::unique_ptr<HookRunner> make_hook_runner(boost::asio::io_context& io)
 {
     return std::make_unique<HookRunnerImpl>(io);
 }

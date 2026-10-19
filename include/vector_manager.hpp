@@ -47,39 +47,40 @@ class VectorManager : public std::enable_shared_from_this<VectorManager>
                                                  StatePublisher& publisher,
                                                  const IstPlatformConfig& cfg);
 
-    bool inProgress() const
+    bool in_progress() const
     {
         return update_in_progress_;
     }
 
     // Mount any existing on-disk vectors at service startup and publish the
     // version/activation state.
-    void mountVectorsOnStartup();
+    void mount_vectors_on_startup();
 
     // Mount existing vectors if they are not already mounted (before an IST
     // run).
-    void ensureMounted();
+    void ensure_mounted();
 
   private:
     friend class IstService;
 
-    std::string startUpdate(UniqueFd image, std::string_view applyTime);
+    std::string start_update(UniqueFd image, std::string_view applyTime);
 
     VectorManager(boost::asio::io_context& io, StatePublisher& publisher,
                   const IstPlatformConfig& cfg);
 
-    void onTransferComplete(bool ok);
-    void onHeaderPeekComplete(bool ok, std::vector<uint8_t> prefix,
-                              UniqueFd readFd, PldmComponentInfo comp,
+    void on_transfer_complete(bool ok);
+    void on_header_peek_complete(bool ok, std::vector<uint8_t> prefix,
+                                 UniqueFd readFd, PldmComponentInfo comp,
+                                 const std::filesystem::path& imagePath);
+    void on_teardown_complete(bool ok, UniqueFd readFd,
+                              std::vector<uint8_t> prefix,
+                              PldmComponentInfo comp,
                               const std::filesystem::path& imagePath);
-    void onTeardownComplete(bool ok, UniqueFd readFd,
-                            std::vector<uint8_t> prefix, PldmComponentInfo comp,
-                            const std::filesystem::path& imagePath);
-    void onMountComplete(bool ok);
-    bool mountImages();
-    bool teardownMounts();
-    void readAndPublishVersion();
-    void finishUpdate(bool ok);
+    void on_mount_complete(bool ok);
+    bool mount_images();
+    bool teardown_mounts();
+    void read_and_publish_version();
+    void finish_update(bool ok);
 
     boost::asio::io_context& io_;
     StatePublisher& publisher_;

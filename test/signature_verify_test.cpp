@@ -163,14 +163,14 @@ class SignatureVerifyTest : public ::testing::Test
 };
 
 // ----------------
-// verifyFileSignature tests
+// verify_file_signature tests
 // ----------------
 
 TEST_F(SignatureVerifyTest, ValidSignature)
 {
     fs::path sig_path = binary_path_;
     sig_path += ".sig";
-    EXPECT_TRUE(verifyFileSignature(binary_path_, sig_path, pub_key_path_));
+    EXPECT_TRUE(verify_file_signature(binary_path_, sig_path, pub_key_path_));
 }
 
 TEST_F(SignatureVerifyTest, CorruptedSignature)
@@ -183,13 +183,13 @@ TEST_F(SignatureVerifyTest, CorruptedSignature)
                                "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
                                "AAAAAAAAAA==";
 
-    EXPECT_FALSE(verifyFileSignature(binary_path_, sig_path, pub_key_path_));
+    EXPECT_FALSE(verify_file_signature(binary_path_, sig_path, pub_key_path_));
 }
 
 TEST_F(SignatureVerifyTest, MissingSigFile)
 {
     fs::path sig_path = tmp_dir_ / "nonexistent.sig";
-    EXPECT_FALSE(verifyFileSignature(binary_path_, sig_path, pub_key_path_));
+    EXPECT_FALSE(verify_file_signature(binary_path_, sig_path, pub_key_path_));
 }
 
 TEST_F(SignatureVerifyTest, TamperedDataFile)
@@ -200,7 +200,7 @@ TEST_F(SignatureVerifyTest, TamperedDataFile)
     // Modify the binary after signing
     std::ofstream(binary_path_, std::ios::app) << "tampered";
 
-    EXPECT_FALSE(verifyFileSignature(binary_path_, sig_path, pub_key_path_));
+    EXPECT_FALSE(verify_file_signature(binary_path_, sig_path, pub_key_path_));
 }
 
 TEST_F(SignatureVerifyTest, InvalidBase64InSigFile)
@@ -210,7 +210,7 @@ TEST_F(SignatureVerifyTest, InvalidBase64InSigFile)
 
     std::ofstream(sig_path) << "this is not valid base64!!!@#$%";
 
-    EXPECT_FALSE(verifyFileSignature(binary_path_, sig_path, pub_key_path_));
+    EXPECT_FALSE(verify_file_signature(binary_path_, sig_path, pub_key_path_));
 }
 
 TEST_F(SignatureVerifyTest, WrongKey)
@@ -223,7 +223,7 @@ TEST_F(SignatureVerifyTest, WrongKey)
     fs::path other_pub = tmp_dir_ / "other_pub.pem";
     other_key.write_public_key(other_pub);
 
-    EXPECT_FALSE(verifyFileSignature(binary_path_, sig_path, other_pub));
+    EXPECT_FALSE(verify_file_signature(binary_path_, sig_path, other_pub));
 }
 
 TEST_F(SignatureVerifyTest, EmptySigFile)
@@ -235,11 +235,11 @@ TEST_F(SignatureVerifyTest, EmptySigFile)
     std::ofstream ofs(sig_path, std::ios::trunc);
     ofs.close();
 
-    EXPECT_FALSE(verifyFileSignature(binary_path_, sig_path, pub_key_path_));
+    EXPECT_FALSE(verify_file_signature(binary_path_, sig_path, pub_key_path_));
 }
 
 // ----------------
-// verifyItmSignatures tests
+// verify_itm_signatures tests
 // ----------------
 
 TEST_F(SignatureVerifyTest, VerifyAllPassesWithSignedBinaryAndLibs)
@@ -252,7 +252,7 @@ TEST_F(SignatureVerifyTest, VerifyAllPassesWithSignedBinaryAndLibs)
     cfg.itmLibDir = tmp_dir_ / "lib";
     cfg.signingKeyPath = pub_key_path_;
 
-    EXPECT_TRUE(verifyItmSignatures(cfg));
+    EXPECT_TRUE(verify_itm_signatures(cfg));
 }
 
 TEST_F(SignatureVerifyTest, VerifyAllFailsWhenBinarySigMissing)
@@ -264,7 +264,7 @@ TEST_F(SignatureVerifyTest, VerifyAllFailsWhenBinarySigMissing)
     cfg.itmLibDir = tmp_dir_ / "lib";
     cfg.signingKeyPath = pub_key_path_;
 
-    EXPECT_FALSE(verifyItmSignatures(cfg));
+    EXPECT_FALSE(verify_itm_signatures(cfg));
 }
 
 TEST_F(SignatureVerifyTest, VerifyAllFailsWhenLibSigMissing)
@@ -277,7 +277,7 @@ TEST_F(SignatureVerifyTest, VerifyAllFailsWhenLibSigMissing)
     cfg.itmLibDir = tmp_dir_ / "lib";
     cfg.signingKeyPath = pub_key_path_;
 
-    EXPECT_FALSE(verifyItmSignatures(cfg));
+    EXPECT_FALSE(verify_itm_signatures(cfg));
 }
 
 TEST_F(SignatureVerifyTest, VerifyAllFailsWhenLibTampered)
@@ -291,7 +291,7 @@ TEST_F(SignatureVerifyTest, VerifyAllFailsWhenLibTampered)
     cfg.itmLibDir = tmp_dir_ / "lib";
     cfg.signingKeyPath = pub_key_path_;
 
-    EXPECT_FALSE(verifyItmSignatures(cfg));
+    EXPECT_FALSE(verify_itm_signatures(cfg));
 }
 
 TEST_F(SignatureVerifyTest, VerifyFailsWhenKeyNotOnDisk)
@@ -300,7 +300,7 @@ TEST_F(SignatureVerifyTest, VerifyFailsWhenKeyNotOnDisk)
     cfg.itmBinaryPath = binary_path_;
     cfg.itmLibDir = tmp_dir_ / "lib";
 
-    EXPECT_FALSE(verifyItmSignatures(cfg));
+    EXPECT_FALSE(verify_itm_signatures(cfg));
 }
 
 TEST_F(SignatureVerifyTest, VerifyPassesWithEmptyLibDir)
@@ -310,7 +310,7 @@ TEST_F(SignatureVerifyTest, VerifyPassesWithEmptyLibDir)
     cfg.itmLibDir = "";
     cfg.signingKeyPath = pub_key_path_;
 
-    EXPECT_TRUE(verifyItmSignatures(cfg));
+    EXPECT_TRUE(verify_itm_signatures(cfg));
 }
 
 // ----------------
@@ -327,7 +327,7 @@ TEST_F(SignatureVerifyTest, VerifyPassesWithSymlinkToSignedLib)
     cfg.itmLibDir = tmp_dir_ / "lib";
     cfg.signingKeyPath = pub_key_path_;
 
-    EXPECT_TRUE(verifyItmSignatures(cfg));
+    EXPECT_TRUE(verify_itm_signatures(cfg));
 }
 
 TEST_F(SignatureVerifyTest, VerifyPassesWithSymlinkChain)
@@ -341,7 +341,7 @@ TEST_F(SignatureVerifyTest, VerifyPassesWithSymlinkChain)
     cfg.itmLibDir = tmp_dir_ / "lib";
     cfg.signingKeyPath = pub_key_path_;
 
-    EXPECT_TRUE(verifyItmSignatures(cfg));
+    EXPECT_TRUE(verify_itm_signatures(cfg));
 }
 
 TEST_F(SignatureVerifyTest, VerifyFailsWhenSymlinkResolvesOutsideVerifiedSet)
@@ -355,7 +355,7 @@ TEST_F(SignatureVerifyTest, VerifyFailsWhenSymlinkResolvesOutsideVerifiedSet)
     cfg.itmLibDir = tmp_dir_ / "lib";
     cfg.signingKeyPath = pub_key_path_;
 
-    EXPECT_FALSE(verifyItmSignatures(cfg));
+    EXPECT_FALSE(verify_itm_signatures(cfg));
 }
 
 TEST_F(SignatureVerifyTest, VerifyFailsWhenSymlinkDangling)
@@ -367,7 +367,7 @@ TEST_F(SignatureVerifyTest, VerifyFailsWhenSymlinkDangling)
     cfg.itmLibDir = tmp_dir_ / "lib";
     cfg.signingKeyPath = pub_key_path_;
 
-    EXPECT_FALSE(verifyItmSignatures(cfg));
+    EXPECT_FALSE(verify_itm_signatures(cfg));
 }
 
 TEST_F(SignatureVerifyTest, VerifyPassesWhenSymlinkResolvesToBinary)
@@ -379,7 +379,7 @@ TEST_F(SignatureVerifyTest, VerifyPassesWhenSymlinkResolvesToBinary)
     cfg.itmLibDir = tmp_dir_ / "lib";
     cfg.signingKeyPath = pub_key_path_;
 
-    EXPECT_TRUE(verifyItmSignatures(cfg));
+    EXPECT_TRUE(verify_itm_signatures(cfg));
 }
 
 TEST_F(SignatureVerifyTest, VerifyPassesWithMixedRealAndSymlinkedLibs)
@@ -395,5 +395,5 @@ TEST_F(SignatureVerifyTest, VerifyPassesWithMixedRealAndSymlinkedLibs)
     cfg.itmLibDir = tmp_dir_ / "lib";
     cfg.signingKeyPath = pub_key_path_;
 
-    EXPECT_TRUE(verifyItmSignatures(cfg));
+    EXPECT_TRUE(verify_itm_signatures(cfg));
 }

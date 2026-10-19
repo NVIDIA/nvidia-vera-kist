@@ -227,8 +227,8 @@ class FileVerifier
     std::ifstream data_stream_;
 };
 
-bool verifyFileSignature(const fs::path& file, const fs::path& sig_file,
-                         const fs::path& pub_key_path)
+bool verify_file_signature(const fs::path& file, const fs::path& sig_file,
+                           const fs::path& pub_key_path)
 {
     FileVerifier verifier;
     if (!verifier.init(file, sig_file, pub_key_path))
@@ -384,7 +384,7 @@ static std::optional<std::vector<VerifyTarget>>
     return targets;
 }
 
-bool verifyItmSignatures(const IstPlatformConfig& cfg)
+bool verify_itm_signatures(const IstPlatformConfig& cfg)
 {
     std::optional<std::vector<VerifyTarget>> targets =
         collect_files_to_verify(cfg);
@@ -394,7 +394,7 @@ bool verifyItmSignatures(const IstPlatformConfig& cfg)
     }
     for (const VerifyTarget& t : *targets)
     {
-        if (!verifyFileSignature(t.file, t.sig, cfg.signingKeyPath))
+        if (!verify_file_signature(t.file, t.sig, cfg.signingKeyPath))
         {
             return false;
         }
@@ -519,7 +519,7 @@ class SignatureVerifySession :
     bool finished_ = false;
 };
 
-void verifyItmSignaturesAsync(
+void verify_itm_signatures_async(
     boost::asio::io_context& io, IstPlatformConfig cfg,
     std::move_only_function<void(bool ok) const> on_complete)
 {

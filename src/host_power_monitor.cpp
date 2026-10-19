@@ -37,7 +37,7 @@ class HostPowerMonitorImpl final :
                          std::shared_ptr<sdbusplus::asio::connection> conn) :
         conn_(std::move(conn)), timer_(io)
     {}
-    void asyncWaitForPowerCycle(
+    void async_wait_for_power_cycle(
         std::move_only_function<void(bool) const> done) override;
 
   private:
@@ -53,7 +53,7 @@ class HostPowerMonitorImpl final :
     bool saw_off_{false};
 };
 
-void HostPowerMonitorImpl::asyncWaitForPowerCycle(
+void HostPowerMonitorImpl::async_wait_for_power_cycle(
     std::move_only_function<void(bool) const> done)
 {
     done_ = std::move(done);
@@ -177,8 +177,8 @@ void HostPowerMonitorImpl::finish(bool ok)
 }
 
 std::shared_ptr<HostPowerMonitor>
-    makeHostPowerMonitor(boost::asio::io_context& io,
-                         std::shared_ptr<sdbusplus::asio::connection> conn)
+    make_host_power_monitor(boost::asio::io_context& io,
+                            std::shared_ptr<sdbusplus::asio::connection> conn)
 {
     return std::make_shared<HostPowerMonitorImpl>(io, std::move(conn));
 }

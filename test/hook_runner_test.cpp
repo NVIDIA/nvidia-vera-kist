@@ -38,7 +38,7 @@ class HookRunnerTest : public ::testing::Test
         tmp_dir_ = fs::temp_directory_path() /
                    ("hook_test_" + std::to_string(::getpid()));
         fs::create_directories(tmp_dir_);
-        runner_ = makeHookRunner(io_);
+        runner_ = make_hook_runner(io_);
     }
 
     void TearDown() override
@@ -56,7 +56,7 @@ TEST_F(HookRunnerTest, NormalExitReportsSuccess)
 {
     bool result = false;
     bool called = false;
-    runner_->asyncRun(
+    runner_->async_run(
         "/bin/bash", "test-normal",
         [&](bool ok) {
             result = ok;
@@ -72,7 +72,7 @@ TEST_F(HookRunnerTest, NonZeroExitReportsFailure)
 {
     bool result = true;
     bool called = false;
-    runner_->asyncRun(
+    runner_->async_run(
         "/bin/bash", "test-fail",
         [&](bool ok) {
             result = ok;
@@ -86,7 +86,7 @@ TEST_F(HookRunnerTest, NonZeroExitReportsFailure)
 
 // A hook the service launches directly produces no other diagnostics, so its
 // output has to travel through std::cout specifically: that is where
-// installServiceLogTee() splits the stream into the journal and
+// install_service_log_tee() splits the stream into the journal and
 // IST_service.log. Writing to an inherited descriptor would reach neither tee.
 TEST_F(HookRunnerTest, HookOutputReachesStdout)
 {
@@ -94,7 +94,7 @@ TEST_F(HookRunnerTest, HookOutputReachesStdout)
     std::streambuf* orig = std::cout.rdbuf(captured.rdbuf());
 
     bool called = false;
-    runner_->asyncRun(
+    runner_->async_run(
         "/bin/bash", "test-output",
         [&](bool ok) {
             (void)ok;
@@ -113,7 +113,7 @@ TEST_F(HookRunnerTest, BadCommandReportsFailure)
 {
     bool result = true;
     bool called = false;
-    runner_->asyncRun("/nonexistent/command", "test-bad-cmd", [&](bool ok) {
+    runner_->async_run("/nonexistent/command", "test-bad-cmd", [&](bool ok) {
         result = ok;
         called = true;
     });
@@ -126,12 +126,12 @@ TEST_F(HookRunnerTest, ArgsArePassedToProcess)
 {
     bool result = false;
     bool called = false;
-    runner_->asyncRun("/bin/bash", "test-args",
-                      [&](bool ok) {
-                          result = ok;
-                          called = true;
-                      },
-                      {"-c", "test \"$0\" = hello", "hello"});
+    runner_->async_run("/bin/bash", "test-args",
+                       [&](bool ok) {
+                           result = ok;
+                           called = true;
+                       },
+                       {"-c", "test \"$0\" = hello", "hello"});
     io_.run();
     ASSERT_TRUE(called);
     EXPECT_TRUE(result);
@@ -141,7 +141,7 @@ TEST_F(HookRunnerTest, TimeoutKillsProcess)
 {
     bool result = true;
     bool called = false;
-    runner_->asyncRun(
+    runner_->async_run(
         "/bin/bash", "test-timeout",
         [&](bool ok) {
             result = ok;
@@ -160,7 +160,7 @@ TEST_F(HookRunnerTest, TimeoutAllowsTrapCleanup)
         "trap 'touch " + marker.string() + "; exit 0' TERM; sleep 999";
 
     bool called = false;
-    runner_->asyncRun(
+    runner_->async_run(
         "/bin/bash", "test-trap-cleanup",
         [&](bool ok) {
             (void)ok;
@@ -183,7 +183,7 @@ TEST_F(HookRunnerTest, SIGKILLEscalationWhenSIGTERMIgnored)
     bool called = false;
     std::chrono::steady_clock::time_point start =
         std::chrono::steady_clock::now();
-    runner_->asyncRun(
+    runner_->async_run(
         "/bin/bash", "test-sigkill",
         [&](bool ok) {
             result = ok;
