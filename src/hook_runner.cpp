@@ -22,7 +22,6 @@
 #include <boost/process/v2/stdio.hpp>
 #include <ist_app.hpp>
 
-#include <array>
 #include <chrono>
 #include <csignal>
 #include <cstring>
@@ -49,47 +48,6 @@ struct ProcessGroupSetup
         }
         return {};
     }
-};
-
-// A hook's own messages are the only diagnostics these scripts produce, and
-// discarding them hid two root causes: only the hooks kist_itm launches were
-// visible, by way of its summary log.
-//
-// Written through std::cout rather than an inherited descriptor so the service
-// log tee picks them up as well. TeeStreambuf sits at the iostream layer, which
-// a child writing straight to fd 1 would bypass, reaching the journal only.
-class HookOutput final : public std::enable_shared_from_this<HookOutput>
-{
-  public:
-    HookOutput(boost::asio::io_context& io, int pipe_read_fd) :
-        stream_(io, pipe_read_fd)
-    {}
-
-    void start()
-    {
-        read_next();
-    }
-
-  private:
-    void read_next()
-    {
-        stream_.async_read_some(
-            boost::asio::buffer(buf_),
-            [self = shared_from_this()](const boost::system::error_code& ec,
-                                        std::size_t n) {
-                if (ec)
-                {
-                    return; // EOF or pipe closed
-                }
-                std::cout.write(self->buf_.data(),
-                                static_cast<std::streamsize>(n));
-                std::cout.flush();
-                self->read_next();
-            });
-    }
-
-    boost::asio::posix::stream_descriptor stream_;
-    std::array<char, k_output_buf_size> buf_{};
 };
 
 class HookProcess final : public std::enable_shared_from_this<HookProcess>
@@ -238,6 +196,10 @@ class HookRunnerImpl final : public HookRunner
   public:
     explicit HookRunnerImpl(boost::asio::io_context& io) : io_(io)
     {}
+    void set_log_file(LogFile& log) override
+    {
+        log_ = &log;
+    }
     void async_run(const std::string& cmd, std::string what,
                    std::move_only_function<void(bool) const> done,
                    std::vector<std::string> args = {},
@@ -245,6 +207,11 @@ class HookRunnerImpl final : public HookRunner
 
   private:
     boost::asio::io_context& io_;
+    // Hooks can run before the service has a run log and after that log is
+    // closed; a LogFile that was never opened discards writes, so neither case
+    // needs a special path.
+    LogFile unopened_log_;
+    LogFile* log_{&unopened_log_};
     std::vector<std::shared_ptr<HookProcess>> active_;
 };
 
@@ -285,9 +252,9 @@ void HookRunnerImpl::async_run(const std::string& cmd, std::string what,
         return;
     }
 
-    // Closed in the parent so HookOutput sees EOF when the hook exits.
+    // Closed in the parent so the pump sees EOF when the hook exits.
     pipe_write = UniqueFd();
-    std::make_shared<HookOutput>(io_, pipe_read.release())->start();
+    std::make_shared<OutputTee>(io_, pipe_read.release(), *log_)->start();
 
     std::shared_ptr<HookProcess> hp =
         std::make_shared<HookProcess>(io_, std::move(what), std::move(done));

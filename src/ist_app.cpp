@@ -117,7 +117,9 @@ IstService::IstService(boost::asio::io_context& io,
     }),
     vector_manager_(VectorManager::create(io, *publisher_, platform_cfg_)),
     re_signal_timer_(io)
-{}
+{
+    hook_runner_->set_log_file(run_logs_.service);
+}
 
 IstService::~IstService()
 {
@@ -181,20 +183,15 @@ void IstService::install_service_log_tee()
 
     fs::path log_path =
         platform_cfg_.storage.result_storage_path / "IST_service.log";
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
-    service_log_fd_ = UniqueFd(::open(
-        log_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644));
-    if (service_log_fd_.get() < 0)
+    if (!run_logs_.service.open(log_path))
     {
-        std::cerr << "Failed to open service log '" << log_path
-                  << "': errno=" << errno << '\n';
         return;
     }
 
     cout_tee_ = std::make_unique<TeeStreambuf>(std::cout.rdbuf(),
-                                               service_log_fd_.get());
+                                               run_logs_.service.fd());
     cerr_tee_ = std::make_unique<TeeStreambuf>(std::cerr.rdbuf(),
-                                               service_log_fd_.get());
+                                               run_logs_.service.fd());
     orig_cout_buf_ = std::cout.rdbuf(cout_tee_.get());
     orig_cerr_buf_ = std::cerr.rdbuf(cerr_tee_.get());
 }
@@ -213,7 +210,7 @@ void IstService::remove_service_log_tee()
     }
     cout_tee_.reset();
     cerr_tee_.reset();
-    service_log_fd_ = UniqueFd();
+    run_logs_.service.close();
 }
 
 // ----------------

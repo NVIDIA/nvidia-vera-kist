@@ -138,8 +138,22 @@ class LogFile
         return fd_.get() >= 0;
     }
 
+    // For TeeStreambuf, which writes to the same file until the lg2 migration
+    // retires it.
+    int fd() const noexcept
+    {
+        return fd_.get();
+    }
+
   private:
     UniqueFd fd_;
+};
+
+// The log files a single run writes, opened after the results directory is
+// wiped and closed once the archive has been taken.
+struct RunLogs
+{
+    LogFile service;
 };
 
 // ----------------
