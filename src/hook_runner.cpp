@@ -55,15 +55,16 @@ class HookProcess final : public std::enable_shared_from_this<HookProcess>
   public:
     HookProcess(boost::asio::io_context& io, std::string what,
                 std::move_only_function<void(bool) const> done) :
-        deadline_(io), grace_(io), what_(std::move(what)),
+        deadline_(io), grace_(io), drain_(io), what_(std::move(what)),
         done_(std::move(done))
     {}
 
     void start(std::shared_ptr<bpv2::process> proc,
-               std::chrono::seconds timeout)
+               std::shared_ptr<OutputTee> tee, std::chrono::seconds timeout)
     {
         proc_ = std::move(proc);
         pid_ = proc_->id();
+        tee_ = std::move(tee);
 
         if (timeout <= std::chrono::seconds{0})
         {
@@ -147,44 +148,86 @@ class HookProcess final : public std::enable_shared_from_this<HookProcess>
         if (timed_out_)
         {
             std::cerr << what_ << " killed due to timeout\n";
-            finish(false);
-            return;
+            ok_ = false;
         }
-        if (ec || exit_code != 0)
+        else if (ec || exit_code != 0)
         {
             std::cerr << "Failed to execute " << what_
                       << ": ec=" << ec.message() << " exit=" << exit_code
                       << '\n';
-            finish(false);
-            return;
+            ok_ = false;
         }
-        finish(true);
+        else
+        {
+            ok_ = true;
+        }
+
+        exited_ = true;
+        drain_.expires_after(k_drain_timeout);
+        drain_.async_wait(
+            [weak = weak_from_this()](const boost::system::error_code& tec) {
+                if (tec)
+                {
+                    return;
+                }
+                if (auto self = weak.lock())
+                {
+                    self->on_drain_timeout();
+                }
+            });
+        finish();
     }
 
-    void finish(bool ok)
+    void on_drain_timeout()
     {
-        if (finished_)
+        std::cerr << what_ << " output did not drain, reporting anyway\n";
+        drained_ = true;
+        finish();
+    }
+
+    // Completion means exited and drained, so the caller cannot archive or
+    // close the log while the hook's last lines are still in the pipe.
+    void finish()
+    {
+        if (finished_ || !exited_ || !drained_)
         {
             return;
         }
         finished_ = true;
+        drain_.cancel();
+        if (tee_)
+        {
+            tee_->stop();
+            tee_.reset();
+        }
         std::move_only_function<void(bool) const> cb = std::move(done_);
         if (cb)
         {
-            cb(ok);
+            cb(ok_);
         }
     }
 
     boost::asio::steady_timer deadline_;
     boost::asio::steady_timer grace_;
+    boost::asio::steady_timer drain_;
     std::shared_ptr<bpv2::process> proc_;
+    std::shared_ptr<OutputTee> tee_;
     pid_t pid_{0};
     std::string what_;
     std::move_only_function<void(bool) const> done_;
     bool timed_out_{false};
     bool finished_{false};
+    bool exited_{false};
+    bool drained_{false};
+    bool ok_{false};
 
   public:
+    void on_drained()
+    {
+        drained_ = true;
+        finish();
+    }
+
     bool is_finished() const
     {
         return finished_;
@@ -254,12 +297,22 @@ void HookRunnerImpl::async_run(const std::string& cmd, std::string what,
 
     // Closed in the parent so the pump sees EOF when the hook exits.
     pipe_write = UniqueFd();
-    std::make_shared<OutputTee>(io_, pipe_read.release(), *log_)->start();
 
     std::shared_ptr<HookProcess> hp =
         std::make_shared<HookProcess>(io_, std::move(what), std::move(done));
     active_.push_back(hp);
-    hp->start(std::move(proc), timeout);
+
+    std::shared_ptr<OutputTee> tee =
+        std::make_shared<OutputTee>(io_, pipe_read.release(), *log_);
+    tee->set_eof_handler([weak = std::weak_ptr<HookProcess>(hp)]() {
+        if (std::shared_ptr<HookProcess> hook = weak.lock())
+        {
+            hook->on_drained();
+        }
+    });
+    tee->start();
+
+    hp->start(std::move(proc), std::move(tee), timeout);
 }
 
 std::unique_ptr<HookRunner> make_hook_runner(boost::asio::io_context& io)
