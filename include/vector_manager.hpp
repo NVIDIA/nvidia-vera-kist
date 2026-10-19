@@ -63,19 +63,19 @@ class VectorManager : public std::enable_shared_from_this<VectorManager>
   private:
     friend class IstService;
 
-    std::string start_update(UniqueFd image, std::string_view applyTime);
+    std::string start_update(UniqueFd image, std::string_view apply_time);
 
     VectorManager(boost::asio::io_context& io, StatePublisher& publisher,
                   const IstPlatformConfig& cfg);
 
     void on_transfer_complete(bool ok);
     void on_header_peek_complete(bool ok, std::vector<uint8_t> prefix,
-                                 UniqueFd readFd, PldmComponentInfo comp,
-                                 const std::filesystem::path& imagePath);
-    void on_teardown_complete(bool ok, UniqueFd readFd,
+                                 UniqueFd read_fd, PldmComponentInfo comp,
+                                 const std::filesystem::path& image_path);
+    void on_teardown_complete(bool ok, UniqueFd read_fd,
                               std::vector<uint8_t> prefix,
                               PldmComponentInfo comp,
-                              const std::filesystem::path& imagePath);
+                              const std::filesystem::path& image_path);
     void on_mount_complete(bool ok);
     bool mount_images();
     bool teardown_mounts();
