@@ -172,10 +172,10 @@ inline constexpr std::string_view k_apply_time_immediate =
 inline constexpr std::string_view k_apply_time_on_reset =
     "xyz.openbmc_project.Software.ApplyTime.RequestedApplyTimes.OnReset";
 
-inline bool is_allowed_apply_time(std::string_view applyTime)
+inline bool is_allowed_apply_time(std::string_view apply_time)
 {
-    return applyTime == k_apply_time_immediate ||
-           applyTime == k_apply_time_on_reset;
+    return apply_time == k_apply_time_immediate ||
+           apply_time == k_apply_time_on_reset;
 }
 
 // ----------------
@@ -372,9 +372,9 @@ class ItmRunner
     virtual ~ItmRunner() = default;
     virtual void
         async_run(const IstTestConfig& cfg,
-                  const IstPlatformConfig& platformCfg,
-                  std::move_only_function<void(int exitCode) const> done,
-                  std::move_only_function<void(uint8_t) const> onProgress) = 0;
+                  const IstPlatformConfig& platform_cfg,
+                  std::move_only_function<void(int exit_code) const> done,
+                  std::move_only_function<void(uint8_t) const> on_progress) = 0;
 };
 
 using ResultsFdCb = std::function<sdbusplus::message::unix_fd()>;
@@ -396,7 +396,7 @@ class StatePublisher
     virtual void remove_activation_progress() = 0;
     virtual void emit_event_log(
         const std::string& message, const std::string& severity,
-        const std::map<std::string, std::string>& additionalData) = 0;
+        const std::map<std::string, std::string>& additional_data) = 0;
 };
 
 // ----------------
@@ -411,8 +411,8 @@ std::unique_ptr<ItmRunner> make_itm_runner(boost::asio::io_context& io);
 std::unique_ptr<StatePublisher>
     make_dbus_state_publisher(sdbusplus::asio::object_server& server,
                               std::shared_ptr<sdbusplus::asio::connection> conn,
-                              const std::string& swPath,
-                              const std::string& istPath);
+                              const std::string& sw_path,
+                              const std::string& ist_path);
 
 // ----------------
 // IstService
@@ -452,9 +452,9 @@ class IstService : public std::enable_shared_from_this<IstService>
     static std::shared_ptr<IstService>
         create(boost::asio::io_context& io,
                std::unique_ptr<StatePublisher> publisher,
-               std::unique_ptr<HookRunner> hookRunner,
-               std::shared_ptr<HostPowerMonitor> powerMonitor,
-               std::unique_ptr<ItmRunner> itmRunner);
+               std::unique_ptr<HookRunner> hook_runner,
+               std::shared_ptr<HostPowerMonitor> power_monitor,
+               std::unique_ptr<ItmRunner> itm_runner);
 
     bool initialize(IstPlatformConfig cfg);
     void print_ist_platform_config() const;
@@ -493,17 +493,17 @@ class IstService : public std::enable_shared_from_this<IstService>
     void set_cpu_discoverer(CpuDiscoverer fn);
 
     void set_results_fd_callback(ResultsFdCb cb);
-    std::string start_ist(const ParamMap& testParams);
-    std::string start_update(int imageFd, std::string_view applyTime);
+    std::string start_ist(const ParamMap& test_params);
+    std::string start_update(int image_fd, std::string_view apply_time);
     sdbusplus::message::unix_fd get_results_fd();
 
   private:
     IstService(boost::asio::io_context& io,
                std::unique_ptr<StatePublisher> publisher,
-               std::unique_ptr<HookRunner> hookRunner,
-               std::shared_ptr<HostPowerMonitor> powerMonitor,
-               std::unique_ptr<ItmRunner> itmRunner);
-    bool get_ist_params(const ParamMap& testParams);
+               std::unique_ptr<HookRunner> hook_runner,
+               std::shared_ptr<HostPowerMonitor> power_monitor,
+               std::unique_ptr<ItmRunner> itm_runner);
+    bool get_ist_params(const ParamMap& test_params);
     bool collateral_verification();
     bool prepare_result_storage();
 
@@ -513,16 +513,16 @@ class IstService : public std::enable_shared_from_this<IstService>
                        std::string_view error_info = {});
 
     void on_signature_verify_done(bool ok);
-    void on_cpu_discovery_done(const std::vector<std::string>& cpuPaths);
+    void on_cpu_discovery_done(const std::vector<std::string>& cpu_paths);
     void launch_boot_assert();
     void on_ist_boot_assert_done(bool ok);
     void on_power_cycle_done(bool ok);
     void start_itm_run();
-    void run_ist_cleanup(int itmExit);
-    void on_archive_done(int itmExit);
-    void emit_ist_event_log(int itmExit);
-    void on_deassert_done(int itmExit, bool okDeassert);
-    void on_reset_done(int itmExit, bool okReset);
+    void run_ist_cleanup(int itm_exit);
+    void on_archive_done(int itm_exit);
+    void emit_ist_event_log(int itm_exit);
+    void on_deassert_done(int itm_exit, bool ok_deassert);
+    void on_reset_done(int itm_exit, bool ok_reset);
 
     boost::asio::io_context& io_;
     std::unique_ptr<StatePublisher> publisher_;

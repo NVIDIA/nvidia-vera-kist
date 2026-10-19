@@ -30,13 +30,13 @@
  *
  * @return true if all files were archived and the archive was closed cleanly.
  */
-bool archive_results(const std::filesystem::path& resultsDir);
+bool archive_results(const std::filesystem::path& results_dir);
 
 /**
  * Chunked variant of archive_results() that runs on the io_context one block
- * per turn instead of blocking. onComplete(ok) fires exactly once on the
+ * per turn instead of blocking. on_complete(ok) fires exactly once on the
  * io_context thread.
  */
 void archive_results_async(
-    boost::asio::io_context& io, std::filesystem::path resultsDir,
-    std::move_only_function<void(bool ok) const> onComplete);
+    boost::asio::io_context& io, std::filesystem::path results_dir,
+    std::move_only_function<void(bool ok) const> on_complete);
