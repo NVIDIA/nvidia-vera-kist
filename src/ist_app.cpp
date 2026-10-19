@@ -103,14 +103,15 @@ IstService::IstService(boost::asio::io_context& io,
                        std::shared_ptr<HostPowerMonitor> power_monitor,
                        std::unique_ptr<ItmRunner> itm_runner) :
     io_(io), publisher_(std::move(publisher)),
-    hookRunner_(std::move(hook_runner)),
-    powerMonitor_(std::move(power_monitor)), itmRunner_(std::move(itm_runner)),
-    signatureVerifier_([&io](const IstPlatformConfig& cfg,
-                             std::move_only_function<void(bool) const> cb) {
+    hook_runner_(std::move(hook_runner)),
+    power_monitor_(std::move(power_monitor)),
+    itm_runner_(std::move(itm_runner)),
+    signature_verifier_([&io](const IstPlatformConfig& cfg,
+                              std::move_only_function<void(bool) const> cb) {
         verifyItmSignaturesAsync(io, cfg, std::move(cb));
     }),
-    vectorManager_(VectorManager::create(io, *publisher_, platformCfg_)),
-    reSignalTimer_(io)
+    vector_manager_(VectorManager::create(io, *publisher_, platform_cfg_)),
+    re_signal_timer_(io)
 {}
 
 IstService::~IstService()
@@ -120,17 +121,17 @@ IstService::~IstService()
 
 void IstService::setSignatureVerifier(SignatureVerifier fn)
 {
-    signatureVerifier_ = std::move(fn);
+    signature_verifier_ = std::move(fn);
 }
 
 void IstService::setCpuDiscoverer(CpuDiscoverer fn)
 {
-    cpuDiscoverer_ = std::move(fn);
+    cpu_discoverer_ = std::move(fn);
 }
 
 void IstService::setResultsFdCallback(ResultsFdCb cb)
 {
-    resultsFdCb_ = std::move(cb);
+    results_fd_cb_ = std::move(cb);
 }
 
 // ----------------
@@ -144,7 +145,7 @@ void IstService::updateDbusState()
 
 void IstService::transitionTo(IstStage stage)
 {
-    reSignalTimer_.cancel();
+    re_signal_timer_.cancel();
     state_.stage = stage;
     updateDbusState();
 }
@@ -152,7 +153,7 @@ void IstService::transitionTo(IstStage stage)
 void IstService::transitionTo(IstStage stage, IstStatus status,
                               std::string_view error_info)
 {
-    reSignalTimer_.cancel();
+    re_signal_timer_.cancel();
     state_.stage = stage;
     state_.status = status;
     if (stage == IstStage::idle)
@@ -168,46 +169,46 @@ void IstService::transitionTo(IstStage stage, IstStatus status,
 
 void IstService::installServiceLogTee()
 {
-    if (origCoutBuf_)
+    if (orig_cout_buf_)
     {
         return;
     }
 
     fs::path log_path =
-        platformCfg_.storage.resultStoragePath / "IST_service.log";
+        platform_cfg_.storage.resultStoragePath / "IST_service.log";
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg)
-    serviceLogFd_ = UniqueFd(::open(
+    service_log_fd_ = UniqueFd(::open(
         log_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644));
-    if (serviceLogFd_.get() < 0)
+    if (service_log_fd_.get() < 0)
     {
         std::cerr << "Failed to open service log '" << log_path
                   << "': errno=" << errno << '\n';
         return;
     }
 
-    coutTee_ =
-        std::make_unique<TeeStreambuf>(std::cout.rdbuf(), serviceLogFd_.get());
-    cerrTee_ =
-        std::make_unique<TeeStreambuf>(std::cerr.rdbuf(), serviceLogFd_.get());
-    origCoutBuf_ = std::cout.rdbuf(coutTee_.get());
-    origCerrBuf_ = std::cerr.rdbuf(cerrTee_.get());
+    cout_tee_ = std::make_unique<TeeStreambuf>(std::cout.rdbuf(),
+                                               service_log_fd_.get());
+    cerr_tee_ = std::make_unique<TeeStreambuf>(std::cerr.rdbuf(),
+                                               service_log_fd_.get());
+    orig_cout_buf_ = std::cout.rdbuf(cout_tee_.get());
+    orig_cerr_buf_ = std::cerr.rdbuf(cerr_tee_.get());
 }
 
 void IstService::removeServiceLogTee()
 {
-    if (origCoutBuf_)
+    if (orig_cout_buf_)
     {
-        std::cout.rdbuf(origCoutBuf_);
-        origCoutBuf_ = nullptr;
+        std::cout.rdbuf(orig_cout_buf_);
+        orig_cout_buf_ = nullptr;
     }
-    if (origCerrBuf_)
+    if (orig_cerr_buf_)
     {
-        std::cerr.rdbuf(origCerrBuf_);
-        origCerrBuf_ = nullptr;
+        std::cerr.rdbuf(orig_cerr_buf_);
+        orig_cerr_buf_ = nullptr;
     }
-    coutTee_.reset();
-    cerrTee_.reset();
-    serviceLogFd_ = UniqueFd();
+    cout_tee_.reset();
+    cerr_tee_.reset();
+    service_log_fd_ = UniqueFd();
 }
 
 // ----------------
@@ -343,23 +344,23 @@ bool parsePlatformConfig(IstPlatformConfig& out, const std::string& path,
 
 void IstService::printIstPlatformConfig() const
 {
-    std::cout << "istHookPath:    " << platformCfg_.hookDir << '\n';
-    std::cout << "itmBinaryPath:  " << platformCfg_.itmBinaryPath << '\n';
-    std::cout << "itmLibDir:      " << platformCfg_.itmLibDir << '\n';
+    std::cout << "istHookPath:    " << platform_cfg_.hookDir << '\n';
+    std::cout << "itmBinaryPath:  " << platform_cfg_.itmBinaryPath << '\n';
+    std::cout << "itmLibDir:      " << platform_cfg_.itmLibDir << '\n';
     std::cout << "hooks:\n";
-    std::cout << "  istBootAssert = " << platformCfg_.hooks.istBootAssert
+    std::cout << "  istBootAssert = " << platform_cfg_.hooks.istBootAssert
               << '\n';
-    std::cout << "  istBootDeassert = " << platformCfg_.hooks.istBootDeassert
+    std::cout << "  istBootDeassert = " << platform_cfg_.hooks.istBootDeassert
               << '\n';
-    std::cout << "  resetSystem = " << platformCfg_.hooks.resetSystem << '\n';
-    std::cout << "  errorCheck = " << platformCfg_.hooks.errorCheck << '\n';
+    std::cout << "  resetSystem = " << platform_cfg_.hooks.resetSystem << '\n';
+    std::cout << "  errorCheck = " << platform_cfg_.hooks.errorCheck << '\n';
     std::cout << "storage:\n";
-    std::cout << "  vectorMountPath = " << platformCfg_.storage.vectorMountPath
+    std::cout << "  vectorMountPath = " << platform_cfg_.storage.vectorMountPath
               << '\n';
     std::cout << "  vectorStoragePath = "
-              << platformCfg_.storage.vectorStoragePath << '\n';
+              << platform_cfg_.storage.vectorStoragePath << '\n';
     std::cout << "  resultStoragePath = "
-              << platformCfg_.storage.resultStoragePath << '\n';
+              << platform_cfg_.storage.resultStoragePath << '\n';
 }
 
 bool IstService::initialize(IstPlatformConfig cfg)
@@ -370,26 +371,26 @@ bool IstService::initialize(IstPlatformConfig cfg)
         return false;
     }
 
-    platformCfg_ = std::move(cfg);
+    platform_cfg_ = std::move(cfg);
     printIstPlatformConfig();
 
     // Deassert IST boot on startup as a safety measure (e.g. after crash)
-    const fs::path& hook_cmd = platformCfg_.hooks.istBootDeassert;
+    const fs::path& hook_cmd = platform_cfg_.hooks.istBootDeassert;
     if (!hook_cmd.empty())
     {
-        hookRunner_->asyncRun(hook_cmd, "istBootDeassert on startup",
-                              [](bool ok) {
-                                  if (!ok)
-                                  {
-                                      std::cerr << "istBootDeassert on startup "
-                                                   "failed (non-fatal)\n";
-                                  }
-                              });
+        hook_runner_->asyncRun(
+            hook_cmd, "istBootDeassert on startup", [](bool ok) {
+                if (!ok)
+                {
+                    std::cerr << "istBootDeassert on startup "
+                                 "failed (non-fatal)\n";
+                }
+            });
     }
 
     initialized_ = true;
 
-    vectorManager_->mountVectorsOnStartup();
+    vector_manager_->mountVectorsOnStartup();
     return true;
 }
 
@@ -516,16 +517,16 @@ bool IstService::getISTParams(const ParamMap& test_params)
 
 bool IstService::collateralVerification()
 {
-    if (platformCfg_.storage.vectorMountPath.empty())
+    if (platform_cfg_.storage.vectorMountPath.empty())
     {
         std::cerr << "vectorMountPath not configured in platform config!\n";
         return false;
     }
     std::error_code fs_ec;
-    if (!fs::exists(platformCfg_.storage.vectorMountPath, fs_ec) || fs_ec)
+    if (!fs::exists(platform_cfg_.storage.vectorMountPath, fs_ec) || fs_ec)
     {
         std::cerr << "Vector storage path '"
-                  << platformCfg_.storage.vectorMountPath
+                  << platform_cfg_.storage.vectorMountPath
                   << "' does not exist or is inaccessible";
         if (fs_ec)
         {
@@ -535,21 +536,21 @@ bool IstService::collateralVerification()
         return false;
     }
 
-    resolveItmPaths(platformCfg_);
+    resolveItmPaths(platform_cfg_);
 
-    if (!fs::exists(platformCfg_.itmBinaryPath, fs_ec) || fs_ec)
+    if (!fs::exists(platform_cfg_.itmBinaryPath, fs_ec) || fs_ec)
     {
-        std::cerr << "IST binary '" << platformCfg_.itmBinaryPath
+        std::cerr << "IST binary '" << platform_cfg_.itmBinaryPath
                   << "' not found; test vectors may not be mounted\n";
         return false;
     }
 
-    fs::path golden_res = platformCfg_.storage.vectorMountPath / "GOLDEN_RES";
+    fs::path golden_res = platform_cfg_.storage.vectorMountPath / "GOLDEN_RES";
     if (!fs::exists(golden_res, fs_ec) || fs_ec ||
         fs::is_empty(golden_res, fs_ec) || fs_ec)
     {
         std::cerr << "GOLDEN_RES not found or empty under '"
-                  << platformCfg_.storage.vectorMountPath
+                  << platform_cfg_.storage.vectorMountPath
                   << "'; test vectors may not be mounted\n";
         return false;
     }
@@ -559,13 +560,13 @@ bool IstService::collateralVerification()
 
 bool IstService::prepareResultStorage()
 {
-    if (platformCfg_.storage.resultStoragePath.empty())
+    if (platform_cfg_.storage.resultStoragePath.empty())
     {
         std::cerr << "resultStoragePath not configured in platform config!\n";
         return false;
     }
     std::error_code fs_ec;
-    fs::create_directories(platformCfg_.storage.resultStoragePath, fs_ec);
+    fs::create_directories(platform_cfg_.storage.resultStoragePath, fs_ec);
     if (fs_ec)
     {
         std::cerr << "Failed to create results directory: " << fs_ec.message()
@@ -623,8 +624,8 @@ void IstService::onIstBootAssertDone(bool ok)
     // after it receives the StartIST method reply, so there is a window
     // where the initial signal from transitionTo() is missed.
     // signal_property() forces a new emission of the current value.
-    reSignalTimer_.expires_after(std::chrono::seconds(2));
-    reSignalTimer_.async_wait(
+    re_signal_timer_.expires_after(std::chrono::seconds(2));
+    re_signal_timer_.async_wait(
         [self = shared_from_this()](const boost::system::error_code& ec) {
             if (ec)
             {
@@ -633,7 +634,7 @@ void IstService::onIstBootAssertDone(bool ok)
             self->publisher_->reSignalStage();
         });
 
-    powerMonitor_->asyncWaitForPowerCycle(
+    power_monitor_->asyncWaitForPowerCycle(
         [self = shared_from_this()](bool ok_power) {
             self->onPowerCycleDone(ok_power);
         });
@@ -644,7 +645,7 @@ void IstService::onPowerCycleDone(bool ok)
     if (!ok)
     {
         std::cerr << "Unable to detect power cycle, running cleanup\n";
-        failureInfo_.emplace_back("category=POWER_CYCLE, reason=not_detected");
+        failure_info_.emplace_back("category=POWER_CYCLE, reason=not_detected");
         runIstCleanup(-1);
         return;
     }
@@ -652,27 +653,27 @@ void IstService::onPowerCycleDone(bool ok)
     transitionTo(IstStage::runningIst);
 
     std::filesystem::path cak_script =
-        platformCfg_.hookDir / "ist_cak_bypass.sh";
+        platform_cfg_.hookDir / "ist_cak_bypass.sh";
     std::error_code ec;
     if (std::filesystem::exists(cak_script, ec) && !ec)
     {
-        if (!is_path_within(cak_script, platformCfg_.hookDir))
+        if (!is_path_within(cak_script, platform_cfg_.hookDir))
         {
             std::cerr << "CAK bypass script '" << cak_script.string()
                       << "' resolves outside hookDirectory '"
-                      << platformCfg_.hookDir.string() << "'\n";
-            failureInfo_.emplace_back(
+                      << platform_cfg_.hookDir.string() << "'\n";
+            failure_info_.emplace_back(
                 "category=SECURITY, reason=cak_bypass_path_escape");
             runIstCleanup(-1);
             return;
         }
-        hookRunner_->asyncRun(
+        hook_runner_->asyncRun(
             cak_script, "CAK bypass",
             [self = shared_from_this()](bool ok_cak) {
                 if (!ok_cak)
                 {
                     std::cerr << "CAK bypass hook failed, aborting IST\n";
-                    self->failureInfo_.emplace_back(
+                    self->failure_info_.emplace_back(
                         "category=HOOK, reason=cak_bypass_failed");
                     self->runIstCleanup(-1);
                     return;
@@ -690,22 +691,22 @@ void IstService::startItmRun()
 {
     transitionTo(IstStage::runningIst);
 
-    itmRunner_->asyncRun(
-        test_, platformCfg_,
+    itm_runner_->asyncRun(
+        test_, platform_cfg_,
         [self = shared_from_this()](int itm_exit) {
             if (itm_exit > 0)
             {
-                self->failureInfo_.emplace_back("category=ITM, exit_code=" +
-                                                std::to_string(itm_exit));
+                self->failure_info_.emplace_back("category=ITM, exit_code=" +
+                                                 std::to_string(itm_exit));
             }
             else if (itm_exit == itm_exit_sw_timeout)
             {
-                self->failureInfo_.emplace_back(
+                self->failure_info_.emplace_back(
                     "category=ITM, reason=sw_timeout");
             }
             else if (itm_exit < 0)
             {
-                self->failureInfo_.emplace_back(
+                self->failure_info_.emplace_back(
                     "category=ITM, reason=process_error");
             }
             self->runIstCleanup(itm_exit);
@@ -727,14 +728,14 @@ void IstService::runIstCleanup(int itm_exit)
         std::cerr << "Failed to execute IST (code=" << itm_exit << ")\n";
     }
     emitIstEventLog(itm_exit);
-    for (const auto& info : failureInfo_)
+    for (const auto& info : failure_info_)
     {
         std::cerr << "IST_ERROR: " << info << '\n';
     }
-    failureInfo_.clear();
+    failure_info_.clear();
     transitionTo(IstStage::cleanup);
 
-    fs::path results_dir = platformCfg_.storage.resultStoragePath;
+    fs::path results_dir = platform_cfg_.storage.resultStoragePath;
     archiveResultsAsync(io_, results_dir,
                         [weak = weak_from_this(), itm_exit](bool ok) {
                             if (!ok)
@@ -750,8 +751,8 @@ void IstService::runIstCleanup(int itm_exit)
 
 void IstService::onArchiveDone(int itm_exit)
 {
-    const fs::path& hook_cmd = platformCfg_.hooks.istBootDeassert;
-    hookRunner_->asyncRun(
+    const fs::path& hook_cmd = platform_cfg_.hooks.istBootDeassert;
+    hook_runner_->asyncRun(
         hook_cmd, "istBootDeassert hook",
         [self = shared_from_this(), itm_exit](bool ok_deassert) {
             self->onDeassertDone(itm_exit, ok_deassert);
@@ -827,7 +828,7 @@ void IstService::onDeassertDone(int itm_exit, bool ok_deassert)
 
     if (test_.autoRebootOnComplete)
     {
-        const fs::path& reset_cmd = platformCfg_.hooks.resetSystem;
+        const fs::path& reset_cmd = platform_cfg_.hooks.resetSystem;
         if (reset_cmd.empty())
         {
             std::cerr << "resetSystem hook not found, failing cleanup\n";
@@ -835,7 +836,7 @@ void IstService::onDeassertDone(int itm_exit, bool ok_deassert)
                          "category=HOOK, reason=reset_system_not_found");
             return;
         }
-        hookRunner_->asyncRun(
+        hook_runner_->asyncRun(
             reset_cmd, "resetSystem hook",
             [self = shared_from_this(), itm_exit](bool ok_reset) {
                 self->onResetDone(itm_exit, ok_reset);
@@ -874,14 +875,14 @@ std::string IstService::startIST(const ParamMap& test_params)
         std::cerr << "Another IST run is in progress\n";
         throw sdbusplus::exception::SdBusError(EBUSY, "IST already running");
     }
-    if (vectorManager_->inProgress())
+    if (vector_manager_->inProgress())
     {
         std::cerr << "Cannot start IST while update is in progress\n";
         throw sdbusplus::exception::SdBusError(
             EBUSY, "Cannot start IST while update is in progress");
     }
 
-    vectorManager_->ensureMounted();
+    vector_manager_->ensureMounted();
 
     transitionTo(IstStage::collateralVerification, IstStatus::inProgress);
 
@@ -906,7 +907,7 @@ std::string IstService::startIST(const ParamMap& test_params)
         throw ist_err::InternalFailure{};
     }
 
-    const fs::path& hook_cmd = platformCfg_.hooks.istBootAssert;
+    const fs::path& hook_cmd = platform_cfg_.hooks.istBootAssert;
     if (hook_cmd.empty())
     {
         transitionTo(IstStage::idle, IstStatus::failed,
@@ -914,7 +915,7 @@ std::string IstService::startIST(const ParamMap& test_params)
         throw ist_err::InternalFailure{};
     }
 
-    const fs::path& deassert_cmd = platformCfg_.hooks.istBootDeassert;
+    const fs::path& deassert_cmd = platform_cfg_.hooks.istBootDeassert;
     if (deassert_cmd.empty())
     {
         transitionTo(IstStage::idle, IstStatus::failed,
@@ -922,15 +923,15 @@ std::string IstService::startIST(const ParamMap& test_params)
         throw ist_err::InternalFailure{};
     }
 
-    currentRunPath_ =
-        "/com/nvidia/vera/ist/runs/" + std::to_string(runCounter_++);
-    publisher_->createRunObject(currentRunPath_, resultsFdCb_);
+    current_run_path_ =
+        "/com/nvidia/vera/ist/runs/" + std::to_string(run_counter_++);
+    publisher_->createRunObject(current_run_path_, results_fd_cb_);
 
     state_.progress = 0;
 
     std::error_code ec;
     for (const auto& entry :
-         fs::directory_iterator(platformCfg_.storage.resultStoragePath, ec))
+         fs::directory_iterator(platform_cfg_.storage.resultStoragePath, ec))
     {
         std::error_code rm_ec;
         fs::remove_all(entry.path(), rm_ec);
@@ -943,11 +944,11 @@ std::string IstService::startIST(const ParamMap& test_params)
 
     installServiceLogTee();
 
-    signatureVerifier_(platformCfg_, [self = shared_from_this()](bool ok) {
+    signature_verifier_(platform_cfg_, [self = shared_from_this()](bool ok) {
         self->onSignatureVerifyDone(ok);
     });
 
-    return currentRunPath_;
+    return current_run_path_;
 }
 
 void IstService::onSignatureVerifyDone(bool ok)
@@ -968,7 +969,7 @@ void IstService::onSignatureVerifyDone(bool ok)
         return;
     }
 
-    if (!cpuDiscoverer_)
+    if (!cpu_discoverer_)
     {
         std::cout << "No CPU discoverer configured, skipping discovery\n";
         launchBootAssert();
@@ -976,7 +977,7 @@ void IstService::onSignatureVerifyDone(bool ok)
     }
 
     std::cout << "Starting CPU discovery via Entity Manager\n";
-    cpuDiscoverer_(
+    cpu_discoverer_(
         [self = shared_from_this()](const std::vector<std::string>& cpu_paths) {
             self->onCpuDiscoveryDone(cpu_paths);
         });
@@ -1062,9 +1063,9 @@ void IstService::launchBootAssert()
 {
     transitionTo(IstStage::pendingIstBoot);
 
-    const fs::path& hook_cmd = platformCfg_.hooks.istBootAssert;
-    hookRunner_->asyncRun(hook_cmd, "istBootAssert hook",
-                          [self = shared_from_this()](bool hook_ok) {
-                              self->onIstBootAssertDone(hook_ok);
-                          });
+    const fs::path& hook_cmd = platform_cfg_.hooks.istBootAssert;
+    hook_runner_->asyncRun(hook_cmd, "istBootAssert hook",
+                           [self = shared_from_this()](bool hook_ok) {
+                               self->onIstBootAssertDone(hook_ok);
+                           });
 }

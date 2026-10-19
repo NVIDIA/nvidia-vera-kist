@@ -275,45 +275,45 @@ class IstServiceTest : public ::testing::Test
     void SetUp() override
     {
         // Create unique temp directory
-        tmpDir_ = fs::temp_directory_path() /
-                  ("ist_test_" + std::to_string(getpid()) + "_" +
-                   std::to_string(counter++));
-        fs::create_directories(tmpDir_ / "vectors" / "GOLDEN_RES");
-        fs::create_directories(tmpDir_ / "storage");
-        fs::create_directories(tmpDir_ / "results");
-        fs::create_directories(tmpDir_ / "hooks");
+        tmp_dir_ = fs::temp_directory_path() /
+                   ("ist_test_" + std::to_string(getpid()) + "_" +
+                    std::to_string(counter++));
+        fs::create_directories(tmp_dir_ / "vectors" / "GOLDEN_RES");
+        fs::create_directories(tmp_dir_ / "storage");
+        fs::create_directories(tmp_dir_ / "results");
+        fs::create_directories(tmp_dir_ / "hooks");
 
         // Create expected collateral so startIST() passes verification
-        std::ofstream itm_stub(tmpDir_ / "vectors" / "kist_itm");
-        std::ofstream golden_stub(tmpDir_ / "vectors" / "GOLDEN_RES" /
+        std::ofstream itm_stub(tmp_dir_ / "vectors" / "kist_itm");
+        std::ofstream golden_stub(tmp_dir_ / "vectors" / "GOLDEN_RES" /
                                   "placeholder");
 
         // Create hook files so canonical() can resolve them
         for (const auto& name : {"assert.sh", "deassert.sh", "reset.sh"})
         {
-            std::ofstream(tmpDir_ / "hooks" / name);
+            std::ofstream(tmp_dir_ / "hooks" / name);
         }
 
         // Write a valid platform config
-        configPath_ = (tmpDir_ / "platform_cfg.json").string();
+        config_path_ = (tmp_dir_ / "platform_cfg.json").string();
         write_config(R"({
             "hookDirectory": ")" +
-                     (tmpDir_ / "hooks").string() + R"(",
+                     (tmp_dir_ / "hooks").string() + R"(",
             "hookPaths": {
                 "istBootAssert": ")" +
-                     (tmpDir_ / "hooks/assert.sh").string() + R"(",
+                     (tmp_dir_ / "hooks/assert.sh").string() + R"(",
                 "istBootDeassert": ")" +
-                     (tmpDir_ / "hooks/deassert.sh").string() + R"(",
+                     (tmp_dir_ / "hooks/deassert.sh").string() + R"(",
                 "resetSystem": ")" +
-                     (tmpDir_ / "hooks/reset.sh").string() + R"("
+                     (tmp_dir_ / "hooks/reset.sh").string() + R"("
             },
             "storageConfig": {
                 "vectorMountPath": ")" +
-                     (tmpDir_ / "vectors").string() + R"(",
+                     (tmp_dir_ / "vectors").string() + R"(",
                 "vectorStoragePath": ")" +
-                     (tmpDir_ / "storage").string() + R"(",
+                     (tmp_dir_ / "storage").string() + R"(",
                 "resultStoragePath": ")" +
-                     (tmpDir_ / "results").string() + R"("
+                     (tmp_dir_ / "results").string() + R"("
             },
             "softwareInventoryId": "IST_Vectors"
         })");
@@ -329,9 +329,9 @@ class IstServiceTest : public ::testing::Test
         auto itm_runner = std::make_unique<NiceMock<MockItmRunner>>();
 
         publisher_ = publisher.get();
-        hookRunner_ = hook_runner.get();
-        powerMonitor_ = power_monitor.get();
-        itmRunner_ = itm_runner.get();
+        hook_runner_ = hook_runner.get();
+        power_monitor_ = power_monitor.get();
+        itm_runner_ = itm_runner.get();
 
         service_ = IstService::create(
             io_, std::move(publisher), std::move(hook_runner),
@@ -341,7 +341,7 @@ class IstServiceTest : public ::testing::Test
     bool init_from_file(const std::string& path)
     {
         IstPlatformConfig cfg;
-        if (!parsePlatformConfig(cfg, path, (tmpDir_ / "hooks").string()))
+        if (!parsePlatformConfig(cfg, path, (tmp_dir_ / "hooks").string()))
         {
             return false;
         }
@@ -352,26 +352,26 @@ class IstServiceTest : public ::testing::Test
 
     void write_config(const std::string& content)
     {
-        std::ofstream f(configPath_);
+        std::ofstream f(config_path_);
         f << content;
     }
 
     void TearDown() override
     {
         service_.reset();
-        fs::remove_all(tmpDir_);
+        fs::remove_all(tmp_dir_);
     }
 
     boost::asio::io_context io_;
     std::shared_ptr<IstService> service_;
 
     MockStatePublisher* publisher_ = nullptr;
-    MockHookRunner* hookRunner_ = nullptr;
-    MockHostPowerMonitor* powerMonitor_ = nullptr;
-    MockItmRunner* itmRunner_ = nullptr;
+    MockHookRunner* hook_runner_ = nullptr;
+    MockHostPowerMonitor* power_monitor_ = nullptr;
+    MockItmRunner* itm_runner_ = nullptr;
 
-    fs::path tmpDir_;
-    std::string configPath_;
+    fs::path tmp_dir_;
+    std::string config_path_;
 
     std::string start_ist(const ParamMap& params = {})
     {
@@ -402,7 +402,7 @@ class IstServiceTest : public ::testing::Test
 
 TEST_F(IstServiceTest, InitializeValidConfig)
 {
-    EXPECT_TRUE(init_from_file(configPath_));
+    EXPECT_TRUE(init_from_file(config_path_));
 }
 
 TEST_F(IstServiceTest, InitializeInvalidPath)
@@ -413,70 +413,70 @@ TEST_F(IstServiceTest, InitializeInvalidPath)
 TEST_F(IstServiceTest, InitializeMalformedJson)
 {
     write_config("not valid json {{{");
-    EXPECT_FALSE(init_from_file(configPath_));
+    EXPECT_FALSE(init_from_file(config_path_));
 }
 
 TEST_F(IstServiceTest, InitializeMissingHookDirectory)
 {
     write_config(R"({ "storageConfig": {} })");
-    EXPECT_FALSE(init_from_file(configPath_));
+    EXPECT_FALSE(init_from_file(config_path_));
 }
 
 TEST_F(IstServiceTest, InitializeRejectsDoubleInit)
 {
-    EXPECT_TRUE(init_from_file(configPath_));
-    EXPECT_FALSE(init_from_file(configPath_));
+    EXPECT_TRUE(init_from_file(config_path_));
+    EXPECT_FALSE(init_from_file(config_path_));
 }
 
 TEST_F(IstServiceTest, SoftwareInventoryIdMissingFails)
 {
     write_config(R"({
         "hookDirectory": ")" +
-                 (tmpDir_ / "hooks").string() + R"(",
+                 (tmp_dir_ / "hooks").string() + R"(",
         "hookPaths": {
             "istBootAssert": ")" +
-                 (tmpDir_ / "hooks/assert.sh").string() + R"(",
+                 (tmp_dir_ / "hooks/assert.sh").string() + R"(",
             "istBootDeassert": ")" +
-                 (tmpDir_ / "hooks/deassert.sh").string() + R"(",
+                 (tmp_dir_ / "hooks/deassert.sh").string() + R"(",
             "resetSystem": ")" +
-                 (tmpDir_ / "hooks/reset.sh").string() + R"("
+                 (tmp_dir_ / "hooks/reset.sh").string() + R"("
         },
         "storageConfig": {
             "vectorMountPath": ")" +
-                 (tmpDir_ / "vectors").string() + R"(",
+                 (tmp_dir_ / "vectors").string() + R"(",
             "vectorStoragePath": ")" +
-                 (tmpDir_ / "storage").string() + R"(",
+                 (tmp_dir_ / "storage").string() + R"(",
             "resultStoragePath": ")" +
-                 (tmpDir_ / "results").string() + R"("
+                 (tmp_dir_ / "results").string() + R"("
         }
     })");
-    EXPECT_FALSE(init_from_file(configPath_));
+    EXPECT_FALSE(init_from_file(config_path_));
 }
 
 TEST_F(IstServiceTest, SoftwareInventoryIdCustomValue)
 {
     write_config(R"({
         "hookDirectory": ")" +
-                 (tmpDir_ / "hooks").string() + R"(",
+                 (tmp_dir_ / "hooks").string() + R"(",
         "hookPaths": {
             "istBootAssert": ")" +
-                 (tmpDir_ / "hooks/assert.sh").string() + R"(",
+                 (tmp_dir_ / "hooks/assert.sh").string() + R"(",
             "istBootDeassert": ")" +
-                 (tmpDir_ / "hooks/deassert.sh").string() + R"(",
+                 (tmp_dir_ / "hooks/deassert.sh").string() + R"(",
             "resetSystem": ")" +
-                 (tmpDir_ / "hooks/reset.sh").string() + R"("
+                 (tmp_dir_ / "hooks/reset.sh").string() + R"("
         },
         "storageConfig": {
             "vectorMountPath": ")" +
-                 (tmpDir_ / "vectors").string() + R"(",
+                 (tmp_dir_ / "vectors").string() + R"(",
             "vectorStoragePath": ")" +
-                 (tmpDir_ / "storage").string() + R"(",
+                 (tmp_dir_ / "storage").string() + R"(",
             "resultStoragePath": ")" +
-                 (tmpDir_ / "results").string() + R"("
+                 (tmp_dir_ / "results").string() + R"("
         },
         "softwareInventoryId": "Custom_Vectors"
     })");
-    EXPECT_TRUE(init_from_file(configPath_));
+    EXPECT_TRUE(init_from_file(config_path_));
     EXPECT_EQ(service_->softwareInventoryId(), "Custom_Vectors");
 }
 
@@ -484,156 +484,156 @@ TEST_F(IstServiceTest, SoftwareInventoryIdRejectsInvalidChars)
 {
     write_config(R"({
         "hookDirectory": ")" +
-                 (tmpDir_ / "hooks").string() + R"(",
+                 (tmp_dir_ / "hooks").string() + R"(",
         "hookPaths": {
             "istBootAssert": ")" +
-                 (tmpDir_ / "hooks/assert.sh").string() + R"(",
+                 (tmp_dir_ / "hooks/assert.sh").string() + R"(",
             "istBootDeassert": ")" +
-                 (tmpDir_ / "hooks/deassert.sh").string() + R"(",
+                 (tmp_dir_ / "hooks/deassert.sh").string() + R"(",
             "resetSystem": ")" +
-                 (tmpDir_ / "hooks/reset.sh").string() + R"("
+                 (tmp_dir_ / "hooks/reset.sh").string() + R"("
         },
         "storageConfig": {
             "vectorMountPath": ")" +
-                 (tmpDir_ / "vectors").string() + R"(",
+                 (tmp_dir_ / "vectors").string() + R"(",
             "vectorStoragePath": ")" +
-                 (tmpDir_ / "storage").string() + R"(",
+                 (tmp_dir_ / "storage").string() + R"(",
             "resultStoragePath": ")" +
-                 (tmpDir_ / "results").string() + R"("
+                 (tmp_dir_ / "results").string() + R"("
         },
         "softwareInventoryId": "bad/path"
     })");
-    EXPECT_FALSE(init_from_file(configPath_));
+    EXPECT_FALSE(init_from_file(config_path_));
 }
 
 TEST_F(IstServiceTest, SoftwareInventoryIdRejectsDash)
 {
     write_config(R"({
         "hookDirectory": ")" +
-                 (tmpDir_ / "hooks").string() + R"(",
+                 (tmp_dir_ / "hooks").string() + R"(",
         "hookPaths": {
             "istBootAssert": ")" +
-                 (tmpDir_ / "hooks/assert.sh").string() + R"(",
+                 (tmp_dir_ / "hooks/assert.sh").string() + R"(",
             "istBootDeassert": ")" +
-                 (tmpDir_ / "hooks/deassert.sh").string() + R"(",
+                 (tmp_dir_ / "hooks/deassert.sh").string() + R"(",
             "resetSystem": ")" +
-                 (tmpDir_ / "hooks/reset.sh").string() + R"("
+                 (tmp_dir_ / "hooks/reset.sh").string() + R"("
         },
         "storageConfig": {
             "vectorMountPath": ")" +
-                 (tmpDir_ / "vectors").string() + R"(",
+                 (tmp_dir_ / "vectors").string() + R"(",
             "vectorStoragePath": ")" +
-                 (tmpDir_ / "storage").string() + R"(",
+                 (tmp_dir_ / "storage").string() + R"(",
             "resultStoragePath": ")" +
-                 (tmpDir_ / "results").string() + R"("
+                 (tmp_dir_ / "results").string() + R"("
         },
         "softwareInventoryId": "bad-id"
     })");
-    EXPECT_FALSE(init_from_file(configPath_));
+    EXPECT_FALSE(init_from_file(config_path_));
 }
 
 TEST_F(IstServiceTest, SoftwareInventoryIdRejectsSpace)
 {
     write_config(R"({
         "hookDirectory": ")" +
-                 (tmpDir_ / "hooks").string() + R"(",
+                 (tmp_dir_ / "hooks").string() + R"(",
         "hookPaths": {
             "istBootAssert": ")" +
-                 (tmpDir_ / "hooks/assert.sh").string() + R"(",
+                 (tmp_dir_ / "hooks/assert.sh").string() + R"(",
             "istBootDeassert": ")" +
-                 (tmpDir_ / "hooks/deassert.sh").string() + R"(",
+                 (tmp_dir_ / "hooks/deassert.sh").string() + R"(",
             "resetSystem": ")" +
-                 (tmpDir_ / "hooks/reset.sh").string() + R"("
+                 (tmp_dir_ / "hooks/reset.sh").string() + R"("
         },
         "storageConfig": {
             "vectorMountPath": ")" +
-                 (tmpDir_ / "vectors").string() + R"(",
+                 (tmp_dir_ / "vectors").string() + R"(",
             "vectorStoragePath": ")" +
-                 (tmpDir_ / "storage").string() + R"(",
+                 (tmp_dir_ / "storage").string() + R"(",
             "resultStoragePath": ")" +
-                 (tmpDir_ / "results").string() + R"("
+                 (tmp_dir_ / "results").string() + R"("
         },
         "softwareInventoryId": "bad id"
     })");
-    EXPECT_FALSE(init_from_file(configPath_));
+    EXPECT_FALSE(init_from_file(config_path_));
 }
 
 TEST_F(IstServiceTest, SoftwareInventoryIdRejectsDot)
 {
     write_config(R"({
         "hookDirectory": ")" +
-                 (tmpDir_ / "hooks").string() + R"(",
+                 (tmp_dir_ / "hooks").string() + R"(",
         "hookPaths": {
             "istBootAssert": ")" +
-                 (tmpDir_ / "hooks/assert.sh").string() + R"(",
+                 (tmp_dir_ / "hooks/assert.sh").string() + R"(",
             "istBootDeassert": ")" +
-                 (tmpDir_ / "hooks/deassert.sh").string() + R"(",
+                 (tmp_dir_ / "hooks/deassert.sh").string() + R"(",
             "resetSystem": ")" +
-                 (tmpDir_ / "hooks/reset.sh").string() + R"("
+                 (tmp_dir_ / "hooks/reset.sh").string() + R"("
         },
         "storageConfig": {
             "vectorMountPath": ")" +
-                 (tmpDir_ / "vectors").string() + R"(",
+                 (tmp_dir_ / "vectors").string() + R"(",
             "vectorStoragePath": ")" +
-                 (tmpDir_ / "storage").string() + R"(",
+                 (tmp_dir_ / "storage").string() + R"(",
             "resultStoragePath": ")" +
-                 (tmpDir_ / "results").string() + R"("
+                 (tmp_dir_ / "results").string() + R"("
         },
         "softwareInventoryId": "bad.id"
     })");
-    EXPECT_FALSE(init_from_file(configPath_));
+    EXPECT_FALSE(init_from_file(config_path_));
 }
 
 TEST_F(IstServiceTest, SoftwareInventoryIdRejectsEmpty)
 {
     write_config(R"({
         "hookDirectory": ")" +
-                 (tmpDir_ / "hooks").string() + R"(",
+                 (tmp_dir_ / "hooks").string() + R"(",
         "hookPaths": {
             "istBootAssert": ")" +
-                 (tmpDir_ / "hooks/assert.sh").string() + R"(",
+                 (tmp_dir_ / "hooks/assert.sh").string() + R"(",
             "istBootDeassert": ")" +
-                 (tmpDir_ / "hooks/deassert.sh").string() + R"(",
+                 (tmp_dir_ / "hooks/deassert.sh").string() + R"(",
             "resetSystem": ")" +
-                 (tmpDir_ / "hooks/reset.sh").string() + R"("
+                 (tmp_dir_ / "hooks/reset.sh").string() + R"("
         },
         "storageConfig": {
             "vectorMountPath": ")" +
-                 (tmpDir_ / "vectors").string() + R"(",
+                 (tmp_dir_ / "vectors").string() + R"(",
             "vectorStoragePath": ")" +
-                 (tmpDir_ / "storage").string() + R"(",
+                 (tmp_dir_ / "storage").string() + R"(",
             "resultStoragePath": ")" +
-                 (tmpDir_ / "results").string() + R"("
+                 (tmp_dir_ / "results").string() + R"("
         },
         "softwareInventoryId": ""
     })");
-    EXPECT_FALSE(init_from_file(configPath_));
+    EXPECT_FALSE(init_from_file(config_path_));
 }
 
 TEST_F(IstServiceTest, SoftwareInventoryIdAcceptsUnderscoresAndDigits)
 {
     write_config(R"({
         "hookDirectory": ")" +
-                 (tmpDir_ / "hooks").string() + R"(",
+                 (tmp_dir_ / "hooks").string() + R"(",
         "hookPaths": {
             "istBootAssert": ")" +
-                 (tmpDir_ / "hooks/assert.sh").string() + R"(",
+                 (tmp_dir_ / "hooks/assert.sh").string() + R"(",
             "istBootDeassert": ")" +
-                 (tmpDir_ / "hooks/deassert.sh").string() + R"(",
+                 (tmp_dir_ / "hooks/deassert.sh").string() + R"(",
             "resetSystem": ")" +
-                 (tmpDir_ / "hooks/reset.sh").string() + R"("
+                 (tmp_dir_ / "hooks/reset.sh").string() + R"("
         },
         "storageConfig": {
             "vectorMountPath": ")" +
-                 (tmpDir_ / "vectors").string() + R"(",
+                 (tmp_dir_ / "vectors").string() + R"(",
             "vectorStoragePath": ")" +
-                 (tmpDir_ / "storage").string() + R"(",
+                 (tmp_dir_ / "storage").string() + R"(",
             "resultStoragePath": ")" +
-                 (tmpDir_ / "results").string() + R"("
+                 (tmp_dir_ / "results").string() + R"("
         },
         "softwareInventoryId": "___123___"
     })");
-    EXPECT_TRUE(init_from_file(configPath_));
+    EXPECT_TRUE(init_from_file(config_path_));
     EXPECT_EQ(service_->softwareInventoryId(), "___123___");
 }
 
@@ -647,14 +647,14 @@ TEST_F(IstServiceTest, InitializeRejectsHookOutsideHookDir)
 {
     write_config(R"({
         "hookDirectory": ")" +
-                 (tmpDir_ / "hooks").string() + R"(",
+                 (tmp_dir_ / "hooks").string() + R"(",
         "hookPaths": {
             "istBootAssert": "/etc/shadow"
         },
         "storageConfig": {},
         "softwareInventoryId": "IST_Vectors"
     })");
-    EXPECT_FALSE(init_from_file(configPath_));
+    EXPECT_FALSE(init_from_file(config_path_));
 }
 
 // ----------------
@@ -663,7 +663,7 @@ TEST_F(IstServiceTest, InitializeRejectsHookOutsideHookDir)
 
 TEST_F(IstServiceTest, StartIstRejectsWhenInProgress)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     ParamMap params;
     std::string run_path = start_ist(params);
@@ -676,7 +676,7 @@ TEST_F(IstServiceTest, StartIstRejectsWhenInProgress)
 
 TEST_F(IstServiceTest, StartIstRejectsWhileUpdateInProgress)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
     int fd = begin_start_update();
 
     ParamMap params;
@@ -690,9 +690,9 @@ TEST_F(IstServiceTest, StartIstRejectsWhileUpdateInProgress)
 TEST_F(IstServiceTest, StartIstAbortsOnMissingVectorStorage)
 {
     // Remove the vectors directory so collateral verification fails
-    fs::remove_all(tmpDir_ / "vectors");
+    fs::remove_all(tmp_dir_ / "vectors");
 
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     ParamMap params;
     EXPECT_THROW(service_->startIST(params), ist_err::ResourceNotFound);
@@ -702,9 +702,9 @@ TEST_F(IstServiceTest, StartIstAbortsOnMissingVectorStorage)
 
 TEST_F(IstServiceTest, StartIstAbortsOnMissingItmBinary)
 {
-    fs::remove(tmpDir_ / "vectors" / "kist_itm");
+    fs::remove(tmp_dir_ / "vectors" / "kist_itm");
 
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     ParamMap params;
     EXPECT_THROW(service_->startIST(params), ist_err::ResourceNotFound);
@@ -714,9 +714,9 @@ TEST_F(IstServiceTest, StartIstAbortsOnMissingItmBinary)
 
 TEST_F(IstServiceTest, StartIstAbortsOnMissingGoldenRes)
 {
-    fs::remove_all(tmpDir_ / "vectors" / "GOLDEN_RES");
+    fs::remove_all(tmp_dir_ / "vectors" / "GOLDEN_RES");
 
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     ParamMap params;
     EXPECT_THROW(service_->startIST(params), ist_err::ResourceNotFound);
@@ -726,10 +726,10 @@ TEST_F(IstServiceTest, StartIstAbortsOnMissingGoldenRes)
 
 TEST_F(IstServiceTest, StartIstAbortsOnEmptyGoldenRes)
 {
-    fs::remove_all(tmpDir_ / "vectors" / "GOLDEN_RES");
-    fs::create_directories(tmpDir_ / "vectors" / "GOLDEN_RES");
+    fs::remove_all(tmp_dir_ / "vectors" / "GOLDEN_RES");
+    fs::create_directories(tmp_dir_ / "vectors" / "GOLDEN_RES");
 
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     ParamMap params;
     EXPECT_THROW(service_->startIST(params), ist_err::ResourceNotFound);
@@ -739,7 +739,7 @@ TEST_F(IstServiceTest, StartIstAbortsOnEmptyGoldenRes)
 
 TEST_F(IstServiceTest, StartIstAbortsOnUnknownParam)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     ParamMap params;
     params["unknownParam"] = std::string("value");
@@ -749,7 +749,7 @@ TEST_F(IstServiceTest, StartIstAbortsOnUnknownParam)
 
 TEST_F(IstServiceTest, StartIstAbortsOnOversizedParam)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     ParamMap params;
     params["customTestList"] = std::string(5000, 'A'); // exceeds 4096 limit
@@ -759,11 +759,11 @@ TEST_F(IstServiceTest, StartIstAbortsOnOversizedParam)
 
 TEST_F(IstServiceTest, StartIstCallsAssertHook)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     // Expect the istBootAssert hook to be called
     std::move_only_function<void(bool) const> assert_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -782,10 +782,10 @@ TEST_F(IstServiceTest, StartIstCallsAssertHook)
 
 TEST_F(IstServiceTest, AssertHookFailureTransitionsToFailed)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     std::move_only_function<void(bool) const> assert_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -804,10 +804,10 @@ TEST_F(IstServiceTest, AssertHookFailureTransitionsToFailed)
 
 TEST_F(IstServiceTest, AssertHookSuccessWaitsForPowerCycle)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     std::move_only_function<void(bool) const> assert_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -815,7 +815,7 @@ TEST_F(IstServiceTest, AssertHookSuccessWaitsForPowerCycle)
                       std::chrono::seconds) { assert_done = std::move(done); });
 
     std::move_only_function<void(bool) const> power_done;
-    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+    EXPECT_CALL(*power_monitor_, asyncWaitForPowerCycle(::testing::_))
         .WillOnce([&](DoneCb done) { power_done = std::move(done); });
 
     ParamMap params;
@@ -830,17 +830,17 @@ TEST_F(IstServiceTest, AssertHookSuccessWaitsForPowerCycle)
 
 TEST_F(IstServiceTest, PendingPowerCycleReSignalsStageAfterDelay)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     std::move_only_function<void(bool) const> assert_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
                       const std::vector<std::string>&,
                       std::chrono::seconds) { assert_done = std::move(done); });
 
-    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+    EXPECT_CALL(*power_monitor_, asyncWaitForPowerCycle(::testing::_))
         .WillOnce([](DoneCb) {});
 
     ParamMap params;
@@ -857,10 +857,10 @@ TEST_F(IstServiceTest, PendingPowerCycleReSignalsStageAfterDelay)
 
 TEST_F(IstServiceTest, ReSignalTimerCancelledOnAssertFailure)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     std::move_only_function<void(bool) const> assert_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -880,10 +880,10 @@ TEST_F(IstServiceTest, ReSignalTimerCancelledOnAssertFailure)
 
 TEST_F(IstServiceTest, PowerCycleFailureRunsDeassertThenFails)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     std::move_only_function<void(bool) const> assert_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -891,11 +891,11 @@ TEST_F(IstServiceTest, PowerCycleFailureRunsDeassertThenFails)
                       std::chrono::seconds) { assert_done = std::move(done); });
 
     std::move_only_function<void(bool) const> power_done;
-    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+    EXPECT_CALL(*power_monitor_, asyncWaitForPowerCycle(::testing::_))
         .WillOnce([&](DoneCb done) { power_done = std::move(done); });
 
     std::move_only_function<void(bool) const> deassert_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootDeassert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -923,10 +923,10 @@ TEST_F(IstServiceTest, PowerCycleFailureRunsDeassertThenFails)
 
 TEST_F(IstServiceTest, PowerCycleSuccessStartsItm)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     std::move_only_function<void(bool) const> assert_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -934,12 +934,12 @@ TEST_F(IstServiceTest, PowerCycleSuccessStartsItm)
                       std::chrono::seconds) { assert_done = std::move(done); });
 
     std::move_only_function<void(bool) const> power_done;
-    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+    EXPECT_CALL(*power_monitor_, asyncWaitForPowerCycle(::testing::_))
         .WillOnce([&](DoneCb done) { power_done = std::move(done); });
 
     ItmDoneCb itm_done;
-    EXPECT_CALL(*itmRunner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
-                                      ::testing::_))
+    EXPECT_CALL(*itm_runner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
+                                       ::testing::_))
         .WillOnce([&](const IstTestConfig&, const IstPlatformConfig&,
                       ItmDoneCb done,
                       ProgressCb) { itm_done = std::move(done); });
@@ -955,11 +955,11 @@ TEST_F(IstServiceTest, PowerCycleSuccessStartsItm)
 
 TEST_F(IstServiceTest, CakBypassScriptRunsWhenPresent)
 {
-    std::ofstream give_me_a_name(tmpDir_ / "hooks" / "ist_cak_bypass.sh");
-    init_from_file(configPath_);
+    std::ofstream give_me_a_name(tmp_dir_ / "hooks" / "ist_cak_bypass.sh");
+    init_from_file(config_path_);
 
     std::move_only_function<void(bool) const> assert_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -967,11 +967,11 @@ TEST_F(IstServiceTest, CakBypassScriptRunsWhenPresent)
                       std::chrono::seconds) { assert_done = std::move(done); });
 
     std::move_only_function<void(bool) const> power_done;
-    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+    EXPECT_CALL(*power_monitor_, asyncWaitForPowerCycle(::testing::_))
         .WillOnce([&](DoneCb done) { power_done = std::move(done); });
 
     std::move_only_function<void(bool) const> cak_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("CAK bypass"), ::testing::_,
                          ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -979,8 +979,8 @@ TEST_F(IstServiceTest, CakBypassScriptRunsWhenPresent)
                       std::chrono::seconds) { cak_done = std::move(done); });
 
     ItmDoneCb itm_done;
-    EXPECT_CALL(*itmRunner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
-                                      ::testing::_))
+    EXPECT_CALL(*itm_runner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
+                                       ::testing::_))
         .WillOnce([&](const IstTestConfig&, const IstPlatformConfig&,
                       ItmDoneCb done,
                       ProgressCb) { itm_done = std::move(done); });
@@ -1001,11 +1001,11 @@ TEST_F(IstServiceTest, CakBypassScriptRunsWhenPresent)
 
 TEST_F(IstServiceTest, CakBypassFailureAbortsIst)
 {
-    std::ofstream give_me_a_name(tmpDir_ / "hooks" / "ist_cak_bypass.sh");
-    init_from_file(configPath_);
+    std::ofstream give_me_a_name(tmp_dir_ / "hooks" / "ist_cak_bypass.sh");
+    init_from_file(config_path_);
 
     std::move_only_function<void(bool) const> assert_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -1013,23 +1013,23 @@ TEST_F(IstServiceTest, CakBypassFailureAbortsIst)
                       std::chrono::seconds) { assert_done = std::move(done); });
 
     std::move_only_function<void(bool) const> power_done;
-    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+    EXPECT_CALL(*power_monitor_, asyncWaitForPowerCycle(::testing::_))
         .WillOnce([&](DoneCb done) { power_done = std::move(done); });
 
     std::move_only_function<void(bool) const> cak_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("CAK bypass"), ::testing::_,
                          ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
                       const std::vector<std::string>&,
                       std::chrono::seconds) { cak_done = std::move(done); });
 
-    EXPECT_CALL(*itmRunner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
-                                      ::testing::_))
+    EXPECT_CALL(*itm_runner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
+                                       ::testing::_))
         .Times(0);
 
     std::move_only_function<void(bool) const> deassert_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootDeassert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -1058,10 +1058,10 @@ TEST_F(IstServiceTest, CakBypassFailureAbortsIst)
 
 TEST_F(IstServiceTest, CakBypassSkippedWhenScriptMissing)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     std::move_only_function<void(bool) const> assert_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -1069,17 +1069,17 @@ TEST_F(IstServiceTest, CakBypassSkippedWhenScriptMissing)
                       std::chrono::seconds) { assert_done = std::move(done); });
 
     std::move_only_function<void(bool) const> power_done;
-    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+    EXPECT_CALL(*power_monitor_, asyncWaitForPowerCycle(::testing::_))
         .WillOnce([&](DoneCb done) { power_done = std::move(done); });
 
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("CAK bypass"), ::testing::_,
                          ::testing::_, ::testing::_))
         .Times(0);
 
     ItmDoneCb itm_done;
-    EXPECT_CALL(*itmRunner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
-                                      ::testing::_))
+    EXPECT_CALL(*itm_runner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
+                                       ::testing::_))
         .WillOnce([&](const IstTestConfig&, const IstPlatformConfig&,
                       ItmDoneCb done,
                       ProgressCb) { itm_done = std::move(done); });
@@ -1095,21 +1095,21 @@ TEST_F(IstServiceTest, CakBypassSkippedWhenScriptMissing)
 
 TEST_F(IstServiceTest, AutoRebootPassesSkipCakToResetHook)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([](const std::string&, const std::string&, DoneCb done,
                      const std::vector<std::string>&,
                      std::chrono::seconds) { done(true); });
-    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+    EXPECT_CALL(*power_monitor_, asyncWaitForPowerCycle(::testing::_))
         .WillOnce([](DoneCb done) { done(true); });
-    EXPECT_CALL(*itmRunner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
-                                      ::testing::_))
+    EXPECT_CALL(*itm_runner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
+                                       ::testing::_))
         .WillOnce([](const IstTestConfig&, const IstPlatformConfig&,
                      ItmDoneCb done, ProgressCb) { done(0); });
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootDeassert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([](const std::string&, const std::string&, DoneCb done,
@@ -1117,7 +1117,7 @@ TEST_F(IstServiceTest, AutoRebootPassesSkipCakToResetHook)
                      std::chrono::seconds) { done(true); });
 
     std::vector<std::string> captured_args;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("resetSystem hook"), ::testing::_,
                          ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -1139,11 +1139,11 @@ TEST_F(IstServiceTest, AutoRebootPassesSkipCakToResetHook)
 
 TEST_F(IstServiceTest, ItmSuccessCompletesWithCleanup)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     // Chain: assert hook → power cycle → ITM → deassert hook
     std::move_only_function<void(bool) const> assert_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -1151,18 +1151,18 @@ TEST_F(IstServiceTest, ItmSuccessCompletesWithCleanup)
                       std::chrono::seconds) { assert_done = std::move(done); });
 
     std::move_only_function<void(bool) const> power_done;
-    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+    EXPECT_CALL(*power_monitor_, asyncWaitForPowerCycle(::testing::_))
         .WillOnce([&](DoneCb done) { power_done = std::move(done); });
 
     ItmDoneCb itm_done;
-    EXPECT_CALL(*itmRunner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
-                                      ::testing::_))
+    EXPECT_CALL(*itm_runner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
+                                       ::testing::_))
         .WillOnce([&](const IstTestConfig&, const IstPlatformConfig&,
                       ItmDoneCb done,
                       ProgressCb) { itm_done = std::move(done); });
 
     std::move_only_function<void(bool) const> deassert_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootDeassert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -1188,10 +1188,10 @@ TEST_F(IstServiceTest, ItmSuccessCompletesWithCleanup)
 
 TEST_F(IstServiceTest, ItmFailureResultsInFailedStatus)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     std::move_only_function<void(bool) const> assert_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -1199,18 +1199,18 @@ TEST_F(IstServiceTest, ItmFailureResultsInFailedStatus)
                       std::chrono::seconds) { assert_done = std::move(done); });
 
     std::move_only_function<void(bool) const> power_done;
-    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+    EXPECT_CALL(*power_monitor_, asyncWaitForPowerCycle(::testing::_))
         .WillOnce([&](DoneCb done) { power_done = std::move(done); });
 
     ItmDoneCb itm_done;
-    EXPECT_CALL(*itmRunner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
-                                      ::testing::_))
+    EXPECT_CALL(*itm_runner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
+                                       ::testing::_))
         .WillOnce([&](const IstTestConfig&, const IstPlatformConfig&,
                       ItmDoneCb done,
                       ProgressCb) { itm_done = std::move(done); });
 
     std::move_only_function<void(bool) const> deassert_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootDeassert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -1236,10 +1236,10 @@ TEST_F(IstServiceTest, ItmFailureResultsInFailedStatus)
 
 TEST_F(IstServiceTest, CleanupDeassertFailureStaysInFailed)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     std::move_only_function<void(bool) const> assert_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -1247,18 +1247,18 @@ TEST_F(IstServiceTest, CleanupDeassertFailureStaysInFailed)
                       std::chrono::seconds) { assert_done = std::move(done); });
 
     std::move_only_function<void(bool) const> power_done;
-    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+    EXPECT_CALL(*power_monitor_, asyncWaitForPowerCycle(::testing::_))
         .WillOnce([&](DoneCb done) { power_done = std::move(done); });
 
     ItmDoneCb itm_done;
-    EXPECT_CALL(*itmRunner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
-                                      ::testing::_))
+    EXPECT_CALL(*itm_runner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
+                                       ::testing::_))
         .WillOnce([&](const IstTestConfig&, const IstPlatformConfig&,
                       ItmDoneCb done,
                       ProgressCb) { itm_done = std::move(done); });
 
     std::move_only_function<void(bool) const> deassert_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootDeassert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -1283,10 +1283,10 @@ TEST_F(IstServiceTest, CleanupDeassertFailureStaysInFailed)
 
 TEST_F(IstServiceTest, AutoRebootCallsResetHook)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     std::move_only_function<void(bool) const> assert_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -1294,18 +1294,18 @@ TEST_F(IstServiceTest, AutoRebootCallsResetHook)
                       std::chrono::seconds) { assert_done = std::move(done); });
 
     std::move_only_function<void(bool) const> power_done;
-    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+    EXPECT_CALL(*power_monitor_, asyncWaitForPowerCycle(::testing::_))
         .WillOnce([&](DoneCb done) { power_done = std::move(done); });
 
     ItmDoneCb itm_done;
-    EXPECT_CALL(*itmRunner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
-                                      ::testing::_))
+    EXPECT_CALL(*itm_runner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
+                                       ::testing::_))
         .WillOnce([&](const IstTestConfig&, const IstPlatformConfig&,
                       ItmDoneCb done,
                       ProgressCb) { itm_done = std::move(done); });
 
     std::move_only_function<void(bool) const> deassert_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootDeassert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -1314,7 +1314,7 @@ TEST_F(IstServiceTest, AutoRebootCallsResetHook)
         });
 
     std::move_only_function<void(bool) const> reset_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("resetSystem hook"), ::testing::_,
                          ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -1343,21 +1343,21 @@ TEST_F(IstServiceTest, AutoRebootCallsResetHook)
 
 TEST_F(IstServiceTest, StartIstPassesTestParams)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     IstTestConfig captured_cfg;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([](const std::string&, const std::string&, DoneCb done,
                      const std::vector<std::string>&,
                      std::chrono::seconds) { done(true); });
 
-    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+    EXPECT_CALL(*power_monitor_, asyncWaitForPowerCycle(::testing::_))
         .WillOnce([](DoneCb done) { done(true); });
 
-    EXPECT_CALL(*itmRunner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
-                                      ::testing::_))
+    EXPECT_CALL(*itm_runner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
+                                       ::testing::_))
         .WillOnce([&](const IstTestConfig& cfg, const IstPlatformConfig&,
                       ItmDoneCb done, ProgressCb) {
             captured_cfg = cfg;
@@ -1365,7 +1365,7 @@ TEST_F(IstServiceTest, StartIstPassesTestParams)
         });
 
     // Deassert hook in cleanup
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootDeassert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([](const std::string&, const std::string&, DoneCb done,
@@ -1401,25 +1401,25 @@ TEST_F(IstServiceTest, StartIstPassesTestParams)
 
 TEST_F(IstServiceTest, SwTimeoutClampedToRange)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     IstTestConfig captured_cfg;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([](const std::string&, const std::string&, DoneCb done,
                      const std::vector<std::string>&,
                      std::chrono::seconds) { done(true); });
-    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+    EXPECT_CALL(*power_monitor_, asyncWaitForPowerCycle(::testing::_))
         .WillOnce([](DoneCb done) { done(true); });
-    EXPECT_CALL(*itmRunner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
-                                      ::testing::_))
+    EXPECT_CALL(*itm_runner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
+                                       ::testing::_))
         .WillOnce([&](const IstTestConfig& cfg, const IstPlatformConfig&,
                       ItmDoneCb done, ProgressCb) {
             captured_cfg = cfg;
             done(0);
         });
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootDeassert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([](const std::string&, const std::string&, DoneCb done,
@@ -1444,7 +1444,7 @@ TEST_F(IstServiceTest, InitializeRejectsNonexistentHookDir)
         "hookPaths": {},
         "storageConfig": {}
     })");
-    EXPECT_FALSE(init_from_file(configPath_));
+    EXPECT_FALSE(init_from_file(config_path_));
 }
 
 TEST_F(IstServiceTest, InitializeRejectsHookDirOutsideTrustedRoot)
@@ -1464,7 +1464,7 @@ TEST_F(IstServiceTest, InitializeRejectsHookDirOutsideTrustedRoot)
         "storageConfig": {},
         "softwareInventoryId": "IST_Vectors"
     })");
-    EXPECT_FALSE(init_from_file(configPath_));
+    EXPECT_FALSE(init_from_file(config_path_));
 
     fs::remove_all(outside);
 }
@@ -1473,14 +1473,14 @@ TEST_F(IstServiceTest, InitializeRejectsEmptyHookPath)
 {
     write_config(R"({
         "hookDirectory": ")" +
-                 (tmpDir_ / "hooks").string() + R"(",
+                 (tmp_dir_ / "hooks").string() + R"(",
         "hookPaths": {
             "istBootAssert": ""
         },
         "storageConfig": {},
         "softwareInventoryId": "IST_Vectors"
     })");
-    EXPECT_FALSE(init_from_file(configPath_));
+    EXPECT_FALSE(init_from_file(config_path_));
 }
 
 TEST_F(IstServiceTest, StartIstThrowsWhenAssertHookMissing)
@@ -1488,22 +1488,22 @@ TEST_F(IstServiceTest, StartIstThrowsWhenAssertHookMissing)
     // Config without istBootAssert hook
     write_config(R"({
         "hookDirectory": ")" +
-                 (tmpDir_ / "hooks").string() + R"(",
+                 (tmp_dir_ / "hooks").string() + R"(",
         "hookPaths": {
             "istBootDeassert": ")" +
-                 (tmpDir_ / "hooks/deassert.sh").string() + R"("
+                 (tmp_dir_ / "hooks/deassert.sh").string() + R"("
         },
         "storageConfig": {
             "vectorMountPath": ")" +
-                 (tmpDir_ / "vectors").string() + R"(",
+                 (tmp_dir_ / "vectors").string() + R"(",
             "vectorStoragePath": ")" +
-                 (tmpDir_ / "storage").string() + R"(",
+                 (tmp_dir_ / "storage").string() + R"(",
             "resultStoragePath": ")" +
-                 (tmpDir_ / "results").string() + R"("
+                 (tmp_dir_ / "results").string() + R"("
         },
         "softwareInventoryId": "IST_Vectors"
     })");
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     ParamMap params;
     EXPECT_THROW(service_->startIST(params), ist_err::InternalFailure);
@@ -1513,25 +1513,25 @@ TEST_F(IstServiceTest, StartIstThrowsWhenAssertHookMissing)
 
 TEST_F(IstServiceTest, SwTimeoutClampedToMax)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     IstTestConfig captured_cfg;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([](const std::string&, const std::string&, DoneCb done,
                      const std::vector<std::string>&,
                      std::chrono::seconds) { done(true); });
-    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+    EXPECT_CALL(*power_monitor_, asyncWaitForPowerCycle(::testing::_))
         .WillOnce([](DoneCb done) { done(true); });
-    EXPECT_CALL(*itmRunner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
-                                      ::testing::_))
+    EXPECT_CALL(*itm_runner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
+                                       ::testing::_))
         .WillOnce([&](const IstTestConfig& cfg, const IstPlatformConfig&,
                       ItmDoneCb done, ProgressCb) {
             captured_cfg = cfg;
             done(0);
         });
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootDeassert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([](const std::string&, const std::string&, DoneCb done,
@@ -1550,10 +1550,10 @@ TEST_F(IstServiceTest, SwTimeoutClampedToMax)
 
 TEST_F(IstServiceTest, AutoRebootResetFailureTransitionsToFailed)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     std::move_only_function<void(bool) const> assert_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -1561,18 +1561,18 @@ TEST_F(IstServiceTest, AutoRebootResetFailureTransitionsToFailed)
                       std::chrono::seconds) { assert_done = std::move(done); });
 
     std::move_only_function<void(bool) const> power_done;
-    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+    EXPECT_CALL(*power_monitor_, asyncWaitForPowerCycle(::testing::_))
         .WillOnce([&](DoneCb done) { power_done = std::move(done); });
 
     ItmDoneCb itm_done;
-    EXPECT_CALL(*itmRunner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
-                                      ::testing::_))
+    EXPECT_CALL(*itm_runner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
+                                       ::testing::_))
         .WillOnce([&](const IstTestConfig&, const IstPlatformConfig&,
                       ItmDoneCb done,
                       ProgressCb) { itm_done = std::move(done); });
 
     std::move_only_function<void(bool) const> deassert_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootDeassert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -1581,7 +1581,7 @@ TEST_F(IstServiceTest, AutoRebootResetFailureTransitionsToFailed)
         });
 
     std::move_only_function<void(bool) const> reset_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("resetSystem hook"), ::testing::_,
                          ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -1607,10 +1607,10 @@ TEST_F(IstServiceTest, AutoRebootResetFailureTransitionsToFailed)
 
 TEST_F(IstServiceTest, AutoRebootWithItmFailureStillFailed)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     std::move_only_function<void(bool) const> assert_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -1618,18 +1618,18 @@ TEST_F(IstServiceTest, AutoRebootWithItmFailureStillFailed)
                       std::chrono::seconds) { assert_done = std::move(done); });
 
     std::move_only_function<void(bool) const> power_done;
-    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+    EXPECT_CALL(*power_monitor_, asyncWaitForPowerCycle(::testing::_))
         .WillOnce([&](DoneCb done) { power_done = std::move(done); });
 
     ItmDoneCb itm_done;
-    EXPECT_CALL(*itmRunner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
-                                      ::testing::_))
+    EXPECT_CALL(*itm_runner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
+                                       ::testing::_))
         .WillOnce([&](const IstTestConfig&, const IstPlatformConfig&,
                       ItmDoneCb done,
                       ProgressCb) { itm_done = std::move(done); });
 
     std::move_only_function<void(bool) const> deassert_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootDeassert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -1638,7 +1638,7 @@ TEST_F(IstServiceTest, AutoRebootWithItmFailureStillFailed)
         });
 
     std::move_only_function<void(bool) const> reset_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("resetSystem hook"), ::testing::_,
                          ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -1668,27 +1668,27 @@ TEST_F(IstServiceTest, AutoRebootFailsWhenResetHookMissing)
     // Config without resetSystem hook
     write_config(R"({
         "hookDirectory": ")" +
-                 (tmpDir_ / "hooks").string() + R"(",
+                 (tmp_dir_ / "hooks").string() + R"(",
         "hookPaths": {
             "istBootAssert": ")" +
-                 (tmpDir_ / "hooks/assert.sh").string() + R"(",
+                 (tmp_dir_ / "hooks/assert.sh").string() + R"(",
             "istBootDeassert": ")" +
-                 (tmpDir_ / "hooks/deassert.sh").string() + R"("
+                 (tmp_dir_ / "hooks/deassert.sh").string() + R"("
         },
         "storageConfig": {
             "vectorMountPath": ")" +
-                 (tmpDir_ / "vectors").string() + R"(",
+                 (tmp_dir_ / "vectors").string() + R"(",
             "vectorStoragePath": ")" +
-                 (tmpDir_ / "storage").string() + R"(",
+                 (tmp_dir_ / "storage").string() + R"(",
             "resultStoragePath": ")" +
-                 (tmpDir_ / "results").string() + R"("
+                 (tmp_dir_ / "results").string() + R"("
         },
         "softwareInventoryId": "IST_Vectors"
     })");
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     std::move_only_function<void(bool) const> assert_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -1696,18 +1696,18 @@ TEST_F(IstServiceTest, AutoRebootFailsWhenResetHookMissing)
                       std::chrono::seconds) { assert_done = std::move(done); });
 
     std::move_only_function<void(bool) const> power_done;
-    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+    EXPECT_CALL(*power_monitor_, asyncWaitForPowerCycle(::testing::_))
         .WillOnce([&](DoneCb done) { power_done = std::move(done); });
 
     ItmDoneCb itm_done;
-    EXPECT_CALL(*itmRunner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
-                                      ::testing::_))
+    EXPECT_CALL(*itm_runner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
+                                       ::testing::_))
         .WillOnce([&](const IstTestConfig&, const IstPlatformConfig&,
                       ItmDoneCb done,
                       ProgressCb) { itm_done = std::move(done); });
 
     std::move_only_function<void(bool) const> deassert_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootDeassert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -1735,20 +1735,20 @@ TEST_F(IstServiceTest, StartIstAbortsOnMissingResultStorageConfig)
     // Config without resultStoragePath
     write_config(R"({
         "hookDirectory": ")" +
-                 (tmpDir_ / "hooks").string() + R"(",
+                 (tmp_dir_ / "hooks").string() + R"(",
         "hookPaths": {
             "istBootAssert": ")" +
-                 (tmpDir_ / "hooks/assert.sh").string() + R"(",
+                 (tmp_dir_ / "hooks/assert.sh").string() + R"(",
             "istBootDeassert": ")" +
-                 (tmpDir_ / "hooks/deassert.sh").string() + R"("
+                 (tmp_dir_ / "hooks/deassert.sh").string() + R"("
         },
         "storageConfig": {
             "vectorMountPath": ")" +
-                 (tmpDir_ / "vectors").string() + R"("
+                 (tmp_dir_ / "vectors").string() + R"("
         },
         "softwareInventoryId": "IST_Vectors"
     })");
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     ParamMap params;
     EXPECT_THROW(service_->startIST(params), ist_err::InternalFailure);
@@ -1757,22 +1757,22 @@ TEST_F(IstServiceTest, StartIstAbortsOnMissingResultStorageConfig)
 
 TEST_F(IstServiceTest, EachRunGetsUniqueObjectPath)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     // --- First run ---
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([](const std::string&, const std::string&, DoneCb done,
                      const std::vector<std::string>&,
                      std::chrono::seconds) { done(true); });
-    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+    EXPECT_CALL(*power_monitor_, asyncWaitForPowerCycle(::testing::_))
         .WillOnce([](DoneCb done) { done(true); });
-    EXPECT_CALL(*itmRunner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
-                                      ::testing::_))
+    EXPECT_CALL(*itm_runner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
+                                       ::testing::_))
         .WillOnce([](const IstTestConfig&, const IstPlatformConfig&,
                      ItmDoneCb done, ProgressCb) { done(0); });
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootDeassert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([](const std::string&, const std::string&, DoneCb done,
@@ -1785,19 +1785,19 @@ TEST_F(IstServiceTest, EachRunGetsUniqueObjectPath)
     io_.restart();
 
     // --- Second run ---
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([](const std::string&, const std::string&, DoneCb done,
                      const std::vector<std::string>&,
                      std::chrono::seconds) { done(true); });
-    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+    EXPECT_CALL(*power_monitor_, asyncWaitForPowerCycle(::testing::_))
         .WillOnce([](DoneCb done) { done(true); });
-    EXPECT_CALL(*itmRunner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
-                                      ::testing::_))
+    EXPECT_CALL(*itm_runner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
+                                       ::testing::_))
         .WillOnce([](const IstTestConfig&, const IstPlatformConfig&,
                      ItmDoneCb done, ProgressCb) { done(0); });
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootDeassert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([](const std::string&, const std::string&, DoneCb done,
@@ -1816,11 +1816,11 @@ TEST_F(IstServiceTest, EachRunGetsUniqueObjectPath)
 
 TEST_F(IstServiceTest, SecondRunAfterCompletionWorks)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     // --- First run: full success ---
     std::move_only_function<void(bool) const> assert_done1;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -1829,18 +1829,18 @@ TEST_F(IstServiceTest, SecondRunAfterCompletionWorks)
         });
 
     std::move_only_function<void(bool) const> power_done1;
-    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+    EXPECT_CALL(*power_monitor_, asyncWaitForPowerCycle(::testing::_))
         .WillOnce([&](DoneCb done) { power_done1 = std::move(done); });
 
     ItmDoneCb itm_done1;
-    EXPECT_CALL(*itmRunner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
-                                      ::testing::_))
+    EXPECT_CALL(*itm_runner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
+                                       ::testing::_))
         .WillOnce([&](const IstTestConfig&, const IstPlatformConfig&,
                       ItmDoneCb done,
                       ProgressCb) { itm_done1 = std::move(done); });
 
     std::move_only_function<void(bool) const> deassert_done1;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootDeassert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -1863,7 +1863,7 @@ TEST_F(IstServiceTest, SecondRunAfterCompletionWorks)
 
     // --- Second run: should start cleanly with fresh state ---
     std::move_only_function<void(bool) const> assert_done2;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -1872,12 +1872,12 @@ TEST_F(IstServiceTest, SecondRunAfterCompletionWorks)
         });
 
     std::move_only_function<void(bool) const> power_done2;
-    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+    EXPECT_CALL(*power_monitor_, asyncWaitForPowerCycle(::testing::_))
         .WillOnce([&](DoneCb done) { power_done2 = std::move(done); });
 
     ItmDoneCb itm_done2;
-    EXPECT_CALL(*itmRunner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
-                                      ::testing::_))
+    EXPECT_CALL(*itm_runner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
+                                       ::testing::_))
         .WillOnce([&](const IstTestConfig& cfg, const IstPlatformConfig&,
                       ItmDoneCb done, ProgressCb) {
             // Verify old params are NOT carried over
@@ -1887,7 +1887,7 @@ TEST_F(IstServiceTest, SecondRunAfterCompletionWorks)
         });
 
     std::move_only_function<void(bool) const> deassert_done2;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootDeassert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -1913,26 +1913,26 @@ TEST_F(IstServiceTest, SecondRunAfterCompletionWorks)
 
 TEST_F(IstServiceTest, RunObjectCreatedWithCorrectPath)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     EXPECT_CALL(
         *publisher_,
         createRunObject(StrEq("/com/nvidia/vera/ist/runs/0"), ::testing::_))
         .Times(1);
 
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([](const std::string&, const std::string&, DoneCb done,
                      const std::vector<std::string>&,
                      std::chrono::seconds) { done(true); });
-    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+    EXPECT_CALL(*power_monitor_, asyncWaitForPowerCycle(::testing::_))
         .WillOnce([](DoneCb done) { done(true); });
-    EXPECT_CALL(*itmRunner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
-                                      ::testing::_))
+    EXPECT_CALL(*itm_runner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
+                                       ::testing::_))
         .WillOnce([](const IstTestConfig&, const IstPlatformConfig&,
                      ItmDoneCb done, ProgressCb) { done(0); });
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootDeassert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([](const std::string&, const std::string&, DoneCb done,
@@ -1951,8 +1951,8 @@ TEST_F(IstServiceTest, RunObjectCreatedWithCorrectPath)
 
 TEST_F(IstServiceTest, RunObjectNotCreatedOnCollateralAbort)
 {
-    fs::remove_all(tmpDir_ / "vectors");
-    init_from_file(configPath_);
+    fs::remove_all(tmp_dir_ / "vectors");
+    init_from_file(config_path_);
 
     EXPECT_CALL(*publisher_, createRunObject(::testing::_, ::testing::_))
         .Times(0);
@@ -1964,7 +1964,7 @@ TEST_F(IstServiceTest, RunObjectNotCreatedOnCollateralAbort)
 
 TEST_F(IstServiceTest, RunObjectCreatedOnFailure)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     EXPECT_CALL(
         *publisher_,
@@ -1972,7 +1972,7 @@ TEST_F(IstServiceTest, RunObjectCreatedOnFailure)
         .Times(1);
 
     DoneCb assert_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -1988,11 +1988,11 @@ TEST_F(IstServiceTest, RunObjectCreatedOnFailure)
 
 TEST_F(IstServiceTest, RunCounterIncrementsAfterFailure)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     // First run: fails at assert hook
     DoneCb assert_done1;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -2007,7 +2007,7 @@ TEST_F(IstServiceTest, RunCounterIncrementsAfterFailure)
 
     // Second run: counter should still be 1, not reset
     DoneCb assert_done2;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -2022,10 +2022,10 @@ TEST_F(IstServiceTest, RunCounterIncrementsAfterFailure)
 
 TEST_F(IstServiceTest, ProgressCallbackUpdatesStateAndPublishes)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     DoneCb assert_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -2033,13 +2033,13 @@ TEST_F(IstServiceTest, ProgressCallbackUpdatesStateAndPublishes)
                       std::chrono::seconds) { assert_done = std::move(done); });
 
     DoneCb power_done;
-    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+    EXPECT_CALL(*power_monitor_, asyncWaitForPowerCycle(::testing::_))
         .WillOnce([&](DoneCb done) { power_done = std::move(done); });
 
     ItmDoneCb itm_done;
     ProgressCb progress_cb;
-    EXPECT_CALL(*itmRunner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
-                                      ::testing::_))
+    EXPECT_CALL(*itm_runner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
+                                       ::testing::_))
         .WillOnce([&](const IstTestConfig&, const IstPlatformConfig&,
                       ItmDoneCb done, ProgressCb on_progress) {
             itm_done = std::move(done);
@@ -2064,7 +2064,7 @@ TEST_F(IstServiceTest, ProgressCallbackUpdatesStateAndPublishes)
 
 TEST_F(IstServiceTest, ParamTypeMismatchRejected)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     ParamMap params;
     params["istSwTimeoutSec"] = std::string("not_a_number");
@@ -2074,11 +2074,11 @@ TEST_F(IstServiceTest, ParamTypeMismatchRejected)
 
 TEST_F(IstServiceTest, SecondRunAfterFailureWorks)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     // --- First run: fails at assert hook ---
     DoneCb assert_done1;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -2095,7 +2095,7 @@ TEST_F(IstServiceTest, SecondRunAfterFailureWorks)
 
     // --- Second run: should be accepted and start cleanly ---
     DoneCb assert_done2;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -2104,18 +2104,18 @@ TEST_F(IstServiceTest, SecondRunAfterFailureWorks)
         });
 
     DoneCb power_done2;
-    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+    EXPECT_CALL(*power_monitor_, asyncWaitForPowerCycle(::testing::_))
         .WillOnce([&](DoneCb done) { power_done2 = std::move(done); });
 
     ItmDoneCb itm_done2;
-    EXPECT_CALL(*itmRunner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
-                                      ::testing::_))
+    EXPECT_CALL(*itm_runner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
+                                       ::testing::_))
         .WillOnce([&](const IstTestConfig&, const IstPlatformConfig&,
                       ItmDoneCb done,
                       ProgressCb) { itm_done2 = std::move(done); });
 
     DoneCb deassert_done2;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootDeassert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -2281,7 +2281,7 @@ std::vector<uint8_t>
 
 TEST_F(IstServiceTest, StartUpdateReturnsSoftwareObjectPath)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
     std::string object_path;
     int fd = begin_start_update(&object_path);
     EXPECT_EQ(object_path,
@@ -2292,7 +2292,7 @@ TEST_F(IstServiceTest, StartUpdateReturnsSoftwareObjectPath)
 
 TEST_F(IstServiceTest, StartUpdateTransfersData)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
     int fd = begin_start_update();
 
     const std::string raw_payload = "hello image data";
@@ -2304,7 +2304,7 @@ TEST_F(IstServiceTest, StartUpdateTransfersData)
 
     io_.run();
 
-    fs::path image_path = tmpDir_ / "storage" / "CPU-IST.img";
+    fs::path image_path = tmp_dir_ / "storage" / "CPU-IST.img";
     ASSERT_TRUE(fs::exists(image_path));
 
     std::ifstream img(image_path, std::ios::binary);
@@ -2315,7 +2315,7 @@ TEST_F(IstServiceTest, StartUpdateTransfersData)
 
 TEST_F(IstServiceTest, StartUpdateRejectsConcurrentTransfer)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
     int fd = begin_start_update();
 
     auto [readFd2, writeFd2] = make_upload_socket_pair();
@@ -2329,10 +2329,10 @@ TEST_F(IstServiceTest, StartUpdateRejectsConcurrentTransfer)
 
 TEST_F(IstServiceTest, StartUpdateRejectsWhileIstRunning)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     DoneCb assert_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -2350,13 +2350,13 @@ TEST_F(IstServiceTest, StartUpdateRejectsWhileIstRunning)
 
 TEST_F(IstServiceTest, StartUpdateEmptyTransferCleansUp)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
     int fd = begin_start_update();
     ::close(fd);
 
     io_.run();
 
-    fs::path image_path = tmpDir_ / "storage" / "CPU-IST.img";
+    fs::path image_path = tmp_dir_ / "storage" / "CPU-IST.img";
     EXPECT_FALSE(fs::exists(image_path));
 }
 
@@ -2364,7 +2364,7 @@ TEST_F(IstServiceTest, StartUpdateTimesOut)
 {
     IstPlatformConfig cfg;
     ASSERT_TRUE(
-        parsePlatformConfig(cfg, configPath_, (tmpDir_ / "hooks").string()));
+        parsePlatformConfig(cfg, config_path_, (tmp_dir_ / "hooks").string()));
     cfg.transferInactivityTimeout = std::chrono::seconds(1);
     ASSERT_TRUE(service_->initialize(std::move(cfg)));
 
@@ -2372,7 +2372,7 @@ TEST_F(IstServiceTest, StartUpdateTimesOut)
 
     io_.run();
 
-    fs::path image_path = tmpDir_ / "storage" / "CPU-IST.img";
+    fs::path image_path = tmp_dir_ / "storage" / "CPU-IST.img";
     EXPECT_FALSE(fs::exists(image_path));
 
     ::close(fd);
@@ -2382,7 +2382,7 @@ TEST_F(IstServiceTest, StartUpdateReportsProgressFromDeclaredPayloadSize)
 {
     IstPlatformConfig cfg;
     ASSERT_TRUE(
-        parsePlatformConfig(cfg, configPath_, (tmpDir_ / "hooks").string()));
+        parsePlatformConfig(cfg, config_path_, (tmp_dir_ / "hooks").string()));
     cfg.transferProgressInterval = std::chrono::seconds(1);
     ASSERT_TRUE(service_->initialize(std::move(cfg)));
 
@@ -2420,7 +2420,7 @@ TEST_F(IstServiceTest, StartUpdateReportsProgressWithoutDeclaredPayloadSize)
 {
     IstPlatformConfig cfg;
     ASSERT_TRUE(
-        parsePlatformConfig(cfg, configPath_, (tmpDir_ / "hooks").string()));
+        parsePlatformConfig(cfg, config_path_, (tmp_dir_ / "hooks").string()));
     cfg.transferProgressInterval = std::chrono::seconds(1);
     ASSERT_TRUE(service_->initialize(std::move(cfg)));
 
@@ -2456,7 +2456,7 @@ TEST_F(IstServiceTest, StartUpdateReportsProgressWithoutDeclaredPayloadSize)
 
 TEST_F(IstServiceTest, StartUpdateAllowsNewTransferAfterCompletion)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     const std::string raw1 = "first transfer";
     std::vector<uint8_t> payload1(raw1.begin(), raw1.end());
@@ -2468,7 +2468,7 @@ TEST_F(IstServiceTest, StartUpdateAllowsNewTransferAfterCompletion)
     ::close(fd1);
     io_.run();
 
-    fs::path image_path = tmpDir_ / "storage" / "CPU-IST.img";
+    fs::path image_path = tmp_dir_ / "storage" / "CPU-IST.img";
     ASSERT_TRUE(fs::exists(image_path));
 
     io_.restart();
@@ -2491,9 +2491,9 @@ TEST_F(IstServiceTest, StartUpdateAllowsNewTransferAfterCompletion)
 
 TEST_F(IstServiceTest, StartUpdateTruncatedTransferRemovesImageAndReleasesLock)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
-    fs::path image_path = tmpDir_ / "storage" / "CPU-IST.img";
+    fs::path image_path = tmp_dir_ / "storage" / "CPU-IST.img";
 
     const std::string raw1 = "payload that gets cut off partway through";
     std::vector<uint8_t> payload1(raw1.begin(), raw1.end());
@@ -2537,7 +2537,7 @@ TEST_F(IstServiceTest, StartUpdateTruncatedTransferRemovesImageAndReleasesLock)
 
 TEST_F(IstServiceTest, StartUpdateAcceptsOnResetApplyTime)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     auto [readFd, writeFd] = make_upload_socket_pair();
     std::string object_path =
@@ -2548,7 +2548,7 @@ TEST_F(IstServiceTest, StartUpdateAcceptsOnResetApplyTime)
 
 TEST_F(IstServiceTest, StartUpdateRejectsUnsupportedApplyTime)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     auto [readFd, writeFd] = make_upload_socket_pair();
     EXPECT_THROW(service_->startUpdate(readFd, "not-a-valid-apply-time"),
@@ -2560,24 +2560,24 @@ TEST_F(IstServiceTest, StartUpdateRejectsEmptyStoragePath)
 {
     write_config(R"({
         "hookDirectory": ")" +
-                 (tmpDir_ / "hooks").string() + R"(",
+                 (tmp_dir_ / "hooks").string() + R"(",
         "hookPaths": {
             "istBootAssert": ")" +
-                 (tmpDir_ / "hooks/assert.sh").string() + R"(",
+                 (tmp_dir_ / "hooks/assert.sh").string() + R"(",
             "istBootDeassert": ")" +
-                 (tmpDir_ / "hooks/deassert.sh").string() + R"(",
+                 (tmp_dir_ / "hooks/deassert.sh").string() + R"(",
             "resetSystem": ")" +
-                 (tmpDir_ / "hooks/reset.sh").string() + R"("
+                 (tmp_dir_ / "hooks/reset.sh").string() + R"("
         },
         "storageConfig": {
             "vectorMountPath": ")" +
-                 (tmpDir_ / "vectors").string() + R"(",
+                 (tmp_dir_ / "vectors").string() + R"(",
             "resultStoragePath": ")" +
-                 (tmpDir_ / "results").string() + R"("
+                 (tmp_dir_ / "results").string() + R"("
         },
         "softwareInventoryId": "IST_Vectors"
     })");
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     auto [readFd, writeFd] = make_upload_socket_pair();
     EXPECT_THROW(service_->startUpdate(readFd, k_apply_time_immediate),
@@ -2591,7 +2591,7 @@ TEST_F(IstServiceTest, StartUpdateRejectsEmptyStoragePath)
 
 TEST_F(IstServiceTest, StartUpdatePldmStripSucceeds)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     const std::string raw_payload = "This is the ext4 image payload content!";
     std::vector<uint8_t> payload(raw_payload.begin(), raw_payload.end());
@@ -2603,7 +2603,7 @@ TEST_F(IstServiceTest, StartUpdatePldmStripSucceeds)
     ::close(fd);
     io_.run();
 
-    fs::path image_path = tmpDir_ / "storage" / "CPU-IST.img";
+    fs::path image_path = tmp_dir_ / "storage" / "CPU-IST.img";
     ASSERT_TRUE(fs::exists(image_path));
     EXPECT_EQ(fs::file_size(image_path), payload.size());
 
@@ -2615,7 +2615,7 @@ TEST_F(IstServiceTest, StartUpdatePldmStripSucceeds)
 
 TEST_F(IstServiceTest, StartUpdatePldmBadHeaderCrc)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     const std::string raw_payload = "payload data";
     std::vector<uint8_t> payload(raw_payload.begin(), raw_payload.end());
@@ -2630,13 +2630,13 @@ TEST_F(IstServiceTest, StartUpdatePldmBadHeaderCrc)
     ::close(fd);
     io_.run();
 
-    fs::path image_path = tmpDir_ / "storage" / "CPU-IST.img";
+    fs::path image_path = tmp_dir_ / "storage" / "CPU-IST.img";
     EXPECT_FALSE(fs::exists(image_path));
 }
 
 TEST_F(IstServiceTest, StartUpdatePldmBadPayloadCrc)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     const std::string raw_payload = "payload data for crc test";
     std::vector<uint8_t> payload(raw_payload.begin(), raw_payload.end());
@@ -2651,13 +2651,13 @@ TEST_F(IstServiceTest, StartUpdatePldmBadPayloadCrc)
     ::close(fd);
     io_.run();
 
-    fs::path image_path = tmpDir_ / "storage" / "CPU-IST.img";
+    fs::path image_path = tmp_dir_ / "storage" / "CPU-IST.img";
     EXPECT_FALSE(fs::exists(image_path));
 }
 
 TEST_F(IstServiceTest, StartUpdatePldmFileTooSmall)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     // Send fewer than 36 bytes — too small for a PLDM header.
     const std::string tiny = "too small";
@@ -2667,13 +2667,13 @@ TEST_F(IstServiceTest, StartUpdatePldmFileTooSmall)
     ::close(fd);
     io_.run();
 
-    fs::path image_path = tmpDir_ / "storage" / "CPU-IST.img";
+    fs::path image_path = tmp_dir_ / "storage" / "CPU-IST.img";
     EXPECT_FALSE(fs::exists(image_path));
 }
 
 TEST_F(IstServiceTest, StartUpdatePldmBadUuidLogsError)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     const std::string raw_payload = "payload data";
     std::vector<uint8_t> payload(raw_payload.begin(), raw_payload.end());
@@ -2693,9 +2693,9 @@ TEST_F(IstServiceTest, StartUpdatePldmBadUuidLogsError)
 
 TEST_F(IstServiceTest, StartUpdateBadUuidDoesNotTruncateExistingImage)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
-    fs::path image_path = tmpDir_ / "storage" / "CPU-IST.img";
+    fs::path image_path = tmp_dir_ / "storage" / "CPU-IST.img";
     fs::create_directories(image_path.parent_path());
     static constexpr std::string_view k_existing = "existing-vector-image";
     {
@@ -2723,7 +2723,7 @@ TEST_F(IstServiceTest, StartUpdateBadUuidDoesNotTruncateExistingImage)
 
 TEST_F(IstServiceTest, StartUpdatePldmBadHeaderCrcLogsError)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     const std::string raw_payload = "payload data";
     std::vector<uint8_t> payload(raw_payload.begin(), raw_payload.end());
@@ -2743,7 +2743,7 @@ TEST_F(IstServiceTest, StartUpdatePldmBadHeaderCrcLogsError)
 
 TEST_F(IstServiceTest, StartUpdatePldmBadPayloadCrcLogsError)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     const std::string raw_payload = "payload data for crc test";
     std::vector<uint8_t> payload(raw_payload.begin(), raw_payload.end());
@@ -2763,7 +2763,7 @@ TEST_F(IstServiceTest, StartUpdatePldmBadPayloadCrcLogsError)
 
 TEST_F(IstServiceTest, StartUpdatePldmRejectsOldRevision)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     // Build a header with revision 3 (no payload checksum).
     constexpr uint16_t header_size = 64;
@@ -2785,13 +2785,13 @@ TEST_F(IstServiceTest, StartUpdatePldmRejectsOldRevision)
     ::close(fd);
     io_.run();
 
-    fs::path image_path = tmpDir_ / "storage" / "CPU-IST.img";
+    fs::path image_path = tmp_dir_ / "storage" / "CPU-IST.img";
     EXPECT_FALSE(fs::exists(image_path));
 }
 
 TEST_F(IstServiceTest, StartUpdatePldmZeroLengthPayload)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     std::vector<uint8_t> payload; // empty
     auto pldm_pkg = build_pldm_package(payload);
@@ -2802,14 +2802,14 @@ TEST_F(IstServiceTest, StartUpdatePldmZeroLengthPayload)
     ::close(fd);
     io_.run();
 
-    fs::path image_path = tmpDir_ / "storage" / "CPU-IST.img";
+    fs::path image_path = tmp_dir_ / "storage" / "CPU-IST.img";
     ASSERT_TRUE(fs::exists(image_path));
     EXPECT_EQ(fs::file_size(image_path), 0u);
 }
 
 TEST_F(IstServiceTest, StartUpdatePldmStripMultiChunk)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     // Payload larger than one 64 KiB strip chunk to exercise the async loop.
     std::vector<uint8_t> payload(200000, 0xAB);
@@ -2821,7 +2821,7 @@ TEST_F(IstServiceTest, StartUpdatePldmStripMultiChunk)
     ::close(fd);
     io_.run();
 
-    fs::path image_path = tmpDir_ / "storage" / "CPU-IST.img";
+    fs::path image_path = tmp_dir_ / "storage" / "CPU-IST.img";
     ASSERT_TRUE(fs::exists(image_path));
     EXPECT_EQ(fs::file_size(image_path), payload.size());
 
@@ -2837,58 +2837,58 @@ TEST_F(IstServiceTest, StartUpdatePldmStripMultiChunk)
 
 TEST_F(IstServiceTest, ReadAndPublishVersionSucceeds)
 {
-    std::ofstream(tmpDir_ / "vectors" / "version.txt") << "1.2.3-abc";
+    std::ofstream(tmp_dir_ / "vectors" / "version.txt") << "1.2.3-abc";
 
     EXPECT_CALL(*publisher_, publishVersion("1.2.3-abc")).Times(1);
-    ASSERT_TRUE(init_from_file(configPath_));
+    ASSERT_TRUE(init_from_file(config_path_));
 }
 
 TEST_F(IstServiceTest, ReadAndPublishVersionMissingFile)
 {
     EXPECT_CALL(*publisher_, publishVersion(testing::_)).Times(0);
-    ASSERT_TRUE(init_from_file(configPath_));
+    ASSERT_TRUE(init_from_file(config_path_));
 }
 
 TEST_F(IstServiceTest, ReadAndPublishVersionEmptyFile)
 {
-    std::ofstream(tmpDir_ / "vectors" / "version.txt") << "";
+    std::ofstream(tmp_dir_ / "vectors" / "version.txt") << "";
 
     EXPECT_CALL(*publisher_, publishVersion(testing::_)).Times(0);
-    ASSERT_TRUE(init_from_file(configPath_));
+    ASSERT_TRUE(init_from_file(config_path_));
 }
 
 TEST_F(IstServiceTest, ReadAndPublishVersionWhitespaceOnly)
 {
-    std::ofstream(tmpDir_ / "vectors" / "version.txt") << "   \t\n";
+    std::ofstream(tmp_dir_ / "vectors" / "version.txt") << "   \t\n";
 
     EXPECT_CALL(*publisher_, publishVersion(testing::_)).Times(0);
-    ASSERT_TRUE(init_from_file(configPath_));
+    ASSERT_TRUE(init_from_file(config_path_));
 }
 
 TEST_F(IstServiceTest, ReadAndPublishVersionTrimWhitespace)
 {
-    std::ofstream(tmpDir_ / "vectors" / "version.txt") << "  1.2.3 \t";
+    std::ofstream(tmp_dir_ / "vectors" / "version.txt") << "  1.2.3 \t";
 
     EXPECT_CALL(*publisher_, publishVersion("1.2.3")).Times(1);
-    ASSERT_TRUE(init_from_file(configPath_));
+    ASSERT_TRUE(init_from_file(config_path_));
 }
 
 TEST_F(IstServiceTest, ReadAndPublishVersionMultipleLines)
 {
-    std::ofstream(tmpDir_ / "vectors" / "version.txt") << "1.2.3\nextra\n";
+    std::ofstream(tmp_dir_ / "vectors" / "version.txt") << "1.2.3\nextra\n";
 
     EXPECT_CALL(*publisher_, publishVersion("1.2.3")).Times(1);
-    ASSERT_TRUE(init_from_file(configPath_));
+    ASSERT_TRUE(init_from_file(config_path_));
 }
 
 TEST_F(IstServiceTest, ReadAndPublishVersionVeryLongString)
 {
     std::string long_version(4096, 'x');
-    std::ofstream(tmpDir_ / "vectors" / "version.txt") << long_version;
+    std::ofstream(tmp_dir_ / "vectors" / "version.txt") << long_version;
 
     std::string truncated(256, 'x');
     EXPECT_CALL(*publisher_, publishVersion(truncated)).Times(1);
-    ASSERT_TRUE(init_from_file(configPath_));
+    ASSERT_TRUE(init_from_file(config_path_));
 }
 
 // ----------------
@@ -2899,34 +2899,34 @@ TEST_F(IstServiceTest, InitNoImagePublishesActivationFailed)
 {
     EXPECT_CALL(*publisher_, publishActivation(StrEq(k_activation_failed)))
         .Times(1);
-    ASSERT_TRUE(init_from_file(configPath_));
+    ASSERT_TRUE(init_from_file(config_path_));
 }
 
 TEST_F(IstServiceTest, InitNoStoragePathPublishesActivationFailed)
 {
     write_config(R"({
         "hookDirectory": ")" +
-                 (tmpDir_ / "hooks").string() + R"(",
+                 (tmp_dir_ / "hooks").string() + R"(",
         "hookPaths": {
             "istBootAssert": ")" +
-                 (tmpDir_ / "hooks/assert.sh").string() + R"(",
+                 (tmp_dir_ / "hooks/assert.sh").string() + R"(",
             "istBootDeassert": ")" +
-                 (tmpDir_ / "hooks/deassert.sh").string() + R"(",
+                 (tmp_dir_ / "hooks/deassert.sh").string() + R"(",
             "resetSystem": ")" +
-                 (tmpDir_ / "hooks/reset.sh").string() + R"("
+                 (tmp_dir_ / "hooks/reset.sh").string() + R"("
         },
         "storageConfig": {
             "vectorMountPath": "",
             "vectorStoragePath": "",
             "resultStoragePath": ")" +
-                 (tmpDir_ / "results").string() + R"("
+                 (tmp_dir_ / "results").string() + R"("
         },
         "softwareInventoryId": "IST_Vectors"
     })");
 
     EXPECT_CALL(*publisher_, publishActivation(StrEq(k_activation_failed)))
         .Times(1);
-    ASSERT_TRUE(init_from_file(configPath_));
+    ASSERT_TRUE(init_from_file(config_path_));
 }
 
 TEST_F(IstServiceTest, InitNoImageDoesNotPublishActivationActive)
@@ -2934,20 +2934,20 @@ TEST_F(IstServiceTest, InitNoImageDoesNotPublishActivationActive)
     EXPECT_CALL(*publisher_, publishActivation(StrEq(k_activation_failed)));
     EXPECT_CALL(*publisher_, publishActivation(StrEq(k_activation_active)))
         .Times(0);
-    ASSERT_TRUE(init_from_file(configPath_));
+    ASSERT_TRUE(init_from_file(config_path_));
 }
 
 // Telemetry consumers read Version alongside the activation state, so the
 // version has to be in place before the state that advertises it.
 TEST_F(IstServiceTest, InitPublishesVersionBeforeActivation)
 {
-    std::ofstream(tmpDir_ / "vectors" / "version.txt") << "1.2.3";
+    std::ofstream(tmp_dir_ / "vectors" / "version.txt") << "1.2.3";
 
     ::testing::InSequence seq;
     EXPECT_CALL(*publisher_, publishVersion("1.2.3")).Times(1);
     EXPECT_CALL(*publisher_, publishActivation(StrEq(k_activation_failed)))
         .Times(1);
-    ASSERT_TRUE(init_from_file(configPath_));
+    ASSERT_TRUE(init_from_file(config_path_));
 }
 
 // ----------------
@@ -2956,10 +2956,10 @@ TEST_F(IstServiceTest, InitPublishesVersionBeforeActivation)
 
 TEST_F(IstServiceTest, ItmMismatchEmitsEventLog)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     DoneCb assert_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -2967,18 +2967,18 @@ TEST_F(IstServiceTest, ItmMismatchEmitsEventLog)
                       std::chrono::seconds) { assert_done = std::move(done); });
 
     DoneCb power_done;
-    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+    EXPECT_CALL(*power_monitor_, asyncWaitForPowerCycle(::testing::_))
         .WillOnce([&](DoneCb done) { power_done = std::move(done); });
 
     ItmDoneCb itm_done;
-    EXPECT_CALL(*itmRunner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
-                                      ::testing::_))
+    EXPECT_CALL(*itm_runner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
+                                       ::testing::_))
         .WillOnce([&](const IstTestConfig&, const IstPlatformConfig&,
                       ItmDoneCb done,
                       ProgressCb) { itm_done = std::move(done); });
 
     DoneCb deassert_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootDeassert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -3015,10 +3015,10 @@ TEST_F(IstServiceTest, ItmMismatchEmitsEventLog)
 
 TEST_F(IstServiceTest, ItmPlatformErrorEmitsEventLog)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     DoneCb assert_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -3026,18 +3026,18 @@ TEST_F(IstServiceTest, ItmPlatformErrorEmitsEventLog)
                       std::chrono::seconds) { assert_done = std::move(done); });
 
     DoneCb power_done;
-    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+    EXPECT_CALL(*power_monitor_, asyncWaitForPowerCycle(::testing::_))
         .WillOnce([&](DoneCb done) { power_done = std::move(done); });
 
     ItmDoneCb itm_done;
-    EXPECT_CALL(*itmRunner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
-                                      ::testing::_))
+    EXPECT_CALL(*itm_runner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
+                                       ::testing::_))
         .WillOnce([&](const IstTestConfig&, const IstPlatformConfig&,
                       ItmDoneCb done,
                       ProgressCb) { itm_done = std::move(done); });
 
     DoneCb deassert_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootDeassert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -3074,10 +3074,10 @@ TEST_F(IstServiceTest, ItmPlatformErrorEmitsEventLog)
 
 TEST_F(IstServiceTest, PlatformErrorIncludesMarkerFiles)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     DoneCb assert_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -3085,18 +3085,18 @@ TEST_F(IstServiceTest, PlatformErrorIncludesMarkerFiles)
                       std::chrono::seconds) { assert_done = std::move(done); });
 
     DoneCb power_done;
-    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+    EXPECT_CALL(*power_monitor_, asyncWaitForPowerCycle(::testing::_))
         .WillOnce([&](DoneCb done) { power_done = std::move(done); });
 
     ItmDoneCb itm_done;
-    EXPECT_CALL(*itmRunner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
-                                      ::testing::_))
+    EXPECT_CALL(*itm_runner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
+                                       ::testing::_))
         .WillOnce([&](const IstTestConfig&, const IstPlatformConfig&,
                       ItmDoneCb done,
                       ProgressCb) { itm_done = std::move(done); });
 
     DoneCb deassert_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootDeassert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -3132,10 +3132,10 @@ TEST_F(IstServiceTest, PlatformErrorIncludesMarkerFiles)
 
 TEST_F(IstServiceTest, PreExistingActiveMarkersContinueToIst)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     DoneCb assert_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -3143,7 +3143,7 @@ TEST_F(IstServiceTest, PreExistingActiveMarkersContinueToIst)
                       std::chrono::seconds) { assert_done = std::move(done); });
 
     DoneCb power_done;
-    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+    EXPECT_CALL(*power_monitor_, asyncWaitForPowerCycle(::testing::_))
         .WillOnce([&](DoneCb done) { power_done = std::move(done); });
 
     fs::create_directories("/tmp/ist/err_marker");
@@ -3161,10 +3161,10 @@ TEST_F(IstServiceTest, PreExistingActiveMarkersContinueToIst)
 
 TEST_F(IstServiceTest, DeassertedMarkersCleanedUpAtStart)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     DoneCb assert_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -3172,7 +3172,7 @@ TEST_F(IstServiceTest, DeassertedMarkersCleanedUpAtStart)
                       std::chrono::seconds) { assert_done = std::move(done); });
 
     DoneCb power_done;
-    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+    EXPECT_CALL(*power_monitor_, asyncWaitForPowerCycle(::testing::_))
         .WillOnce([&](DoneCb done) { power_done = std::move(done); });
 
     fs::create_directories("/tmp/ist/err_marker");
@@ -3190,22 +3190,22 @@ TEST_F(IstServiceTest, DeassertedMarkersCleanedUpAtStart)
 
 TEST_F(IstServiceTest, ResultsPreservedWhenCollateralVerificationFails)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     // Create a fake result from a previous run
-    std::ofstream(tmpDir_ / "results" / "prev_result.txt") << "data";
+    std::ofstream(tmp_dir_ / "results" / "prev_result.txt") << "data";
     fs::create_directories("/tmp/ist/err_marker");
     std::ofstream("/tmp/ist/err_marker/PWR_BRAKE") << "asserted";
 
     // Remove vectors so collateral verification fails
-    fs::remove_all(tmpDir_ / "vectors");
+    fs::remove_all(tmp_dir_ / "vectors");
 
     ParamMap params;
     EXPECT_THROW(service_->startIST(params), ist_err::ResourceNotFound);
     EXPECT_EQ(service_->state().status, IstStatus::aborted);
 
     // Previous results and markers should still be intact
-    EXPECT_TRUE(fs::exists(tmpDir_ / "results" / "prev_result.txt"));
+    EXPECT_TRUE(fs::exists(tmp_dir_ / "results" / "prev_result.txt"));
     EXPECT_TRUE(fs::exists("/tmp/ist/err_marker/PWR_BRAKE"));
 
     fs::remove_all("/tmp/ist/err_marker");
@@ -3213,10 +3213,10 @@ TEST_F(IstServiceTest, ResultsPreservedWhenCollateralVerificationFails)
 
 TEST_F(IstServiceTest, ItmSuccessDoesNotEmitEventLog)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     DoneCb assert_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -3224,18 +3224,18 @@ TEST_F(IstServiceTest, ItmSuccessDoesNotEmitEventLog)
                       std::chrono::seconds) { assert_done = std::move(done); });
 
     DoneCb power_done;
-    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+    EXPECT_CALL(*power_monitor_, asyncWaitForPowerCycle(::testing::_))
         .WillOnce([&](DoneCb done) { power_done = std::move(done); });
 
     ItmDoneCb itm_done;
-    EXPECT_CALL(*itmRunner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
-                                      ::testing::_))
+    EXPECT_CALL(*itm_runner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
+                                       ::testing::_))
         .WillOnce([&](const IstTestConfig&, const IstPlatformConfig&,
                       ItmDoneCb done,
                       ProgressCb) { itm_done = std::move(done); });
 
     DoneCb deassert_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootDeassert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -3263,10 +3263,10 @@ TEST_F(IstServiceTest, ItmSuccessDoesNotEmitEventLog)
 
 TEST_F(IstServiceTest, ItmInfraFailureDoesNotEmitEventLog)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     DoneCb assert_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -3274,18 +3274,18 @@ TEST_F(IstServiceTest, ItmInfraFailureDoesNotEmitEventLog)
                       std::chrono::seconds) { assert_done = std::move(done); });
 
     DoneCb power_done;
-    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+    EXPECT_CALL(*power_monitor_, asyncWaitForPowerCycle(::testing::_))
         .WillOnce([&](DoneCb done) { power_done = std::move(done); });
 
     ItmDoneCb itm_done;
-    EXPECT_CALL(*itmRunner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
-                                      ::testing::_))
+    EXPECT_CALL(*itm_runner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
+                                       ::testing::_))
         .WillOnce([&](const IstTestConfig&, const IstPlatformConfig&,
                       ItmDoneCb done,
                       ProgressCb) { itm_done = std::move(done); });
 
     DoneCb deassert_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootDeassert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -3369,9 +3369,9 @@ TEST(ArchiveResultsTest, SkipsExistingArchiveFile)
 
 TEST_F(IstServiceTest, GetResultsFdReturnsValidFdWhenArchiveExists)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
-    fs::path results_dir = tmpDir_ / "results";
+    fs::path results_dir = tmp_dir_ / "results";
     std::ofstream(results_dir / "ist_results.tar.gz") << "archive data";
 
     int fd = static_cast<int>(service_->getResultsFd());
@@ -3385,16 +3385,16 @@ TEST_F(IstServiceTest, GetResultsFdReturnsValidFdWhenArchiveExists)
 
 TEST_F(IstServiceTest, GetResultsFdThrowsWhenNoArchive)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     EXPECT_THROW(service_->getResultsFd(), ist_err::ResourceNotFound);
 }
 
 TEST_F(IstServiceTest, GetResultsFdThrowsWhenArchiveTooLarge)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
-    fs::path results_dir = tmpDir_ / "results";
+    fs::path results_dir = tmp_dir_ / "results";
     fs::path archive = results_dir / "ist_results.tar.gz";
 
     // Create a file just over the 50MB limit via truncate
@@ -3408,9 +3408,9 @@ TEST_F(IstServiceTest, GetResultsFdThrowsWhenArchiveTooLarge)
 
 TEST_F(IstServiceTest, StartIstCleansUpOldResults)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
-    fs::path results_dir = tmpDir_ / "results";
+    fs::path results_dir = tmp_dir_ / "results";
     std::ofstream(results_dir / "ist_results.tar.gz") << "stale archive";
     std::ofstream(results_dir / "leftover.gz") << "stale data";
     EXPECT_TRUE(fs::exists(results_dir / "ist_results.tar.gz"));
@@ -3433,7 +3433,7 @@ using CpuDoneCb =
 
 TEST_F(IstServiceTest, CpuDiscoverySetsTwoCpuSocketList)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     service_->setCpuDiscoverer([](CpuDoneCb done) {
         done({"/xyz/openbmc_project/inventory/system/chassis/CPU_0",
@@ -3441,22 +3441,22 @@ TEST_F(IstServiceTest, CpuDiscoverySetsTwoCpuSocketList)
     });
 
     IstTestConfig captured_cfg;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([](const std::string&, const std::string&, DoneCb done,
                      const std::vector<std::string>&,
                      std::chrono::seconds) { done(true); });
-    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+    EXPECT_CALL(*power_monitor_, asyncWaitForPowerCycle(::testing::_))
         .WillOnce([](DoneCb done) { done(true); });
-    EXPECT_CALL(*itmRunner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
-                                      ::testing::_))
+    EXPECT_CALL(*itm_runner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
+                                       ::testing::_))
         .WillOnce([&](const IstTestConfig& cfg, const IstPlatformConfig&,
                       ItmDoneCb done, ProgressCb) {
             captured_cfg = cfg;
             done(0);
         });
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootDeassert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([](const std::string&, const std::string&, DoneCb done,
@@ -3473,29 +3473,29 @@ TEST_F(IstServiceTest, CpuDiscoverySetsTwoCpuSocketList)
 
 TEST_F(IstServiceTest, CpuDiscoverySetsOneCpuSocketList)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     service_->setCpuDiscoverer([](CpuDoneCb done) {
         done({"/xyz/openbmc_project/inventory/system/chassis/CPU_0"});
     });
 
     IstTestConfig captured_cfg;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([](const std::string&, const std::string&, DoneCb done,
                      const std::vector<std::string>&,
                      std::chrono::seconds) { done(true); });
-    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+    EXPECT_CALL(*power_monitor_, asyncWaitForPowerCycle(::testing::_))
         .WillOnce([](DoneCb done) { done(true); });
-    EXPECT_CALL(*itmRunner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
-                                      ::testing::_))
+    EXPECT_CALL(*itm_runner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
+                                       ::testing::_))
         .WillOnce([&](const IstTestConfig& cfg, const IstPlatformConfig&,
                       ItmDoneCb done, ProgressCb) {
             captured_cfg = cfg;
             done(0);
         });
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootDeassert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([](const std::string&, const std::string&, DoneCb done,
@@ -3512,7 +3512,7 @@ TEST_F(IstServiceTest, CpuDiscoverySetsOneCpuSocketList)
 
 TEST_F(IstServiceTest, CpuDiscoveryEmptyFailsIst)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     service_->setCpuDiscoverer([](CpuDoneCb done) { done({}); });
 
@@ -3524,7 +3524,7 @@ TEST_F(IstServiceTest, CpuDiscoveryEmptyFailsIst)
 
 TEST_F(IstServiceTest, UserSocketListSkipsCpuDiscovery)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     bool discoverer_called = false;
     service_->setCpuDiscoverer([&](CpuDoneCb done) {
@@ -3533,22 +3533,22 @@ TEST_F(IstServiceTest, UserSocketListSkipsCpuDiscovery)
     });
 
     IstTestConfig captured_cfg;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([](const std::string&, const std::string&, DoneCb done,
                      const std::vector<std::string>&,
                      std::chrono::seconds) { done(true); });
-    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+    EXPECT_CALL(*power_monitor_, asyncWaitForPowerCycle(::testing::_))
         .WillOnce([](DoneCb done) { done(true); });
-    EXPECT_CALL(*itmRunner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
-                                      ::testing::_))
+    EXPECT_CALL(*itm_runner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
+                                       ::testing::_))
         .WillOnce([&](const IstTestConfig& cfg, const IstPlatformConfig&,
                       ItmDoneCb done, ProgressCb) {
             captured_cfg = cfg;
             done(0);
         });
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootDeassert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([](const std::string&, const std::string&, DoneCb done,
@@ -3568,7 +3568,7 @@ TEST_F(IstServiceTest, UserSocketListSkipsCpuDiscovery)
 
 TEST_F(IstServiceTest, CpuDiscoveryOutOfOrderPathsSorted)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     service_->setCpuDiscoverer([](CpuDoneCb done) {
         done({"/xyz/openbmc_project/inventory/system/chassis/CPU_1",
@@ -3576,22 +3576,22 @@ TEST_F(IstServiceTest, CpuDiscoveryOutOfOrderPathsSorted)
     });
 
     IstTestConfig captured_cfg;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([](const std::string&, const std::string&, DoneCb done,
                      const std::vector<std::string>&,
                      std::chrono::seconds) { done(true); });
-    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+    EXPECT_CALL(*power_monitor_, asyncWaitForPowerCycle(::testing::_))
         .WillOnce([](DoneCb done) { done(true); });
-    EXPECT_CALL(*itmRunner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
-                                      ::testing::_))
+    EXPECT_CALL(*itm_runner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
+                                       ::testing::_))
         .WillOnce([&](const IstTestConfig& cfg, const IstPlatformConfig&,
                       ItmDoneCb done, ProgressCb) {
             captured_cfg = cfg;
             done(0);
         });
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootDeassert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([](const std::string&, const std::string&, DoneCb done,
@@ -3608,7 +3608,7 @@ TEST_F(IstServiceTest, CpuDiscoveryOutOfOrderPathsSorted)
 
 TEST_F(IstServiceTest, CpuDiscoveryDeduplicatesRepresentations)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     // Entity Manager may expose the same physical socket under more than one
     // inventory path (e.g. .../system/component/CPU_0 and
@@ -3622,22 +3622,22 @@ TEST_F(IstServiceTest, CpuDiscoveryDeduplicatesRepresentations)
     });
 
     IstTestConfig captured_cfg;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([](const std::string&, const std::string&, DoneCb done,
                      const std::vector<std::string>&,
                      std::chrono::seconds) { done(true); });
-    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+    EXPECT_CALL(*power_monitor_, asyncWaitForPowerCycle(::testing::_))
         .WillOnce([](DoneCb done) { done(true); });
-    EXPECT_CALL(*itmRunner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
-                                      ::testing::_))
+    EXPECT_CALL(*itm_runner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
+                                       ::testing::_))
         .WillOnce([&](const IstTestConfig& cfg, const IstPlatformConfig&,
                       ItmDoneCb done, ProgressCb) {
             captured_cfg = cfg;
             done(0);
         });
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootDeassert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([](const std::string&, const std::string&, DoneCb done,
@@ -3654,7 +3654,7 @@ TEST_F(IstServiceTest, CpuDiscoveryDeduplicatesRepresentations)
 
 TEST_F(IstServiceTest, CpuDiscoveryDeduplicatesSingleSocketRepresentations)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     // Single-CPU system: the one physical socket is still exposed under two
     // paths (.../system/component/CPU_0 and .../system/cpu/CPU_0). Discovery
@@ -3666,22 +3666,22 @@ TEST_F(IstServiceTest, CpuDiscoveryDeduplicatesSingleSocketRepresentations)
     });
 
     IstTestConfig captured_cfg;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([](const std::string&, const std::string&, DoneCb done,
                      const std::vector<std::string>&,
                      std::chrono::seconds) { done(true); });
-    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+    EXPECT_CALL(*power_monitor_, asyncWaitForPowerCycle(::testing::_))
         .WillOnce([](DoneCb done) { done(true); });
-    EXPECT_CALL(*itmRunner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
-                                      ::testing::_))
+    EXPECT_CALL(*itm_runner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
+                                       ::testing::_))
         .WillOnce([&](const IstTestConfig& cfg, const IstPlatformConfig&,
                       ItmDoneCb done, ProgressCb) {
             captured_cfg = cfg;
             done(0);
         });
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootDeassert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([](const std::string&, const std::string&, DoneCb done,
@@ -3698,7 +3698,7 @@ TEST_F(IstServiceTest, CpuDiscoveryDeduplicatesSingleSocketRepresentations)
 
 TEST_F(IstServiceTest, CpuDiscoveryNonContiguousSocketsFails)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     service_->setCpuDiscoverer([](CpuDoneCb done) {
         done({"/xyz/openbmc_project/inventory/system/chassis/CPU_1"});
@@ -3712,7 +3712,7 @@ TEST_F(IstServiceTest, CpuDiscoveryNonContiguousSocketsFails)
 
 TEST_F(IstServiceTest, CpuDiscoveryBadPathFails)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     service_->setCpuDiscoverer([](CpuDoneCb done) {
         done({"/xyz/openbmc_project/inventory/system/chassis/CPU0"});
@@ -3726,10 +3726,10 @@ TEST_F(IstServiceTest, CpuDiscoveryBadPathFails)
 
 TEST_F(IstServiceTest, NoCpuDiscovererSkipsDiscovery)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     std::move_only_function<void(bool) const> assert_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -3748,9 +3748,9 @@ TEST_F(IstServiceTest, NoCpuDiscovererSkipsDiscovery)
 
 TEST_F(IstServiceTest, ServiceLogCreatedOnStartIst)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
-    fs::path log_path = tmpDir_ / "results" / "IST_service.log";
+    fs::path log_path = tmp_dir_ / "results" / "IST_service.log";
     EXPECT_FALSE(fs::exists(log_path));
 
     start_ist();
@@ -3760,10 +3760,10 @@ TEST_F(IstServiceTest, ServiceLogCreatedOnStartIst)
 
 TEST_F(IstServiceTest, ServiceLogCapturesCerrOutput)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     DoneCb assert_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -3778,7 +3778,7 @@ TEST_F(IstServiceTest, ServiceLogCapturesCerrOutput)
     // Simulate failure to drive to idle (removes tee)
     assert_done(false);
 
-    fs::path log_path = tmpDir_ / "results" / "IST_service.log";
+    fs::path log_path = tmp_dir_ / "results" / "IST_service.log";
     ASSERT_TRUE(fs::exists(log_path));
 
     std::ifstream f(log_path);
@@ -3788,10 +3788,10 @@ TEST_F(IstServiceTest, ServiceLogCapturesCerrOutput)
 
 TEST_F(IstServiceTest, ServiceLogTeeRemovedOnIdle)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     DoneCb assert_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -3807,7 +3807,7 @@ TEST_F(IstServiceTest, ServiceLogTeeRemovedOnIdle)
     // Write after tee removed — should NOT appear in log
     std::cerr << "after_tee_removed\n";
 
-    fs::path log_path = tmpDir_ / "results" / "IST_service.log";
+    fs::path log_path = tmp_dir_ / "results" / "IST_service.log";
     std::ifstream f(log_path);
     std::string content((std::istreambuf_iterator<char>(f)), {});
     EXPECT_EQ(content.find("after_tee_removed"), std::string::npos);
@@ -3819,8 +3819,8 @@ TEST_F(IstServiceTest, ServiceLogTeeRemovedOnIdle)
 
 TEST_F(IstServiceTest, ErrorCollateralVerificationFailed)
 {
-    fs::remove_all(tmpDir_ / "vectors");
-    init_from_file(configPath_);
+    fs::remove_all(tmp_dir_ / "vectors");
+    init_from_file(config_path_);
 
     testing::internal::CaptureStderr();
     ParamMap params;
@@ -3836,22 +3836,22 @@ TEST_F(IstServiceTest, ErrorHookAssertNotFound)
 {
     write_config(R"({
         "hookDirectory": ")" +
-                 (tmpDir_ / "hooks").string() + R"(",
+                 (tmp_dir_ / "hooks").string() + R"(",
         "hookPaths": {
             "istBootDeassert": ")" +
-                 (tmpDir_ / "hooks/deassert.sh").string() + R"("
+                 (tmp_dir_ / "hooks/deassert.sh").string() + R"("
         },
         "storageConfig": {
             "vectorMountPath": ")" +
-                 (tmpDir_ / "vectors").string() + R"(",
+                 (tmp_dir_ / "vectors").string() + R"(",
             "vectorStoragePath": ")" +
-                 (tmpDir_ / "storage").string() + R"(",
+                 (tmp_dir_ / "storage").string() + R"(",
             "resultStoragePath": ")" +
-                 (tmpDir_ / "results").string() + R"("
+                 (tmp_dir_ / "results").string() + R"("
         },
         "softwareInventoryId": "IST_Vectors"
     })");
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     testing::internal::CaptureStderr();
     ParamMap params;
@@ -3865,10 +3865,10 @@ TEST_F(IstServiceTest, ErrorHookAssertNotFound)
 
 TEST_F(IstServiceTest, ErrorHookAssertFailed)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     DoneCb assert_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -3889,22 +3889,22 @@ TEST_F(IstServiceTest, ErrorHookDeassertNotFound)
 {
     write_config(R"({
         "hookDirectory": ")" +
-                 (tmpDir_ / "hooks").string() + R"(",
+                 (tmp_dir_ / "hooks").string() + R"(",
         "hookPaths": {
             "istBootAssert": ")" +
-                 (tmpDir_ / "hooks/assert.sh").string() + R"("
+                 (tmp_dir_ / "hooks/assert.sh").string() + R"("
         },
         "storageConfig": {
             "vectorMountPath": ")" +
-                 (tmpDir_ / "vectors").string() + R"(",
+                 (tmp_dir_ / "vectors").string() + R"(",
             "vectorStoragePath": ")" +
-                 (tmpDir_ / "storage").string() + R"(",
+                 (tmp_dir_ / "storage").string() + R"(",
             "resultStoragePath": ")" +
-                 (tmpDir_ / "results").string() + R"("
+                 (tmp_dir_ / "results").string() + R"("
         },
         "softwareInventoryId": "IST_Vectors"
     })");
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     testing::internal::CaptureStderr();
     ParamMap params;
@@ -3921,10 +3921,10 @@ TEST_F(IstServiceTest, ErrorHookDeassertNotFound)
 
 TEST_F(IstServiceTest, ErrorHookDeassertFailed)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     DoneCb assert_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -3932,18 +3932,18 @@ TEST_F(IstServiceTest, ErrorHookDeassertFailed)
                       std::chrono::seconds) { assert_done = std::move(done); });
 
     DoneCb power_done;
-    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+    EXPECT_CALL(*power_monitor_, asyncWaitForPowerCycle(::testing::_))
         .WillOnce([&](DoneCb done) { power_done = std::move(done); });
 
     ItmDoneCb itm_done;
-    EXPECT_CALL(*itmRunner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
-                                      ::testing::_))
+    EXPECT_CALL(*itm_runner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
+                                       ::testing::_))
         .WillOnce([&](const IstTestConfig&, const IstPlatformConfig&,
                       ItmDoneCb done,
                       ProgressCb) { itm_done = std::move(done); });
 
     DoneCb deassert_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootDeassert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -3968,21 +3968,21 @@ TEST_F(IstServiceTest, ErrorHookDeassertFailed)
 
 TEST_F(IstServiceTest, ErrorHookResetFailed)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([](const std::string&, const std::string&, DoneCb done,
                      const std::vector<std::string>&,
                      std::chrono::seconds) { done(true); });
-    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+    EXPECT_CALL(*power_monitor_, asyncWaitForPowerCycle(::testing::_))
         .WillOnce([](DoneCb done) { done(true); });
-    EXPECT_CALL(*itmRunner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
-                                      ::testing::_))
+    EXPECT_CALL(*itm_runner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
+                                       ::testing::_))
         .WillOnce([](const IstTestConfig&, const IstPlatformConfig&,
                      ItmDoneCb done, ProgressCb) { done(0); });
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootDeassert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([](const std::string&, const std::string&, DoneCb done,
@@ -3990,7 +3990,7 @@ TEST_F(IstServiceTest, ErrorHookResetFailed)
                      std::chrono::seconds) { done(true); });
 
     DoneCb reset_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("resetSystem hook"), ::testing::_,
                          ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -4015,38 +4015,38 @@ TEST_F(IstServiceTest, ErrorHookResetNotFound)
 {
     write_config(R"({
         "hookDirectory": ")" +
-                 (tmpDir_ / "hooks").string() + R"(",
+                 (tmp_dir_ / "hooks").string() + R"(",
         "hookPaths": {
             "istBootAssert": ")" +
-                 (tmpDir_ / "hooks/assert.sh").string() + R"(",
+                 (tmp_dir_ / "hooks/assert.sh").string() + R"(",
             "istBootDeassert": ")" +
-                 (tmpDir_ / "hooks/deassert.sh").string() + R"("
+                 (tmp_dir_ / "hooks/deassert.sh").string() + R"("
         },
         "storageConfig": {
             "vectorMountPath": ")" +
-                 (tmpDir_ / "vectors").string() + R"(",
+                 (tmp_dir_ / "vectors").string() + R"(",
             "vectorStoragePath": ")" +
-                 (tmpDir_ / "storage").string() + R"(",
+                 (tmp_dir_ / "storage").string() + R"(",
             "resultStoragePath": ")" +
-                 (tmpDir_ / "results").string() + R"("
+                 (tmp_dir_ / "results").string() + R"("
         },
         "softwareInventoryId": "IST_Vectors"
     })");
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([](const std::string&, const std::string&, DoneCb done,
                      const std::vector<std::string>&,
                      std::chrono::seconds) { done(true); });
-    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+    EXPECT_CALL(*power_monitor_, asyncWaitForPowerCycle(::testing::_))
         .WillOnce([](DoneCb done) { done(true); });
-    EXPECT_CALL(*itmRunner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
-                                      ::testing::_))
+    EXPECT_CALL(*itm_runner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
+                                       ::testing::_))
         .WillOnce([](const IstTestConfig&, const IstPlatformConfig&,
                      ItmDoneCb done, ProgressCb) { done(0); });
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootDeassert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([](const std::string&, const std::string&, DoneCb done,
@@ -4068,11 +4068,11 @@ TEST_F(IstServiceTest, ErrorHookResetNotFound)
 
 TEST_F(IstServiceTest, ErrorHookCakBypassFailed)
 {
-    std::ofstream give_me_a_name(tmpDir_ / "hooks" / "ist_cak_bypass.sh");
-    init_from_file(configPath_);
+    std::ofstream give_me_a_name(tmp_dir_ / "hooks" / "ist_cak_bypass.sh");
+    init_from_file(config_path_);
 
     DoneCb assert_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -4080,11 +4080,11 @@ TEST_F(IstServiceTest, ErrorHookCakBypassFailed)
                       std::chrono::seconds) { assert_done = std::move(done); });
 
     DoneCb power_done;
-    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+    EXPECT_CALL(*power_monitor_, asyncWaitForPowerCycle(::testing::_))
         .WillOnce([&](DoneCb done) { power_done = std::move(done); });
 
     DoneCb cak_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("CAK bypass"), ::testing::_,
                          ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -4092,7 +4092,7 @@ TEST_F(IstServiceTest, ErrorHookCakBypassFailed)
                       std::chrono::seconds) { cak_done = std::move(done); });
 
     DoneCb deassert_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootDeassert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -4117,10 +4117,10 @@ TEST_F(IstServiceTest, ErrorHookCakBypassFailed)
 
 TEST_F(IstServiceTest, ErrorPowerCycleNotDetected)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     DoneCb assert_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -4128,11 +4128,11 @@ TEST_F(IstServiceTest, ErrorPowerCycleNotDetected)
                       std::chrono::seconds) { assert_done = std::move(done); });
 
     DoneCb power_done;
-    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+    EXPECT_CALL(*power_monitor_, asyncWaitForPowerCycle(::testing::_))
         .WillOnce([&](DoneCb done) { power_done = std::move(done); });
 
     DoneCb deassert_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootDeassert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -4156,10 +4156,10 @@ TEST_F(IstServiceTest, ErrorPowerCycleNotDetected)
 
 TEST_F(IstServiceTest, ErrorItmExitCode)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     DoneCb assert_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -4167,18 +4167,18 @@ TEST_F(IstServiceTest, ErrorItmExitCode)
                       std::chrono::seconds) { assert_done = std::move(done); });
 
     DoneCb power_done;
-    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+    EXPECT_CALL(*power_monitor_, asyncWaitForPowerCycle(::testing::_))
         .WillOnce([&](DoneCb done) { power_done = std::move(done); });
 
     ItmDoneCb itm_done;
-    EXPECT_CALL(*itmRunner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
-                                      ::testing::_))
+    EXPECT_CALL(*itm_runner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
+                                       ::testing::_))
         .WillOnce([&](const IstTestConfig&, const IstPlatformConfig&,
                       ItmDoneCb done,
                       ProgressCb) { itm_done = std::move(done); });
 
     DoneCb deassert_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootDeassert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -4202,10 +4202,10 @@ TEST_F(IstServiceTest, ErrorItmExitCode)
 
 TEST_F(IstServiceTest, ErrorItmSwTimeout)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     DoneCb assert_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -4213,18 +4213,18 @@ TEST_F(IstServiceTest, ErrorItmSwTimeout)
                       std::chrono::seconds) { assert_done = std::move(done); });
 
     DoneCb power_done;
-    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+    EXPECT_CALL(*power_monitor_, asyncWaitForPowerCycle(::testing::_))
         .WillOnce([&](DoneCb done) { power_done = std::move(done); });
 
     ItmDoneCb itm_done;
-    EXPECT_CALL(*itmRunner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
-                                      ::testing::_))
+    EXPECT_CALL(*itm_runner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
+                                       ::testing::_))
         .WillOnce([&](const IstTestConfig&, const IstPlatformConfig&,
                       ItmDoneCb done,
                       ProgressCb) { itm_done = std::move(done); });
 
     DoneCb deassert_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootDeassert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -4248,7 +4248,7 @@ TEST_F(IstServiceTest, ErrorItmSwTimeout)
 
 TEST_F(IstServiceTest, ErrorSecuritySignatureFailed)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
     service_->setSignatureVerifier(
         [](const IstPlatformConfig&, DoneCb cb) { cb(false); });
 
@@ -4264,10 +4264,10 @@ TEST_F(IstServiceTest, ErrorSecuritySignatureFailed)
 
 TEST_F(IstServiceTest, ErrorDoubleFailureItmAndDeassert)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
     DoneCb assert_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -4275,18 +4275,18 @@ TEST_F(IstServiceTest, ErrorDoubleFailureItmAndDeassert)
                       std::chrono::seconds) { assert_done = std::move(done); });
 
     DoneCb power_done;
-    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+    EXPECT_CALL(*power_monitor_, asyncWaitForPowerCycle(::testing::_))
         .WillOnce([&](DoneCb done) { power_done = std::move(done); });
 
     ItmDoneCb itm_done;
-    EXPECT_CALL(*itmRunner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
-                                      ::testing::_))
+    EXPECT_CALL(*itm_runner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
+                                       ::testing::_))
         .WillOnce([&](const IstTestConfig&, const IstPlatformConfig&,
                       ItmDoneCb done,
                       ProgressCb) { itm_done = std::move(done); });
 
     DoneCb deassert_done;
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootDeassert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([&](const std::string&, const std::string&, DoneCb done,
@@ -4313,21 +4313,21 @@ TEST_F(IstServiceTest, ErrorDoubleFailureItmAndDeassert)
 
 TEST_F(IstServiceTest, NoErrorOnSuccessfulRun)
 {
-    init_from_file(configPath_);
+    init_from_file(config_path_);
 
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootAssert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([](const std::string&, const std::string&, DoneCb done,
                      const std::vector<std::string>&,
                      std::chrono::seconds) { done(true); });
-    EXPECT_CALL(*powerMonitor_, asyncWaitForPowerCycle(::testing::_))
+    EXPECT_CALL(*power_monitor_, asyncWaitForPowerCycle(::testing::_))
         .WillOnce([](DoneCb done) { done(true); });
-    EXPECT_CALL(*itmRunner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
-                                      ::testing::_))
+    EXPECT_CALL(*itm_runner_, asyncRun(::testing::_, ::testing::_, ::testing::_,
+                                       ::testing::_))
         .WillOnce([](const IstTestConfig&, const IstPlatformConfig&,
                      ItmDoneCb done, ProgressCb) { done(0); });
-    EXPECT_CALL(*hookRunner_,
+    EXPECT_CALL(*hook_runner_,
                 asyncRun(::testing::_, StrEq("istBootDeassert hook"),
                          ::testing::_, ::testing::_, ::testing::_))
         .WillOnce([](const std::string&, const std::string&, DoneCb done,

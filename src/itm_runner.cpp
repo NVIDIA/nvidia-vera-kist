@@ -49,7 +49,7 @@ class ProgressPoller final : public std::enable_shared_from_this<ProgressPoller>
     ProgressPoller(boost::asio::io_context& io, std::string path,
                    std::move_only_function<void(uint8_t) const> on_progress) :
         io_(io), timer_(io), path_(std::move(path)),
-        onProgress_(std::move(on_progress))
+        on_progress_(std::move(on_progress))
     {}
 
     ~ProgressPoller()
@@ -107,10 +107,10 @@ class ProgressPoller final : public std::enable_shared_from_this<ProgressPoller>
 
     void report(uint8_t pct)
     {
-        if (pct != k_no_update && pct != lastProgress_)
+        if (pct != k_no_update && pct != last_progress_)
         {
-            lastProgress_ = pct;
-            onProgress_(pct);
+            last_progress_ = pct;
+            on_progress_(pct);
         }
     }
 
@@ -187,8 +187,8 @@ class ProgressPoller final : public std::enable_shared_from_this<ProgressPoller>
     boost::asio::io_context& io_;
     boost::asio::steady_timer timer_;
     std::string path_;
-    std::move_only_function<void(uint8_t) const> onProgress_;
-    uint8_t lastProgress_{0};
+    std::move_only_function<void(uint8_t) const> on_progress_;
+    uint8_t last_progress_{0};
     bool stopped_ = false;
 };
 
@@ -198,7 +198,7 @@ class OutputTee final : public std::enable_shared_from_this<OutputTee>
 {
   public:
     OutputTee(boost::asio::io_context& io, int pipe_read_fd, UniqueFd log_fd) :
-        stream_(io, pipe_read_fd), logFd_(std::move(log_fd))
+        stream_(io, pipe_read_fd), log_fd_(std::move(log_fd))
     {}
 
     void start()
@@ -235,7 +235,7 @@ class OutputTee final : public std::enable_shared_from_this<OutputTee>
                 while (remaining > 0)
                 {
                     ssize_t written =
-                        ::write(self->logFd_.get(), data, remaining);
+                        ::write(self->log_fd_.get(), data, remaining);
                     if (written <= 0)
                     {
                         std::cerr << "OutputTee: write to log failed: " << errno
@@ -253,7 +253,7 @@ class OutputTee final : public std::enable_shared_from_this<OutputTee>
     }
 
     boost::asio::posix::stream_descriptor stream_;
-    UniqueFd logFd_;
+    UniqueFd log_fd_;
     std::array<char, 4096> buf_{};
 };
 
@@ -278,7 +278,7 @@ class ItmProcess final : public std::enable_shared_from_this<ItmProcess>
     std::shared_ptr<OutputTee> tee_;
     boost::asio::steady_timer deadline_;
     std::move_only_function<void(int) const> done_;
-    bool timedOut_{false};
+    bool timed_out_{false};
 };
 
 void ItmProcess::start(std::shared_ptr<bpv2::process> proc,
@@ -323,7 +323,7 @@ void ItmProcess::on_deadline_expired(int timeout_sec)
     }
     std::cerr << "kist_itm exceeded SW timeout (" << timeout_sec
               << "s), terminating\n";
-    timedOut_ = true;
+    timed_out_ = true;
     proc_->terminate();
 }
 
@@ -343,7 +343,7 @@ void ItmProcess::on_process_exit(const boost::system::error_code& ec,
     deadline_.cancel();
     proc_.reset();
 
-    if (timedOut_)
+    if (timed_out_)
     {
         std::cerr << "kist_itm killed due to SW timeout\n";
         done_(itm_exit_sw_timeout);

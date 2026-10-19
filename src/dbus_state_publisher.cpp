@@ -34,29 +34,29 @@ class DbusStatePublisher final : public StatePublisher
                        std::shared_ptr<sdbusplus::asio::connection> conn,
                        const std::string& sw_path,
                        const std::string& ist_path) :
-        server_(server), conn_(std::move(conn)), swPath_(sw_path)
+        server_(server), conn_(std::move(conn)), sw_path_(sw_path)
     {
         init_shm_telemetry();
 
-        globalStateIface_ =
+        global_state_iface_ =
             server_.add_interface(ist_path, "com.nvidia.vera.ist.State");
-        globalStateIface_->register_property("IstInProgress", false);
-        globalStateIface_->initialize();
+        global_state_iface_->register_property("IstInProgress", false);
+        global_state_iface_->initialize();
 
-        swVersionIface_ = server_.add_interface(
+        sw_version_iface_ = server_.add_interface(
             sw_path, "xyz.openbmc_project.Software.Version");
-        swVersionIface_->register_property("Version", std::string("Unknown"));
-        swVersionIface_->initialize();
+        sw_version_iface_->register_property("Version", std::string("Unknown"));
+        sw_version_iface_->initialize();
 
-        activationIface_ = server_.add_interface(
+        activation_iface_ = server_.add_interface(
             sw_path, "xyz.openbmc_project.Software.Activation");
-        activationIface_->register_property("Activation",
-                                            std::string(k_activation_active));
-        activationIface_->initialize();
+        activation_iface_->register_property("Activation",
+                                             std::string(k_activation_active));
+        activation_iface_->initialize();
 
-        opStatusIface_ = server_.add_interface(sw_path, k_op_status_iface);
-        opStatusIface_->register_property("Functional", true);
-        opStatusIface_->initialize();
+        op_status_iface_ = server_.add_interface(sw_path, k_op_status_iface);
+        op_status_iface_->register_property("Functional", true);
+        op_status_iface_->initialize();
     }
 
     void createRunObject(const std::string& run_path,
@@ -64,96 +64,96 @@ class DbusStatePublisher final : public StatePublisher
     {
         removeRunObject();
 
-        runStateIface_ =
+        run_state_iface_ =
             server_.add_interface(run_path, "com.nvidia.vera.ist.run.State");
-        runStateIface_->register_property("Stage",
-                                          istStageToString(IstStage::idle));
-        runStateIface_->initialize();
+        run_state_iface_->register_property("Stage",
+                                            istStageToString(IstStage::idle));
+        run_state_iface_->initialize();
 
-        runProgIface_ = server_.add_interface(
+        run_prog_iface_ = server_.add_interface(
             run_path, "xyz.openbmc_project.Common.Progress");
-        runProgIface_->register_property(
+        run_prog_iface_->register_property(
             "Status", status_to_dbus_string(IstStatus::inProgress));
-        runProgIface_->register_property("Progress", uint8_t{0});
-        runProgIface_->register_property("StartTime", epoch_now());
-        runProgIface_->register_property("CompletedTime", uint64_t{0});
-        runProgIface_->initialize();
+        run_prog_iface_->register_property("Progress", uint8_t{0});
+        run_prog_iface_->register_property("StartTime", epoch_now());
+        run_prog_iface_->register_property("CompletedTime", uint64_t{0});
+        run_prog_iface_->initialize();
 
         if (results_fd_cb)
         {
-            runResultsIface_ = server_.add_interface(
+            run_results_iface_ = server_.add_interface(
                 run_path, "com.nvidia.vera.ist.run.Results");
-            runResultsIface_->register_method("GetResultsFd",
-                                              std::move(results_fd_cb));
-            runResultsIface_->initialize();
+            run_results_iface_->register_method("GetResultsFd",
+                                                std::move(results_fd_cb));
+            run_results_iface_->initialize();
         }
     }
 
     void removeRunObject() override
     {
-        if (runResultsIface_)
+        if (run_results_iface_)
         {
-            defer_remove_interface(std::move(runResultsIface_));
+            defer_remove_interface(std::move(run_results_iface_));
         }
-        if (runProgIface_)
+        if (run_prog_iface_)
         {
-            defer_remove_interface(std::move(runProgIface_));
+            defer_remove_interface(std::move(run_prog_iface_));
         }
-        if (runStateIface_)
+        if (run_state_iface_)
         {
-            defer_remove_interface(std::move(runStateIface_));
+            defer_remove_interface(std::move(run_state_iface_));
         }
     }
 
     void publish(const IstState& state) override
     {
-        if (globalStateIface_)
+        if (global_state_iface_)
         {
-            globalStateIface_->set_property("IstInProgress",
-                                            state.stage != IstStage::idle);
+            global_state_iface_->set_property("IstInProgress",
+                                              state.stage != IstStage::idle);
         }
-        if (runStateIface_)
+        if (run_state_iface_)
         {
-            runStateIface_->set_property("Stage",
-                                         istStageToString(state.stage));
+            run_state_iface_->set_property("Stage",
+                                           istStageToString(state.stage));
         }
-        if (runProgIface_)
+        if (run_prog_iface_)
         {
-            runProgIface_->set_property("Status",
-                                        status_to_dbus_string(state.status));
-            runProgIface_->set_property("Progress", state.progress);
+            run_prog_iface_->set_property("Status",
+                                          status_to_dbus_string(state.status));
+            run_prog_iface_->set_property("Progress", state.progress);
             if (state.status != IstStatus::inProgress)
             {
-                runProgIface_->set_property("CompletedTime", epoch_now());
+                run_prog_iface_->set_property("CompletedTime", epoch_now());
             }
         }
     }
 
     void reSignalStage() override
     {
-        if (runStateIface_)
+        if (run_state_iface_)
         {
-            runStateIface_->signal_property("Stage");
+            run_state_iface_->signal_property("Stage");
         }
     }
 
     void publishProgress(uint8_t progress) override
     {
-        if (runProgIface_)
+        if (run_prog_iface_)
         {
-            runProgIface_->set_property("Progress", progress);
+            run_prog_iface_->set_property("Progress", progress);
         }
     }
 
     void publishVersion(const std::string& version) override
     {
-        if (swVersionIface_)
+        if (sw_version_iface_)
         {
-            swVersionIface_->set_property("Version", version);
+            sw_version_iface_->set_property("Version", version);
         }
         else
         {
-            std::cerr << "publishVersion: swVersionIface_ is null, version="
+            std::cerr << "publishVersion: sw_version_iface_ is null, version="
                       << version << '\n';
         }
     }
@@ -161,42 +161,42 @@ class DbusStatePublisher final : public StatePublisher
     void publishActivation(std::string_view state) override
     {
         const bool functional = (state == k_activation_active);
-        if (activationIface_)
+        if (activation_iface_)
         {
-            activationIface_->set_property("Activation", std::string(state));
+            activation_iface_->set_property("Activation", std::string(state));
         }
-        if (opStatusIface_)
+        if (op_status_iface_)
         {
-            opStatusIface_->set_property("Functional", functional);
+            op_status_iface_->set_property("Functional", functional);
         }
-        publish_functional_on_shm(swPath_, functional);
+        publish_functional_on_shm(sw_path_, functional);
     }
 
     void createActivationProgress() override
     {
-        if (activationProgressIface_)
+        if (activation_progress_iface_)
         {
-            server_.remove_interface(activationProgressIface_);
+            server_.remove_interface(activation_progress_iface_);
         }
-        activationProgressIface_ = server_.add_interface(
-            swPath_, "xyz.openbmc_project.Software.ActivationProgress");
-        activationProgressIface_->register_property("Progress", uint8_t{0});
-        activationProgressIface_->initialize();
+        activation_progress_iface_ = server_.add_interface(
+            sw_path_, "xyz.openbmc_project.Software.ActivationProgress");
+        activation_progress_iface_->register_property("Progress", uint8_t{0});
+        activation_progress_iface_->initialize();
     }
 
     void publishActivationProgress(uint8_t progress) override
     {
-        if (activationProgressIface_)
+        if (activation_progress_iface_)
         {
-            activationProgressIface_->set_property("Progress", progress);
+            activation_progress_iface_->set_property("Progress", progress);
         }
     }
 
     void removeActivationProgress() override
     {
-        if (activationProgressIface_)
+        if (activation_progress_iface_)
         {
-            defer_remove_interface(std::move(activationProgressIface_));
+            defer_remove_interface(std::move(activation_progress_iface_));
         }
     }
 
@@ -254,15 +254,15 @@ class DbusStatePublisher final : public StatePublisher
 
     sdbusplus::asio::object_server& server_;
     std::shared_ptr<sdbusplus::asio::connection> conn_;
-    std::string swPath_;
-    std::shared_ptr<sdbusplus::asio::dbus_interface> globalStateIface_;
-    std::shared_ptr<sdbusplus::asio::dbus_interface> runStateIface_;
-    std::shared_ptr<sdbusplus::asio::dbus_interface> runProgIface_;
-    std::shared_ptr<sdbusplus::asio::dbus_interface> runResultsIface_;
-    std::shared_ptr<sdbusplus::asio::dbus_interface> swVersionIface_;
-    std::shared_ptr<sdbusplus::asio::dbus_interface> activationIface_;
-    std::shared_ptr<sdbusplus::asio::dbus_interface> opStatusIface_;
-    std::shared_ptr<sdbusplus::asio::dbus_interface> activationProgressIface_;
+    std::string sw_path_;
+    std::shared_ptr<sdbusplus::asio::dbus_interface> global_state_iface_;
+    std::shared_ptr<sdbusplus::asio::dbus_interface> run_state_iface_;
+    std::shared_ptr<sdbusplus::asio::dbus_interface> run_prog_iface_;
+    std::shared_ptr<sdbusplus::asio::dbus_interface> run_results_iface_;
+    std::shared_ptr<sdbusplus::asio::dbus_interface> sw_version_iface_;
+    std::shared_ptr<sdbusplus::asio::dbus_interface> activation_iface_;
+    std::shared_ptr<sdbusplus::asio::dbus_interface> op_status_iface_;
+    std::shared_ptr<sdbusplus::asio::dbus_interface> activation_progress_iface_;
 };
 
 std::unique_ptr<StatePublisher>

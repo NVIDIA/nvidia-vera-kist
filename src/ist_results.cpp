@@ -80,10 +80,10 @@ class ArchiveWriter
             archive_write_free(ar_);
             ar_ = nullptr;
         }
-        if (opened_ && !finishedOk_)
+        if (opened_ && !finished_ok_)
         {
             std::error_code ec;
-            fs::remove(archivePath_, ec);
+            fs::remove(archive_path_, ec);
         }
     }
 
@@ -94,12 +94,12 @@ class ArchiveWriter
 
     bool open(const fs::path& archive_path)
     {
-        archivePath_ = archive_path;
+        archive_path_ = archive_path;
         ar_ = archive_write_new();
         archive_write_add_filter_gzip(ar_);
         archive_write_set_format_pax_restricted(ar_);
 
-        if (archive_write_open_filename(ar_, archivePath_.c_str()) !=
+        if (archive_write_open_filename(ar_, archive_path_.c_str()) !=
             ARCHIVE_OK)
         {
             std::cerr << "IST: archive_write_open_filename failed: "
@@ -203,19 +203,19 @@ class ArchiveWriter
         if (opened_ && !ok)
         {
             std::error_code ec;
-            fs::remove(archivePath_, ec);
+            fs::remove(archive_path_, ec);
         }
-        finishedOk_ = ok;
+        finished_ok_ = ok;
         return ok;
     }
 
   private:
     struct archive* ar_ = nullptr;
     UniqueFd fd_;
-    fs::path archivePath_;
+    fs::path archive_path_;
     bool opened_ = false;
     bool failed_ = false;
-    bool finishedOk_ = false;
+    bool finished_ok_ = false;
     std::array<char, k_archive_buf_size> buf_{};
 };
 
@@ -269,8 +269,8 @@ class ArchiveSession : public std::enable_shared_from_this<ArchiveSession>
   public:
     ArchiveSession(boost::asio::io_context& io, fs::path results_dir,
                    std::move_only_function<void(bool ok) const> on_complete) :
-        io_(io), resultsDir_(std::move(results_dir)),
-        onComplete_(std::move(on_complete))
+        io_(io), results_dir_(std::move(results_dir)),
+        on_complete_(std::move(on_complete))
     {}
 
     ArchiveSession(const ArchiveSession&) = delete;
@@ -304,15 +304,15 @@ class ArchiveSession : public std::enable_shared_from_this<ArchiveSession>
         // start().
         if (!started_)
         {
-            files_ = collect_result_files(resultsDir_);
+            files_ = collect_result_files(results_dir_);
             if (files_.empty())
             {
                 std::cerr << "IST: no result files to archive in "
-                          << resultsDir_ << '\n';
+                          << results_dir_ << '\n';
                 finish(false);
                 return;
             }
-            if (!writer_.open(resultsDir_ / k_archive_name))
+            if (!writer_.open(results_dir_ / k_archive_name))
             {
                 finish(false);
                 return;
@@ -322,7 +322,7 @@ class ArchiveSession : public std::enable_shared_from_this<ArchiveSession>
             return;
         }
 
-        if (!entryOpen_)
+        if (!entry_open_)
         {
             if (index_ >= files_.size())
             {
@@ -334,7 +334,7 @@ class ArchiveSession : public std::enable_shared_from_this<ArchiveSession>
                 finish(false);
                 return;
             }
-            entryOpen_ = true;
+            entry_open_ = true;
             post_step();
             return;
         }
@@ -360,7 +360,7 @@ class ArchiveSession : public std::enable_shared_from_this<ArchiveSession>
                       << ec.message() << '\n';
         }
         ++index_;
-        entryOpen_ = false;
+        entry_open_ = false;
         post_step();
     }
 
@@ -372,7 +372,7 @@ class ArchiveSession : public std::enable_shared_from_this<ArchiveSession>
         }
         finished_ = true;
         bool writer_ok = writer_.finish();
-        auto cb = std::move(onComplete_);
+        auto cb = std::move(on_complete_);
         if (cb)
         {
             cb(ok && writer_ok);
@@ -380,13 +380,13 @@ class ArchiveSession : public std::enable_shared_from_this<ArchiveSession>
     }
 
     boost::asio::io_context& io_;
-    fs::path resultsDir_;
-    std::move_only_function<void(bool ok) const> onComplete_;
+    fs::path results_dir_;
+    std::move_only_function<void(bool ok) const> on_complete_;
     ArchiveWriter writer_;
     std::vector<fs::path> files_;
     size_t index_ = 0;
     bool started_ = false;
-    bool entryOpen_ = false;
+    bool entry_open_ = false;
     bool finished_ = false;
 };
 
@@ -407,7 +407,7 @@ sdbusplus::message::unix_fd IstService::getResultsFd()
             EBUSY, "Cannot retrieve results while IST is in progress");
     }
 
-    const fs::path& results_dir = platformCfg_.storage.resultStoragePath;
+    const fs::path& results_dir = platform_cfg_.storage.resultStoragePath;
     if (results_dir.empty())
     {
         std::cerr << "IST: resultStoragePath not configured\n";

@@ -383,7 +383,7 @@ class PldmHeaderPeekSession :
                               UniqueFd read_fd, PldmComponentInfo comp) const>
                               on_complete) :
         stream_(io, read_fd.release()), deadline_(io), timeout_(timeout),
-        onComplete_(std::move(on_complete))
+        on_complete_(std::move(on_complete))
     {}
 
     void start()
@@ -510,7 +510,7 @@ class PldmHeaderPeekSession :
             read_fd = UniqueFd(stream_.release());
         }
 
-        auto cb = std::move(onComplete_);
+        auto cb = std::move(on_complete_);
         if (cb)
         {
             cb(ok, std::move(prefix_), std::move(read_fd), comp_);
@@ -523,7 +523,7 @@ class PldmHeaderPeekSession :
     std::move_only_function<void(bool ok, std::vector<uint8_t> prefix,
                                  UniqueFd read_fd, PldmComponentInfo comp)
                                 const>
-        onComplete_;
+        on_complete_;
     std::array<char, k_transfer_buf_size> buf_{};
     std::vector<uint8_t> prefix_;
     PldmComponentInfo comp_{};
@@ -556,22 +556,22 @@ class TransferSession : public std::enable_shared_from_this<TransferSession>
         std::vector<uint8_t> prefix, PldmComponentInfo comp,
         std::move_only_function<void(uint8_t progress) const> on_progress,
         std::move_only_function<void(bool ok) const> on_complete) :
-        stream_(io, read_fd.release()), deadline_(io), progressTimer_(io),
-        imagePath_(std::move(image_path)), timeout_(timeout),
-        progressInterval_(progress_interval), prefix_(std::move(prefix)),
-        payloadOffset_(comp.offset), expectedCrc_(comp.payloadCrc),
-        payloadTotal_(comp.payloadSize), onProgress_(std::move(on_progress)),
-        onComplete_(std::move(on_complete))
+        stream_(io, read_fd.release()), deadline_(io), progress_timer_(io),
+        image_path_(std::move(image_path)), timeout_(timeout),
+        progress_interval_(progress_interval), prefix_(std::move(prefix)),
+        payload_offset_(comp.offset), expected_crc_(comp.payloadCrc),
+        payload_total_(comp.payloadSize), on_progress_(std::move(on_progress)),
+        on_complete_(std::move(on_complete))
     {
         // Overwrite in place (no room for a temp copy): once the validated
         // header gets us here, a payload-level failure intentionally leaves no
         // image. Header/UUID failures are rejected earlier and never reach
         // this.
-        output_.open(imagePath_, std::ios::binary | std::ios::trunc);
+        output_.open(image_path_, std::ios::binary | std::ios::trunc);
         if (!output_)
         {
             throw std::system_error(errno, std::generic_category(),
-                                    "Failed to open " + imagePath_.string());
+                                    "Failed to open " + image_path_.string());
         }
     }
 
@@ -588,10 +588,10 @@ class TransferSession : public std::enable_shared_from_this<TransferSession>
         // The buffered prefix holds the full PLDM header plus, usually, the
         // first payload bytes.  Write only the payload portion; the header is
         // intentionally never persisted.
-        if (prefix_.size() > payloadOffset_)
+        if (prefix_.size() > payload_offset_)
         {
-            const uint8_t* payload = prefix_.data() + payloadOffset_;
-            size_t payload_len = prefix_.size() - payloadOffset_;
+            const uint8_t* payload = prefix_.data() + payload_offset_;
+            size_t payload_len = prefix_.size() - payload_offset_;
             if (!write_payload(payload, payload_len))
             {
                 return;
@@ -616,8 +616,8 @@ class TransferSession : public std::enable_shared_from_this<TransferSession>
             finish(false);
             return false;
         }
-        crcState_ = crc32_update(crcState_, data, len);
-        payloadBytes_ += len;
+        crc_state_ = crc32_update(crc_state_, data, len);
+        payload_bytes_ += len;
         return true;
     }
 
@@ -639,8 +639,8 @@ class TransferSession : public std::enable_shared_from_this<TransferSession>
 
     void schedule_progress_tick()
     {
-        progressTimer_.expires_after(progressInterval_);
-        progressTimer_.async_wait(
+        progress_timer_.expires_after(progress_interval_);
+        progress_timer_.async_wait(
             [weak = weak_from_this()](const boost::system::error_code& ec) {
                 if (ec)
                 {
@@ -660,14 +660,14 @@ class TransferSession : public std::enable_shared_from_this<TransferSession>
             return;
         }
 
-        if (payloadBytes_ != reportedBytes_)
+        if (payload_bytes_ != reported_bytes_)
         {
-            reportedBytes_ = payloadBytes_;
+            reported_bytes_ = payload_bytes_;
             uint8_t progress = next_progress();
-            if (progress != lastProgress_ && onProgress_)
+            if (progress != last_progress_ && on_progress_)
             {
-                lastProgress_ = progress;
-                onProgress_(progress);
+                last_progress_ = progress;
+                on_progress_(progress);
             }
         }
 
@@ -676,13 +676,13 @@ class TransferSession : public std::enable_shared_from_this<TransferSession>
 
     uint8_t next_progress() const
     {
-        if (payloadTotal_ == 0)
+        if (payload_total_ == 0)
         {
             return static_cast<uint8_t>(std::min<unsigned>(
-                lastProgress_ + 1U, k_transfer_progress_max));
+                last_progress_ + 1U, k_transfer_progress_max));
         }
-        uint64_t pct = static_cast<uint64_t>(payloadBytes_) *
-                       k_transfer_progress_max / payloadTotal_;
+        uint64_t pct = static_cast<uint64_t>(payload_bytes_) *
+                       k_transfer_progress_max / payload_total_;
         return static_cast<uint8_t>(
             std::min<uint64_t>(pct, k_transfer_progress_max));
     }
@@ -729,18 +729,18 @@ class TransferSession : public std::enable_shared_from_this<TransferSession>
 
     void verify_and_finish()
     {
-        uint32_t computed = ~crcState_;
-        if (computed != expectedCrc_)
+        uint32_t computed = ~crc_state_;
+        if (computed != expected_crc_)
         {
             std::cerr << "PLDM payload CRC mismatch: stored 0x" << std::hex
-                      << expectedCrc_ << " computed 0x" << computed << std::dec
-                      << " (" << payloadBytes_
+                      << expected_crc_ << " computed 0x" << computed << std::dec
+                      << " (" << payload_bytes_
                       << " payload bytes received; truncated transfer?)\n";
             finish(false);
             return;
         }
 
-        std::cout << "Image transfer complete: " << payloadBytes_
+        std::cout << "Image transfer complete: " << payload_bytes_
                   << " payload bytes, CRC verified\n";
         committed_ = true;
         finish(true);
@@ -753,7 +753,7 @@ class TransferSession : public std::enable_shared_from_this<TransferSession>
             return;
         }
         std::cerr << "Transfer timed out after " << timeout_.count()
-                  << "s of inactivity (" << payloadBytes_
+                  << "s of inactivity (" << payload_bytes_
                   << " payload bytes received)\n";
         stream_.close();
         finish(false);
@@ -765,7 +765,7 @@ class TransferSession : public std::enable_shared_from_this<TransferSession>
         if (!committed_)
         {
             std::error_code ec;
-            fs::remove(imagePath_, ec);
+            fs::remove(image_path_, ec);
         }
     }
 
@@ -777,9 +777,9 @@ class TransferSession : public std::enable_shared_from_this<TransferSession>
         }
         finished_ = true;
         deadline_.cancel();
-        progressTimer_.cancel();
+        progress_timer_.cancel();
         discard_if_uncommitted();
-        auto cb = std::move(onComplete_);
+        auto cb = std::move(on_complete_);
         if (cb)
         {
             cb(ok);
@@ -788,22 +788,22 @@ class TransferSession : public std::enable_shared_from_this<TransferSession>
 
     boost::asio::posix::stream_descriptor stream_;
     boost::asio::steady_timer deadline_;
-    boost::asio::steady_timer progressTimer_;
+    boost::asio::steady_timer progress_timer_;
     std::ofstream output_;
-    fs::path imagePath_;
+    fs::path image_path_;
     std::chrono::seconds timeout_;
-    std::chrono::seconds progressInterval_;
+    std::chrono::seconds progress_interval_;
     std::vector<uint8_t> prefix_;
-    size_t payloadOffset_;
-    uint32_t expectedCrc_;
-    uint64_t payloadTotal_;
-    std::move_only_function<void(uint8_t progress) const> onProgress_;
-    std::move_only_function<void(bool ok) const> onComplete_;
+    size_t payload_offset_;
+    uint32_t expected_crc_;
+    uint64_t payload_total_;
+    std::move_only_function<void(uint8_t progress) const> on_progress_;
+    std::move_only_function<void(bool ok) const> on_complete_;
     std::array<char, k_transfer_buf_size> buf_{};
-    uint32_t crcState_{0xFFFFFFFF};
-    size_t payloadBytes_{0};
-    size_t reportedBytes_{0};
-    uint8_t lastProgress_{0};
+    uint32_t crc_state_{0xFFFFFFFF};
+    size_t payload_bytes_{0};
+    size_t reported_bytes_{0};
+    uint8_t last_progress_{0};
     bool finished_{false};
     bool committed_{false};
 };
@@ -824,7 +824,7 @@ std::shared_ptr<VectorManager>
 VectorManager::VectorManager(boost::asio::io_context& io,
                              StatePublisher& publisher,
                              const IstPlatformConfig& cfg) :
-    io_(io), publisher_(publisher), platformCfg_(cfg)
+    io_(io), publisher_(publisher), platform_cfg_(cfg)
 {}
 
 void VectorManager::mountVectorsOnStartup()
@@ -838,12 +838,12 @@ void VectorManager::mountVectorsOnStartup()
 std::string VectorManager::startUpdate(UniqueFd image,
                                        std::string_view apply_time)
 {
-    if (updateInProgress_)
+    if (update_in_progress_)
     {
         std::cerr << "StartUpdate rejected: an update is already in progress\n";
         throw ist_err::Unavailable{};
     }
-    if (platformCfg_.storage.vectorStoragePath.empty())
+    if (platform_cfg_.storage.vectorStoragePath.empty())
     {
         std::cerr << "StartUpdate rejected: vector storage path is empty\n";
         throw ist_err::InternalFailure{};
@@ -862,14 +862,14 @@ std::string VectorManager::startUpdate(UniqueFd image,
     (void)apply_time; // Immediate and OnReset are accepted; apply is always
                       // immediate.
 
-    const fs::path& storage_path = platformCfg_.storage.vectorStoragePath;
+    const fs::path& storage_path = platform_cfg_.storage.vectorStoragePath;
     fs::path image_path = storage_path / k_image_file_name;
 
-    updateInProgress_ = true;
+    update_in_progress_ = true;
 
     std::shared_ptr<PldmHeaderPeekSession> peek =
         std::make_shared<PldmHeaderPeekSession>(
-            io_, std::move(image), platformCfg_.transferInactivityTimeout,
+            io_, std::move(image), platform_cfg_.transferInactivityTimeout,
             [weak = weak_from_this(),
              image_path](bool ok, std::vector<uint8_t> prefix, UniqueFd read_fd,
                          PldmComponentInfo comp) {
@@ -880,16 +880,16 @@ std::string VectorManager::startUpdate(UniqueFd image,
                                                image_path);
                 }
             });
-    activeHeaderPeek_ = peek;
+    active_header_peek_ = peek;
     peek->start();
 
     return std::format("/xyz/openbmc_project/inventory_software/{}",
-                       platformCfg_.softwareInventoryId);
+                       platform_cfg_.softwareInventoryId);
 }
 
 void VectorManager::onTransferComplete(bool ok)
 {
-    activeTransfer_.reset();
+    active_transfer_.reset();
     if (!ok)
     {
         std::cerr << "Image transfer failed\n";
@@ -906,7 +906,7 @@ void VectorManager::onTransferComplete(bool ok)
 
 bool VectorManager::teardownMounts()
 {
-    const fs::path& mount_path = platformCfg_.storage.vectorMountPath;
+    const fs::path& mount_path = platform_cfg_.storage.vectorMountPath;
 
     if (mount_path.empty())
     {
@@ -936,8 +936,8 @@ bool VectorManager::teardownMounts()
 
 bool VectorManager::mountImages()
 {
-    const fs::path& storage_path = platformCfg_.storage.vectorStoragePath;
-    const fs::path& mount_path = platformCfg_.storage.vectorMountPath;
+    const fs::path& storage_path = platform_cfg_.storage.vectorStoragePath;
+    const fs::path& mount_path = platform_cfg_.storage.vectorMountPath;
 
     if (storage_path.empty() || mount_path.empty())
     {
@@ -1041,7 +1041,7 @@ bool VectorManager::mountImages()
 
 void VectorManager::readAndPublishVersion()
 {
-    const fs::path& mount_path = platformCfg_.storage.vectorMountPath;
+    const fs::path& mount_path = platform_cfg_.storage.vectorMountPath;
     if (mount_path.empty())
     {
         std::cerr << "vectorMountPath not configured; skipping version read\n";
@@ -1089,7 +1089,7 @@ void VectorManager::finishUpdate(bool ok)
     publisher_.publishActivation(ok ? k_activation_active
                                     : k_activation_failed);
     publisher_.removeActivationProgress();
-    updateInProgress_ = false;
+    update_in_progress_ = false;
 }
 
 void VectorManager::onHeaderPeekComplete(bool ok, std::vector<uint8_t> prefix,
@@ -1097,7 +1097,7 @@ void VectorManager::onHeaderPeekComplete(bool ok, std::vector<uint8_t> prefix,
                                          PldmComponentInfo comp,
                                          const fs::path& image_path)
 {
-    activeHeaderPeek_.reset();
+    active_header_peek_.reset();
     if (!ok)
     {
         finishUpdate(false);
@@ -1133,8 +1133,8 @@ void VectorManager::onTeardownComplete(bool ok, UniqueFd read_fd,
         std::shared_ptr<TransferSession> session =
             std::make_shared<TransferSession>(
                 io_, std::move(read_fd), image_path,
-                platformCfg_.transferInactivityTimeout,
-                platformCfg_.transferProgressInterval, std::move(prefix), comp,
+                platform_cfg_.transferInactivityTimeout,
+                platform_cfg_.transferProgressInterval, std::move(prefix), comp,
                 [weak = weak_from_this()](uint8_t progress) {
                     std::shared_ptr<VectorManager> self = weak.lock();
                     if (self)
@@ -1153,7 +1153,7 @@ void VectorManager::onTeardownComplete(bool ok, UniqueFd read_fd,
         publisher_.createActivationProgress();
         publisher_.publishActivationProgress(0);
 
-        activeTransfer_ = session;
+        active_transfer_ = session;
         session->start();
     }
     catch (const std::system_error& e)
@@ -1177,7 +1177,7 @@ void VectorManager::onMountComplete(bool ok)
 
 void VectorManager::ensureMounted()
 {
-    const fs::path& mount_path = platformCfg_.storage.vectorMountPath;
+    const fs::path& mount_path = platform_cfg_.storage.vectorMountPath;
     if (mount_path.empty())
     {
         return;
@@ -1218,5 +1218,5 @@ std::string IstService::startUpdate(int image_fd, std::string_view apply_time)
                   << istStageToString(state_.stage) << ")\n";
         throw ist_err::Unavailable{};
     }
-    return vectorManager_->startUpdate(std::move(image), apply_time);
+    return vector_manager_->startUpdate(std::move(image), apply_time);
 }

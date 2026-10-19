@@ -142,8 +142,8 @@ class FileVerifier
     {
         file_ = file;
 
-        pubKey_ = load_public_key(pub_key_path);
-        if (!pubKey_)
+        pub_key_ = load_public_key(pub_key_path);
+        if (!pub_key_)
         {
             return false;
         }
@@ -156,7 +156,7 @@ class FileVerifier
         }
         std::string sig_b64((std::istreambuf_iterator<char>(sig_stream)),
                             std::istreambuf_iterator<char>());
-        if (!base64_decode(sig_b64, sigBytes_))
+        if (!base64_decode(sig_b64, sig_bytes_))
         {
             std::cerr << "Failed to base64-decode signature: " << sig_file
                       << '\n';
@@ -170,14 +170,14 @@ class FileVerifier
             return false;
         }
         if (EVP_DigestVerifyInit(ctx_.get(), nullptr, EVP_sha384(), nullptr,
-                                 pubKey_.get()) != 1)
+                                 pub_key_.get()) != 1)
         {
             std::cerr << "EVP_DigestVerifyInit failed for: " << file_ << '\n';
             return false;
         }
 
-        dataStream_.open(file_, std::ios::binary);
-        if (!dataStream_)
+        data_stream_.open(file_, std::ios::binary);
+        if (!data_stream_)
         {
             std::cerr << "Failed to open data file: " << file_ << '\n';
             return false;
@@ -194,9 +194,9 @@ class FileVerifier
 
     State pump(std::span<char> buf)
     {
-        dataStream_.read(buf.data(), static_cast<std::streamsize>(buf.size()));
-        std::streamsize n = dataStream_.gcount();
-        if (dataStream_ || n > 0)
+        data_stream_.read(buf.data(), static_cast<std::streamsize>(buf.size()));
+        std::streamsize n = data_stream_.gcount();
+        if (data_stream_ || n > 0)
         {
             if (n > 0 && EVP_DigestVerifyUpdate(ctx_.get(), buf.data(),
                                                 static_cast<size_t>(n)) != 1)
@@ -208,8 +208,8 @@ class FileVerifier
             return State::More;
         }
 
-        int rc = EVP_DigestVerifyFinal(ctx_.get(), sigBytes_.data(),
-                                       sigBytes_.size());
+        int rc = EVP_DigestVerifyFinal(ctx_.get(), sig_bytes_.data(),
+                                       sig_bytes_.size());
         if (rc != 1)
         {
             std::cerr << "Signature verification FAILED for: " << file_ << '\n';
@@ -221,10 +221,10 @@ class FileVerifier
 
   private:
     fs::path file_;
-    EvpPkeyPtr pubKey_;
+    EvpPkeyPtr pub_key_;
     EvpMdCtxPtr ctx_;
-    std::vector<uint8_t> sigBytes_;
-    std::ifstream dataStream_;
+    std::vector<uint8_t> sig_bytes_;
+    std::ifstream data_stream_;
 };
 
 bool verifyFileSignature(const fs::path& file, const fs::path& sig_file,
@@ -411,7 +411,7 @@ class SignatureVerifySession :
     SignatureVerifySession(
         boost::asio::io_context& io, IstPlatformConfig cfg,
         std::move_only_function<void(bool ok) const> on_complete) :
-        io_(io), cfg_(std::move(cfg)), onComplete_(std::move(on_complete))
+        io_(io), cfg_(std::move(cfg)), on_complete_(std::move(on_complete))
     {}
 
     SignatureVerifySession(const SignatureVerifySession&) = delete;
@@ -457,7 +457,7 @@ class SignatureVerifySession :
             return;
         }
 
-        if (!verifierActive_)
+        if (!verifier_active_)
         {
             if (index_ >= targets_.size())
             {
@@ -470,7 +470,7 @@ class SignatureVerifySession :
                 finish(false);
                 return;
             }
-            verifierActive_ = true;
+            verifier_active_ = true;
             post_step();
             return;
         }
@@ -488,7 +488,7 @@ class SignatureVerifySession :
         }
 
         verifier_ = FileVerifier();
-        verifierActive_ = false;
+        verifier_active_ = false;
         ++index_;
         post_step();
     }
@@ -500,7 +500,7 @@ class SignatureVerifySession :
             return;
         }
         finished_ = true;
-        auto cb = std::move(onComplete_);
+        auto cb = std::move(on_complete_);
         if (cb)
         {
             cb(ok);
@@ -509,13 +509,13 @@ class SignatureVerifySession :
 
     boost::asio::io_context& io_;
     IstPlatformConfig cfg_;
-    std::move_only_function<void(bool ok) const> onComplete_;
+    std::move_only_function<void(bool ok) const> on_complete_;
     std::vector<VerifyTarget> targets_;
     FileVerifier verifier_;
     std::array<char, k_verify_chunk_size> buf_{};
     size_t index_ = 0;
     bool enumerated_ = false;
-    bool verifierActive_ = false;
+    bool verifier_active_ = false;
     bool finished_ = false;
 };
 
