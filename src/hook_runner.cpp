@@ -115,8 +115,8 @@ class HookProcess final : public std::enable_shared_from_this<HookProcess>
         {
             std::cerr << what_ << " timeout " << timeout.count()
                       << "s is invalid, using default "
-                      << HookRunner::defaultTimeout.count() << "s\n";
-            timeout = HookRunner::defaultTimeout;
+                      << HookRunner::k_default_timeout.count() << "s\n";
+            timeout = HookRunner::k_default_timeout;
         }
         deadline_.expires_after(timeout);
         deadline_.async_wait(
@@ -245,7 +245,7 @@ class HookRunnerImpl final : public HookRunner
     void async_run(const std::string& cmd, std::string what,
                    std::move_only_function<void(bool) const> done,
                    std::vector<std::string> args = {},
-                   std::chrono::seconds timeout = defaultTimeout) override;
+                   std::chrono::seconds timeout = k_default_timeout) override;
 
   private:
     boost::asio::io_context& io_;

@@ -333,7 +333,7 @@ struct IstState
 class HookRunner
 {
   public:
-    static constexpr std::chrono::seconds defaultTimeout{120};
+    static constexpr std::chrono::seconds k_default_timeout{120};
 
     // The reset hooks wait for the CPU MCTP endpoints and reset again if they
     // do not come back, so they need room for two resets and two waits: about
@@ -352,10 +352,11 @@ class HookRunner
     static constexpr std::chrono::seconds k_cak_bypass_timeout{360};
 
     virtual ~HookRunner() = default;
-    virtual void async_run(const std::string& cmd, std::string what,
-                           std::move_only_function<void(bool ok) const> done,
-                           std::vector<std::string> args = {},
-                           std::chrono::seconds timeout = defaultTimeout) = 0;
+    virtual void
+        async_run(const std::string& cmd, std::string what,
+                  std::move_only_function<void(bool ok) const> done,
+                  std::vector<std::string> args = {},
+                  std::chrono::seconds timeout = k_default_timeout) = 0;
 };
 
 class HostPowerMonitor
