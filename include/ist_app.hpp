@@ -252,10 +252,10 @@ struct IstTestConfig
 enum class IstStage
 {
     idle,
-    collateralVerification,
-    pendingIstBoot,
-    pendingPowerCycle,
-    runningIst,
+    collateral_verification,
+    pending_ist_boot,
+    pending_power_cycle,
+    running_ist,
     cleanup,
 };
 
@@ -265,13 +265,13 @@ inline std::string istStageToString(IstStage s)
     {
         case IstStage::idle:
             return "Idle";
-        case IstStage::collateralVerification:
+        case IstStage::collateral_verification:
             return "CollateralVerification";
-        case IstStage::pendingIstBoot:
+        case IstStage::pending_ist_boot:
             return "PendingISTBoot";
-        case IstStage::pendingPowerCycle:
+        case IstStage::pending_power_cycle:
             return "PendingPowerCycle";
-        case IstStage::runningIst:
+        case IstStage::running_ist:
             return "RunningIST";
         case IstStage::cleanup:
             return "Cleanup";
@@ -290,7 +290,7 @@ inline std::string istStageToString(IstStage s)
  */
 enum class IstStatus
 {
-    inProgress,
+    in_progress,
     completed,
     failed,
     aborted,
@@ -300,7 +300,7 @@ inline std::string istStatusToString(IstStatus s)
 {
     switch (s)
     {
-        case IstStatus::inProgress:
+        case IstStatus::in_progress:
             return "InProgress";
         case IstStatus::completed:
             return "Completed";

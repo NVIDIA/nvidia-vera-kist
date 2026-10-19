@@ -187,9 +187,9 @@ class FileVerifier
 
     enum class State
     {
-        More,
-        Done,
-        Error,
+        more,
+        done,
+        error,
     };
 
     State pump(std::span<char> buf)
@@ -203,9 +203,9 @@ class FileVerifier
             {
                 std::cerr << "EVP_DigestVerifyUpdate failed for: " << file_
                           << '\n';
-                return State::Error;
+                return State::error;
             }
-            return State::More;
+            return State::more;
         }
 
         int rc = EVP_DigestVerifyFinal(ctx_.get(), sig_bytes_.data(),
@@ -213,10 +213,10 @@ class FileVerifier
         if (rc != 1)
         {
             std::cerr << "Signature verification FAILED for: " << file_ << '\n';
-            return State::Error;
+            return State::error;
         }
         std::cerr << "Signature verified OK: " << file_ << '\n';
-        return State::Done;
+        return State::done;
     }
 
   private:
@@ -237,11 +237,11 @@ bool verifyFileSignature(const fs::path& file, const fs::path& sig_file,
     }
 
     std::array<char, 8192> buf{};
-    FileVerifier::State st = FileVerifier::State::More;
-    while ((st = verifier.pump(buf)) == FileVerifier::State::More)
+    FileVerifier::State st = FileVerifier::State::more;
+    while ((st = verifier.pump(buf)) == FileVerifier::State::more)
     {
     }
-    return st == FileVerifier::State::Done;
+    return st == FileVerifier::State::done;
 }
 
 struct VerifyTarget
@@ -476,12 +476,12 @@ class SignatureVerifySession :
         }
 
         FileVerifier::State st = verifier_.pump(buf_);
-        if (st == FileVerifier::State::Error)
+        if (st == FileVerifier::State::error)
         {
             finish(false);
             return;
         }
-        if (st == FileVerifier::State::More)
+        if (st == FileVerifier::State::more)
         {
             post_step();
             return;

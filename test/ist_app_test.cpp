@@ -117,18 +117,18 @@ class MockStatePublisher : public StatePublisher
 TEST(IstStageTest, AllStagesToString)
 {
     EXPECT_EQ(istStageToString(IstStage::idle), "Idle");
-    EXPECT_EQ(istStageToString(IstStage::collateralVerification),
+    EXPECT_EQ(istStageToString(IstStage::collateral_verification),
               "CollateralVerification");
-    EXPECT_EQ(istStageToString(IstStage::pendingIstBoot), "PendingISTBoot");
-    EXPECT_EQ(istStageToString(IstStage::pendingPowerCycle),
+    EXPECT_EQ(istStageToString(IstStage::pending_ist_boot), "PendingISTBoot");
+    EXPECT_EQ(istStageToString(IstStage::pending_power_cycle),
               "PendingPowerCycle");
-    EXPECT_EQ(istStageToString(IstStage::runningIst), "RunningIST");
+    EXPECT_EQ(istStageToString(IstStage::running_ist), "RunningIST");
     EXPECT_EQ(istStageToString(IstStage::cleanup), "Cleanup");
 }
 
 TEST(IstStatusTest, AllStatusesToString)
 {
-    EXPECT_EQ(istStatusToString(IstStatus::inProgress), "InProgress");
+    EXPECT_EQ(istStatusToString(IstStatus::in_progress), "InProgress");
     EXPECT_EQ(istStatusToString(IstStatus::completed), "Completed");
     EXPECT_EQ(istStatusToString(IstStatus::failed), "Failed");
     EXPECT_EQ(istStatusToString(IstStatus::aborted), "Aborted");
@@ -668,7 +668,7 @@ TEST_F(IstServiceTest, StartIstRejectsWhenInProgress)
     ParamMap params;
     std::string run_path = start_ist(params);
     EXPECT_FALSE(run_path.empty());
-    EXPECT_EQ(service_->state().status, IstStatus::inProgress);
+    EXPECT_EQ(service_->state().status, IstStatus::in_progress);
 
     ParamMap params2;
     EXPECT_THROW(service_->startIST(params2), sdbusplus::exception::SdBusError);
@@ -773,8 +773,8 @@ TEST_F(IstServiceTest, StartIstCallsAssertHook)
     ParamMap params;
     start_ist(params);
 
-    EXPECT_EQ(service_->state().status, IstStatus::inProgress);
-    EXPECT_EQ(service_->state().stage, IstStage::pendingIstBoot);
+    EXPECT_EQ(service_->state().status, IstStatus::in_progress);
+    EXPECT_EQ(service_->state().stage, IstStage::pending_ist_boot);
 
     // Verify callback was captured
     ASSERT_TRUE(assert_done);
@@ -824,7 +824,7 @@ TEST_F(IstServiceTest, AssertHookSuccessWaitsForPowerCycle)
     // Simulate hook success → should start power cycle wait
     assert_done(true);
 
-    EXPECT_EQ(service_->state().stage, IstStage::pendingPowerCycle);
+    EXPECT_EQ(service_->state().stage, IstStage::pending_power_cycle);
     ASSERT_TRUE(power_done);
 }
 
@@ -849,7 +849,7 @@ TEST_F(IstServiceTest, PendingPowerCycleReSignalsStageAfterDelay)
     EXPECT_CALL(*publisher_, reSignalStage()).Times(1);
 
     assert_done(true);
-    EXPECT_EQ(service_->state().stage, IstStage::pendingPowerCycle);
+    EXPECT_EQ(service_->state().stage, IstStage::pending_power_cycle);
 
     // Advance past the 2-second re-signal timer
     io_.run_for(std::chrono::seconds(3));
@@ -949,7 +949,7 @@ TEST_F(IstServiceTest, PowerCycleSuccessStartsItm)
     assert_done(true);
     power_done(true);
 
-    EXPECT_EQ(service_->state().stage, IstStage::runningIst);
+    EXPECT_EQ(service_->state().stage, IstStage::running_ist);
     ASSERT_TRUE(itm_done);
 }
 
@@ -995,7 +995,7 @@ TEST_F(IstServiceTest, CakBypassScriptRunsWhenPresent)
 
     cak_done(true);
 
-    EXPECT_EQ(service_->state().stage, IstStage::runningIst);
+    EXPECT_EQ(service_->state().stage, IstStage::running_ist);
     ASSERT_TRUE(itm_done);
 }
 
@@ -1089,7 +1089,7 @@ TEST_F(IstServiceTest, CakBypassSkippedWhenScriptMissing)
     assert_done(true);
     power_done(true);
 
-    EXPECT_EQ(service_->state().stage, IstStage::runningIst);
+    EXPECT_EQ(service_->state().stage, IstStage::running_ist);
     ASSERT_TRUE(itm_done);
 }
 
@@ -1898,7 +1898,7 @@ TEST_F(IstServiceTest, SecondRunAfterCompletionWorks)
     ParamMap params2; // no customTestList this time
     EXPECT_NO_THROW(start_ist(params2));
     EXPECT_EQ(service_->state().progress, 0);
-    EXPECT_EQ(service_->state().status, IstStatus::inProgress);
+    EXPECT_EQ(service_->state().status, IstStatus::in_progress);
 
     assert_done2(true);
     power_done2(true);
@@ -2125,7 +2125,7 @@ TEST_F(IstServiceTest, SecondRunAfterFailureWorks)
 
     ParamMap params2;
     EXPECT_NO_THROW(start_ist(params2));
-    EXPECT_EQ(service_->state().status, IstStatus::inProgress);
+    EXPECT_EQ(service_->state().status, IstStatus::in_progress);
     EXPECT_EQ(service_->state().progress, 0);
 
     assert_done2(true);
@@ -3153,7 +3153,7 @@ TEST_F(IstServiceTest, PreExistingActiveMarkersContinueToIst)
     start_ist(params);
     assert_done(true);
 
-    EXPECT_EQ(service_->state().stage, IstStage::pendingPowerCycle);
+    EXPECT_EQ(service_->state().stage, IstStage::pending_power_cycle);
     EXPECT_TRUE(fs::exists("/tmp/ist/err_marker/PWR_BRAKE"));
 
     fs::remove_all("/tmp/ist/err_marker");
@@ -3182,7 +3182,7 @@ TEST_F(IstServiceTest, DeassertedMarkersCleanedUpAtStart)
     start_ist(params);
     assert_done(true);
 
-    EXPECT_EQ(service_->state().stage, IstStage::pendingPowerCycle);
+    EXPECT_EQ(service_->state().stage, IstStage::pending_power_cycle);
     EXPECT_FALSE(fs::exists("/tmp/ist/err_marker/PWR_BRAKE"));
 
     fs::remove_all("/tmp/ist/err_marker");
@@ -3738,7 +3738,7 @@ TEST_F(IstServiceTest, NoCpuDiscovererSkipsDiscovery)
 
     start_ist();
 
-    EXPECT_EQ(service_->state().stage, IstStage::pendingIstBoot);
+    EXPECT_EQ(service_->state().stage, IstStage::pending_ist_boot);
     ASSERT_TRUE(assert_done);
 }
 

@@ -154,9 +154,9 @@ class ArchiveWriter
 
     enum class Pump
     {
-        More,
-        Done,
-        Error,
+        more,
+        done,
+        error,
     };
 
     Pump pump()
@@ -166,12 +166,12 @@ class ArchiveWriter
         {
             std::cerr << "IST: read failed: " << errno << '\n';
             failed_ = true;
-            return Pump::Error;
+            return Pump::error;
         }
         if (nread == 0)
         {
             fd_ = UniqueFd();
-            return Pump::Done;
+            return Pump::done;
         }
         if (archive_write_data(ar_, buf_.data(), static_cast<size_t>(nread)) <
             0)
@@ -179,9 +179,9 @@ class ArchiveWriter
             std::cerr << "IST: archive_write_data failed: "
                       << archive_error_string(ar_) << '\n';
             failed_ = true;
-            return Pump::Error;
+            return Pump::error;
         }
-        return Pump::More;
+        return Pump::more;
     }
 
     bool finish()
@@ -241,11 +241,11 @@ bool archiveResults(const fs::path& results_dir)
         {
             break;
         }
-        ArchiveWriter::Pump p = ArchiveWriter::Pump::More;
-        while ((p = writer.pump()) == ArchiveWriter::Pump::More)
+        ArchiveWriter::Pump p = ArchiveWriter::Pump::more;
+        while ((p = writer.pump()) == ArchiveWriter::Pump::more)
         {
         }
-        if (p == ArchiveWriter::Pump::Error)
+        if (p == ArchiveWriter::Pump::error)
         {
             break;
         }
@@ -340,12 +340,12 @@ class ArchiveSession : public std::enable_shared_from_this<ArchiveSession>
         }
 
         ArchiveWriter::Pump p = writer_.pump();
-        if (p == ArchiveWriter::Pump::Error)
+        if (p == ArchiveWriter::Pump::error)
         {
             finish(false);
             return;
         }
-        if (p == ArchiveWriter::Pump::More)
+        if (p == ArchiveWriter::Pump::more)
         {
             post_step();
             return;
