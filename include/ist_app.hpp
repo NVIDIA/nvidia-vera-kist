@@ -303,6 +303,10 @@ class HookRunner
     static constexpr std::chrono::seconds k_cak_bypass_timeout{360};
 
     virtual ~HookRunner() = default;
+
+    // The run log belongs to the service, which does not exist yet when the
+    // runner is constructed.
+    virtual void set_log_file(LogFile& log) = 0;
     virtual void
         async_run(const std::string& cmd, std::string what,
                   std::move_only_function<void(bool ok) const> done,
@@ -498,7 +502,7 @@ class IstService : public std::enable_shared_from_this<IstService>
 
     std::vector<std::string> failure_info_;
 
-    UniqueFd service_log_fd_;
+    RunLogs run_logs_;
     std::unique_ptr<TeeStreambuf> cout_tee_;
     std::unique_ptr<TeeStreambuf> cerr_tee_;
     std::streambuf* orig_cout_buf_{nullptr};

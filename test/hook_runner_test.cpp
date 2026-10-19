@@ -21,7 +21,7 @@
 
 #include <chrono>
 #include <filesystem>
-#include <iostream>
+#include <fstream>
 #include <sstream>
 #include <string>
 
@@ -84,14 +84,14 @@ TEST_F(HookRunnerTest, NonZeroExitReportsFailure)
     EXPECT_FALSE(result);
 }
 
-// A hook the service launches directly produces no other diagnostics, so its
-// output has to travel through std::cout specifically: that is where
-// install_service_log_tee() splits the stream into the journal and
-// IST_service.log. Writing to an inherited descriptor would reach neither tee.
-TEST_F(HookRunnerTest, HookOutputReachesStdout)
+// A hook the service launches directly produces no other diagnostics, so both
+// of its streams have to end up in the run log, not just the journal.
+TEST_F(HookRunnerTest, HookOutputReachesRunLog)
 {
-    std::ostringstream captured;
-    std::streambuf* orig = std::cout.rdbuf(captured.rdbuf());
+    fs::path log_path = tmp_dir_ / "run.log";
+    LogFile log;
+    ASSERT_TRUE(log.open(log_path));
+    runner_->set_log_file(log);
 
     bool called = false;
     runner_->async_run(
@@ -102,11 +102,31 @@ TEST_F(HookRunnerTest, HookOutputReachesStdout)
         },
         {"-c", "echo on-stdout; echo on-stderr >&2"}, 10s);
     io_.run();
-    std::cout.rdbuf(orig);
+    log.close();
 
     ASSERT_TRUE(called);
-    EXPECT_NE(captured.str().find("on-stdout"), std::string::npos);
-    EXPECT_NE(captured.str().find("on-stderr"), std::string::npos);
+    std::ifstream in(log_path);
+    std::stringstream contents;
+    contents << in.rdbuf();
+    EXPECT_NE(contents.str().find("on-stdout"), std::string::npos);
+    EXPECT_NE(contents.str().find("on-stderr"), std::string::npos);
+}
+
+// Hooks run outside a test run too, when nothing owns a log to write to.
+TEST_F(HookRunnerTest, OutputWithNoRunLogIsNotFatal)
+{
+    bool result = false;
+    bool called = false;
+    runner_->async_run(
+        "/bin/bash", "test-no-log",
+        [&](bool ok) {
+            result = ok;
+            called = true;
+        },
+        {"-c", "echo orphaned-output"}, 10s);
+    io_.run();
+    ASSERT_TRUE(called);
+    EXPECT_TRUE(result);
 }
 
 TEST_F(HookRunnerTest, BadCommandReportsFailure)

@@ -62,6 +62,7 @@ static std::pair<int, int> make_upload_socket_pair()
 class MockHookRunner : public HookRunner
 {
   public:
+    MOCK_METHOD(void, set_log_file, (LogFile & log), (override));
     MOCK_METHOD(void, async_run,
                 (const std::string& cmd, std::string what,
                  std::move_only_function<void(bool ok) const> done,
