@@ -22,6 +22,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 #include <string>
 
 #include <gtest/gtest.h>
@@ -99,6 +100,20 @@ TEST_F(ItmRunnerTest, NonZeroExitReportsExitCode)
     run("exit 42");
     ASSERT_TRUE(called_);
     EXPECT_EQ(exit_code_, 42);
+}
+
+// The last thing kist_itm writes is how the run ended, and completion used to
+// close the pump's read stream before reporting, so those bytes could be lost.
+TEST_F(ItmRunnerTest, OutputWrittenBeforeExitIsLogged)
+{
+    run("echo closing-line");
+    ASSERT_TRUE(called_);
+    EXPECT_EQ(exit_code_, 0);
+
+    std::ifstream in(tmp_dir_ / "execute_ist_IST_Package_Summary.log");
+    std::stringstream contents;
+    contents << in.rdbuf();
+    EXPECT_NE(contents.str().find("closing-line"), std::string::npos);
 }
 
 TEST_F(ItmRunnerTest, LogOpenFailureReportsError)

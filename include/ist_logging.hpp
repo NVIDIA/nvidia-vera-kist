@@ -25,8 +25,10 @@
 #include <boost/system/error_code.hpp>
 
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <filesystem>
+#include <functional>
 #include <iostream>
 #include <memory>
 #include <string_view>
@@ -164,6 +166,11 @@ struct RunLogs
 // can carry; it does not split or truncate the child's lines.
 static constexpr std::size_t k_output_buf_size = 4096;
 
+// How long a child's completion waits on its output to drain. EOF normally
+// arrives in the same reactor cycle as the exit, but a grandchild holding the
+// write end open would otherwise stall the run indefinitely.
+static constexpr std::chrono::seconds k_drain_timeout{5};
+
 // Reads from a pipe fd asynchronously and writes each chunk to both a log file
 // and stdout (which journald captures). Chunks go out as they arrive with no
 // line assembly: a read can land mid-line, and if a child wedges mid-line
@@ -174,6 +181,13 @@ class OutputTee final : public std::enable_shared_from_this<OutputTee>
     OutputTee(boost::asio::io_context& io, int pipe_read_fd, LogFile& log) :
         stream_(io, pipe_read_fd), log_(log)
     {}
+
+    // Fires once the read loop ends, so a caller can treat its child as
+    // complete only after the child's output has been written.
+    void set_eof_handler(std::move_only_function<void() const> on_eof)
+    {
+        on_eof_ = std::move(on_eof);
+    }
 
     void start()
     {
@@ -201,7 +215,8 @@ class OutputTee final : public std::enable_shared_from_this<OutputTee>
                                         std::size_t n) {
                 if (ec)
                 {
-                    return; // EOF or pipe closed
+                    self->on_eof(); // EOF or pipe closed
+                    return;
                 }
                 self->log_.write(std::string_view(self->buf_.data(), n));
                 std::ignore = ::write(STDOUT_FILENO, self->buf_.data(), n);
@@ -209,7 +224,17 @@ class OutputTee final : public std::enable_shared_from_this<OutputTee>
             });
     }
 
+    void on_eof()
+    {
+        std::move_only_function<void() const> cb = std::move(on_eof_);
+        if (cb)
+        {
+            cb();
+        }
+    }
+
     boost::asio::posix::stream_descriptor stream_;
     LogFile& log_;
+    std::move_only_function<void() const> on_eof_;
     std::array<char, k_output_buf_size> buf_{};
 };

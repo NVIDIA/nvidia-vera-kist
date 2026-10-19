@@ -197,23 +197,36 @@ class ItmProcess final : public std::enable_shared_from_this<ItmProcess>
   public:
     ItmProcess(boost::asio::io_context& io,
                std::move_only_function<void(int) const> done) :
-        deadline_(io), done_(std::move(done))
+        deadline_(io), drain_(io), done_(std::move(done))
     {}
 
     void start(std::shared_ptr<bpv2::process> proc,
                std::shared_ptr<ProgressPoller> poller,
                std::shared_ptr<OutputTee> tee, int timeout_sec);
 
+    void on_drained()
+    {
+        drained_ = true;
+        finish();
+    }
+
   private:
     void on_deadline_expired(int timeout_sec);
     void on_process_exit(const boost::system::error_code& ec, int exit_code);
+    void on_drain_timeout();
+    void finish();
 
     std::shared_ptr<bpv2::process> proc_;
     std::shared_ptr<ProgressPoller> poller_;
     std::shared_ptr<OutputTee> tee_;
     boost::asio::steady_timer deadline_;
+    boost::asio::steady_timer drain_;
     std::move_only_function<void(int) const> done_;
     bool timed_out_{false};
+    bool exited_{false};
+    bool drained_{false};
+    bool finished_{false};
+    int exit_code_{-1};
 };
 
 void ItmProcess::start(std::shared_ptr<bpv2::process> proc,
@@ -270,28 +283,64 @@ void ItmProcess::on_process_exit(const boost::system::error_code& ec,
         poller_->stop();
         poller_.reset();
     }
-    if (tee_)
-    {
-        tee_->stop();
-        tee_.reset();
-    }
     deadline_.cancel();
     proc_.reset();
 
     if (timed_out_)
     {
         std::cerr << "kist_itm killed due to SW timeout\n";
-        done_(itm_exit_sw_timeout);
-        return;
+        exit_code_ = itm_exit_sw_timeout;
     }
-    if (ec)
+    else if (ec)
     {
         std::cerr << "kist_itm wait failed: ec=" << ec.message()
                   << " exit=" << exit_code << '\n';
-        done_(-1);
+        exit_code_ = -1;
+    }
+    else
+    {
+        exit_code_ = exit_code;
+    }
+
+    exited_ = true;
+    drain_.expires_after(k_drain_timeout);
+    drain_.async_wait(
+        [weak = weak_from_this()](const boost::system::error_code& tec) {
+            if (tec)
+            {
+                return;
+            }
+            if (std::shared_ptr<ItmProcess> self = weak.lock())
+            {
+                self->on_drain_timeout();
+            }
+        });
+    finish();
+}
+
+void ItmProcess::on_drain_timeout()
+{
+    std::cerr << "kist_itm output did not drain, reporting anyway\n";
+    drained_ = true;
+    finish();
+}
+
+// Closing the read stream here is what used to discard kist_itm's closing
+// lines, so completion waits for the pump's EOF instead.
+void ItmProcess::finish()
+{
+    if (finished_ || !exited_ || !drained_)
+    {
         return;
     }
-    done_(exit_code);
+    finished_ = true;
+    drain_.cancel();
+    if (tee_)
+    {
+        tee_->stop();
+        tee_.reset();
+    }
+    done_(exit_code_);
 }
 
 class ItmRunnerImpl final : public ItmRunner
@@ -439,10 +488,6 @@ void ItmRunnerImpl::async_run(
     // Close write-end in parent so OutputTee sees EOF when kist_itm exits
     pipe_write = UniqueFd();
 
-    std::shared_ptr<OutputTee> tee =
-        std::make_shared<OutputTee>(io_, pipe_read.release(), itm_log_);
-    tee->start();
-
     std::shared_ptr<ProgressPoller> poller = std::make_shared<ProgressPoller>(
         io_, progress_path, std::move(on_progress));
     poller->start();
@@ -456,6 +501,17 @@ void ItmRunnerImpl::async_run(
         };
 
     active_ = std::make_shared<ItmProcess>(io_, std::move(on_done));
+
+    std::shared_ptr<OutputTee> tee =
+        std::make_shared<OutputTee>(io_, pipe_read.release(), itm_log_);
+    tee->set_eof_handler([weak = std::weak_ptr<ItmProcess>(active_)]() {
+        if (std::shared_ptr<ItmProcess> itm = weak.lock())
+        {
+            itm->on_drained();
+        }
+    });
+    tee->start();
+
     active_->start(std::move(proc), std::move(poller), std::move(tee),
                    timeout_sec);
 }
