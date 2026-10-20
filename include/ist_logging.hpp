@@ -27,7 +27,9 @@
 #include <array>
 #include <chrono>
 #include <cstddef>
+#include <ctime>
 #include <filesystem>
+#include <format>
 #include <functional>
 #include <iostream>
 #include <memory>
@@ -157,6 +159,48 @@ struct RunLogs
 {
     LogFile service;
 };
+
+// ----------------
+// Service message log
+// ----------------
+
+// The service's own messages are written from ten translation units, none of
+// which can reach IstService, so they find the run log through this pointer.
+// Null outside a run, where the message reaches the journal alone.
+inline LogFile*& service_log_slot()
+{
+    static LogFile* log = nullptr;
+    return log;
+}
+
+inline void set_service_log(LogFile* log)
+{
+    service_log_slot() = log;
+}
+
+inline void log_to_results(std::string_view level, std::string_view text)
+{
+    LogFile* log = service_log_slot();
+    if (log == nullptr || !log->is_open())
+    {
+        return;
+    }
+
+    std::chrono::system_clock::time_point now =
+        std::chrono::system_clock::now();
+    std::time_t secs = std::chrono::system_clock::to_time_t(now);
+    long millis = std::chrono::duration_cast<std::chrono::milliseconds>(
+                      now.time_since_epoch())
+                      .count() %
+                  1000;
+    std::tm parts{};
+    ::gmtime_r(&secs, &parts);
+
+    log->write(std::format("{:04}-{:02}-{:02} {:02}:{:02}:{:02}.{:03}Z {} {}\n",
+                           parts.tm_year + 1900, parts.tm_mon + 1,
+                           parts.tm_mday, parts.tm_hour, parts.tm_min,
+                           parts.tm_sec, millis, level, text));
+}
 
 // ----------------
 // Child output pump

@@ -16,12 +16,14 @@
  */
 #include <boost/asio/post.hpp>
 #include <ist_app.hpp>
+#include <ist_logging.hpp>
+#include <phosphor-logging/lg2.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <shm_telemetry.hpp>
 
 #include <chrono>
 #include <cstdint>
-#include <iostream>
+#include <format>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -153,8 +155,14 @@ class DbusStatePublisher final : public StatePublisher
         }
         else
         {
-            std::cerr << "publish_version: sw_version_iface_ is null, version="
-                      << version << '\n';
+            log_to_results(
+                "ERR",
+                std::format(
+                    "publish_version: sw_version_iface_ is null, version={}",
+                    version));
+            lg2::error("publish_version: sw_version_iface_ is null, "
+                       "version={VERSION}",
+                       "VERSION", version);
         }
     }
 
@@ -208,8 +216,11 @@ class DbusStatePublisher final : public StatePublisher
             [](const boost::system::error_code& ec) {
                 if (ec)
                 {
-                    std::cerr << "Failed to create event log: " << ec.message()
-                              << '\n';
+                    log_to_results("ERR",
+                                   std::format("Failed to create event log: {}",
+                                               ec.message()));
+                    lg2::error("Failed to create event log: {ERROR}", "ERROR",
+                               ec.message());
                 }
             },
             "xyz.openbmc_project.Logging", "/xyz/openbmc_project/logging",

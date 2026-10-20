@@ -4427,3 +4427,33 @@ TEST_F(IstServiceTest, NoErrorOnSuccessfulRun)
     EXPECT_THAT(err, ::testing::Not(::testing::HasSubstr("IST_ERROR:")));
     EXPECT_EQ(service_->state().status, IstStatus::completed);
 }
+
+TEST_F(IstServiceTest, ServiceMessagesReachTheRunLogWithTimestamps)
+{
+    fs::path log_path = tmp_dir_ / "seam.log";
+    LogFile log;
+    ASSERT_TRUE(log.open(log_path));
+    set_service_log(&log);
+
+    log_to_results("ERR", "seam_error_line");
+    log_to_results("INFO", "seam_info_line");
+
+    set_service_log(nullptr);
+    log.close();
+
+    std::ifstream f(log_path);
+    std::string content((std::istreambuf_iterator<char>(f)), {});
+
+    EXPECT_THAT(content, ::testing::HasSubstr("ERR seam_error_line"));
+    EXPECT_THAT(content, ::testing::HasSubstr("INFO seam_info_line"));
+    EXPECT_THAT(content,
+                ::testing::MatchesRegex(
+                    R"((.|\n)*[0-9]{4}-[0-9]{2}-[0-9]{2} )"
+                    R"([0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z(.|\n)*)"));
+}
+
+TEST_F(IstServiceTest, ServiceMessagesSurviveWithNoRunLog)
+{
+    set_service_log(nullptr);
+    log_to_results("ERR", "no_log_attached");
+}
