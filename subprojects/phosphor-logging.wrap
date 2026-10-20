@@ -1,0 +1,9 @@
+[wrap-git]
+url = https://github.com/openbmc/phosphor-logging.git
+# Pinned rather than HEAD: 8463dd2 moved lg2 onto sdbusplus::object_path,
+# which this branch's sdbusplus predates. nsmd and pldm pin sdbusplus for
+# the same reason.
+revision = 38c294a6f4e3ee1aa5951f6282c5fa81cc102e71
+
+[provide]
+phosphor-logging = phosphor_logging_dep

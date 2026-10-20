@@ -101,6 +101,18 @@ if not sdbusplus.found()
     sdbusplus = sdbusplus.as_system('system')
 endif
 
+phosphor_logging_dep = dependency(
+    'phosphor-logging',
+    required: false,
+    include_type: 'system',
+)
+if not phosphor_logging_dep.found()
+    phosphor_logging_proj = subproject('phosphor-logging', required: true)
+    phosphor_logging_dep = phosphor_logging_proj.get_variable(
+        'phosphor_logging_dep',
+    )
+endif
+
 systemd_system_unit_dir = systemd.get_variable(pkgconfig: 'systemdsystemunitdir')
 
 systemd_unit_configuration = configuration_data()
@@ -186,6 +198,7 @@ ist_app_a = static_library(
         nlohmann_json_dep,
         libarchive_dep,
         libcrypto_dep,
+        phosphor_logging_dep,
     ],
     include_directories: 'include',
     link_with: [ist_shm_a],
@@ -194,7 +207,13 @@ ist_app_a = static_library(
 executable(
     'ist',
     'src/ist_main.cpp',
-    dependencies: [boost, sdbusplus, nlohmann_json_dep, libarchive_dep],
+    dependencies: [
+        boost,
+        sdbusplus,
+        nlohmann_json_dep,
+        libarchive_dep,
+        phosphor_logging_dep,
+    ],
     include_directories: 'include',
     install: true,
     link_with: [ist_app_a],
@@ -240,6 +259,7 @@ if get_option('tests').enabled()
             boost,
             sdbusplus,
             nlohmann_json_dep,
+            phosphor_logging_dep,
             gmock_dep,
             gtest_dep,
         ],
@@ -252,7 +272,13 @@ if get_option('tests').enabled()
     hook_runner_test = executable(
         'hook-runner-test',
         'test/hook_runner_test.cpp',
-        dependencies: [boost, sdbusplus, nlohmann_json_dep, gtest_dep],
+        dependencies: [
+            boost,
+            sdbusplus,
+            nlohmann_json_dep,
+            phosphor_logging_dep,
+            gtest_dep,
+        ],
         include_directories: ['include'],
         link_with: [ist_app_a],
     )
@@ -262,7 +288,13 @@ if get_option('tests').enabled()
     itm_runner_test = executable(
         'itm-runner-test',
         'test/itm_runner_test.cpp',
-        dependencies: [boost, sdbusplus, nlohmann_json_dep, gtest_dep],
+        dependencies: [
+            boost,
+            sdbusplus,
+            nlohmann_json_dep,
+            phosphor_logging_dep,
+            gtest_dep,
+        ],
         include_directories: ['include'],
         link_with: [ist_app_a],
     )
@@ -277,6 +309,7 @@ if get_option('tests').enabled()
             sdbusplus,
             nlohmann_json_dep,
             libcrypto_dep,
+            phosphor_logging_dep,
             gtest_dep,
         ],
         include_directories: ['include'],
