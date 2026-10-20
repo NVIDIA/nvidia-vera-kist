@@ -20,6 +20,7 @@
 #include <ist_errors.hpp>
 #include <ist_results.hpp>
 #include <nlohmann/json.hpp>
+#include <phosphor-logging/lg2.hpp>
 #include <sdbusplus/exception.hpp>
 #include <signature_verify.hpp>
 #include <vector_manager.hpp>
@@ -28,6 +29,7 @@
 #include <charconv>
 #include <cstdint>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <iostream>
 #include <map>
@@ -46,9 +48,14 @@ static constexpr int32_t max_sw_timeout_sec = 7200;
 // Static helpers
 // ---------------------
 
+// An external tool parses this line out of IST_service.log in the results
+// tarball. It matches on a line containing "IST_ERROR: category=<>, <key>=<>",
+// so text may be added ahead of the prefix but nothing from "IST_ERROR:"
+// onward may change.
 static void emit_ist_error(std::string_view info)
 {
-    std::cerr << "IST_ERROR: " << info << '\n';
+    log_to_results("ERR", std::format("IST_ERROR: {}", info));
+    lg2::error("IST_ERROR: {FAILURE}", "FAILURE", info);
 }
 
 static fs::path json_path(const json& obj, const char* key)

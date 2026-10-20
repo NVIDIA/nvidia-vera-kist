@@ -267,7 +267,15 @@ if get_option('tests').enabled()
         link_with: [ist_app_a],
     )
 
-    test('ist_app_test', ist_app_test, protocol: 'gtest')
+    # lg2 picks its output sink during static init, so the variable has to be
+    # in the environment rather than set from a test body. Without it lg2 goes
+    # only to journald and the assertions on service messages see nothing.
+    test(
+        'ist_app_test',
+        ist_app_test,
+        protocol: 'gtest',
+        env: {'LG2_FORCE_STDERR': '1'},
+    )
 
     hook_runner_test = executable(
         'hook-runner-test',
