@@ -188,6 +188,8 @@ void IstService::install_service_log_tee()
         return;
     }
 
+    set_service_log(&run_logs_.service);
+
     cout_tee_ = std::make_unique<TeeStreambuf>(std::cout.rdbuf(),
                                                run_logs_.service.fd());
     cerr_tee_ = std::make_unique<TeeStreambuf>(std::cerr.rdbuf(),
@@ -210,6 +212,7 @@ void IstService::remove_service_log_tee()
     }
     cout_tee_.reset();
     cerr_tee_.reset();
+    set_service_log(nullptr);
     run_logs_.service.close();
 }
 
