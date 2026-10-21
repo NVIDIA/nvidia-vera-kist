@@ -3876,7 +3876,7 @@ TEST_F(IstServiceTest, ServiceLogCreatedOnStartIst)
     EXPECT_TRUE(fs::exists(log_path));
 }
 
-TEST_F(IstServiceTest, ServiceLogCapturesCerrOutput)
+TEST_F(IstServiceTest, ServiceLogCapturesServiceMessages)
 {
     init_from_file(config_path_);
 
@@ -3889,9 +3889,6 @@ TEST_F(IstServiceTest, ServiceLogCapturesCerrOutput)
                       std::chrono::seconds) { assert_done = std::move(done); });
 
     start_ist();
-
-    // Force a cerr write while tee is active
-    std::cerr << "test_service_log_message\n";
 
     // Read before the cleanup archive runs, which takes the loose log file
     assert_done(false);
@@ -3901,10 +3898,12 @@ TEST_F(IstServiceTest, ServiceLogCapturesCerrOutput)
 
     std::ifstream f(log_path);
     std::string content((std::istreambuf_iterator<char>(f)), {});
-    EXPECT_NE(content.find("test_service_log_message"), std::string::npos);
+    EXPECT_THAT(content,
+                ::testing::HasSubstr(
+                    "IST_ERROR: category=HOOK, reason=ist_boot_assert_failed"));
 }
 
-TEST_F(IstServiceTest, ServiceLogTeeRemovedOnIdle)
+TEST_F(IstServiceTest, ServiceLogDetachedOnIdle)
 {
     init_from_file(config_path_);
 
@@ -3917,15 +3916,14 @@ TEST_F(IstServiceTest, ServiceLogTeeRemovedOnIdle)
                       std::chrono::seconds) { assert_done = std::move(done); });
 
     start_ist();
-    std::streambuf* teed = std::cerr.rdbuf();
+    EXPECT_NE(service_log_slot(), nullptr);
 
-    // Drive to idle
     assert_done(false);
     io_.run();
     io_.restart();
     EXPECT_EQ(service_->state().stage, IstStage::idle);
 
-    EXPECT_NE(std::cerr.rdbuf(), teed);
+    EXPECT_EQ(service_log_slot(), nullptr);
 }
 
 // ----------------
