@@ -16,8 +16,6 @@
  */
 #pragma once
 
-#include <unistd.h>
-
 #include <boost/asio/steady_timer.hpp>
 #include <ist_logging.hpp>
 #include <sdbusplus/asio/object_server.hpp>
@@ -26,70 +24,14 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
-#include <iostream>
 #include <map>
 #include <memory>
 #include <optional>
-#include <streambuf>
 #include <string>
 #include <string_view>
 #include <unordered_map>
 #include <variant>
 #include <vector>
-
-// ----------------
-// Tee streambuf — duplicates writes to a log file while forwarding to the
-// original streambuf (typically the journal fd under systemd).
-// ----------------
-
-class TeeStreambuf : public std::streambuf
-{
-  public:
-    TeeStreambuf(std::streambuf* primary, int log_fd) :
-        primary_(primary), log_fd_(log_fd)
-    {}
-
-  protected:
-    // Single-char path; bulk writes go through xsputn.
-    int overflow(int c) override
-    {
-        if (c == EOF)
-        {
-            return EOF;
-        }
-        char ch = static_cast<char>(c);
-        if (primary_->sputc(ch) == EOF)
-        {
-            return EOF;
-        }
-        // Log file write is best-effort — don't fail the stream if it errors.
-        std::ignore = ::write(log_fd_, &ch, 1);
-        return c;
-    }
-
-    std::streamsize xsputn(const char* s, std::streamsize n) override
-    {
-        std::streamsize primary_written = primary_->sputn(s, n);
-        // Best-effort write to log file regardless of primary result.
-        const char* p = s;
-        std::streamsize remaining = n;
-        while (remaining > 0)
-        {
-            ssize_t w = ::write(log_fd_, p, static_cast<size_t>(remaining));
-            if (w <= 0)
-            {
-                break;
-            }
-            p += w;
-            remaining -= w;
-        }
-        return primary_written;
-    }
-
-  private:
-    std::streambuf* primary_;
-    int log_fd_;
-};
 
 // ----------------
 // Type aliases
@@ -503,11 +445,6 @@ class IstService : public std::enable_shared_from_this<IstService>
     std::vector<std::string> failure_info_;
 
     RunLogs run_logs_;
-    std::unique_ptr<TeeStreambuf> cout_tee_;
-    std::unique_ptr<TeeStreambuf> cerr_tee_;
-    std::streambuf* orig_cout_buf_{nullptr};
-    std::streambuf* orig_cerr_buf_{nullptr};
-
-    void install_service_log_tee();
-    void remove_service_log_tee();
+    void open_service_log();
+    void close_service_log();
 };

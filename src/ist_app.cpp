@@ -132,7 +132,7 @@ IstService::IstService(boost::asio::io_context& io,
 
 IstService::~IstService()
 {
-    remove_service_log_tee();
+    close_service_log();
 }
 
 void IstService::set_signature_verifier(SignatureVerifier fn)
@@ -178,49 +178,28 @@ void IstService::transition_to(IstStage stage, IstStatus status,
         {
             emit_ist_error(error_info);
         }
-        remove_service_log_tee();
+        close_service_log();
     }
     update_dbus_state();
 }
 
-void IstService::install_service_log_tee()
+void IstService::open_service_log()
 {
-    if (orig_cout_buf_)
+    if (run_logs_.service.is_open())
     {
         return;
     }
 
     fs::path log_path =
         platform_cfg_.storage.result_storage_path / "IST_service.log";
-    if (!run_logs_.service.open(log_path))
+    if (run_logs_.service.open(log_path))
     {
-        return;
+        set_service_log(&run_logs_.service);
     }
-
-    set_service_log(&run_logs_.service);
-
-    cout_tee_ = std::make_unique<TeeStreambuf>(std::cout.rdbuf(),
-                                               run_logs_.service.fd());
-    cerr_tee_ = std::make_unique<TeeStreambuf>(std::cerr.rdbuf(),
-                                               run_logs_.service.fd());
-    orig_cout_buf_ = std::cout.rdbuf(cout_tee_.get());
-    orig_cerr_buf_ = std::cerr.rdbuf(cerr_tee_.get());
 }
 
-void IstService::remove_service_log_tee()
+void IstService::close_service_log()
 {
-    if (orig_cout_buf_)
-    {
-        std::cout.rdbuf(orig_cout_buf_);
-        orig_cout_buf_ = nullptr;
-    }
-    if (orig_cerr_buf_)
-    {
-        std::cerr.rdbuf(orig_cerr_buf_);
-        orig_cerr_buf_ = nullptr;
-    }
-    cout_tee_.reset();
-    cerr_tee_.reset();
     set_service_log(nullptr);
     run_logs_.service.close();
 }
@@ -985,7 +964,7 @@ std::string IstService::start_ist(const ParamMap& test_params)
         }
     }
 
-    install_service_log_tee();
+    open_service_log();
 
     signature_verifier_(platform_cfg_, [self = shared_from_this()](bool ok) {
         self->on_signature_verify_done(ok);

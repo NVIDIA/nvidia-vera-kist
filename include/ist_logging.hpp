@@ -23,6 +23,7 @@
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/posix/stream_descriptor.hpp>
 #include <boost/system/error_code.hpp>
+#include <phosphor-logging/lg2.hpp>
 
 #include <array>
 #include <chrono>
@@ -103,8 +104,8 @@ class LogFile
                               O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644));
         if (fd_.get() < 0)
         {
-            std::cerr << "Failed to open log file '" << path
-                      << "': errno=" << errno << '\n';
+            lg2::error("Failed to open log file '{PATH}': {ERRNO}", "PATH",
+                       path, "ERRNO", errno);
             return false;
         }
         return true;
@@ -123,8 +124,7 @@ class LogFile
             ssize_t written = ::write(fd_.get(), p, remaining);
             if (written <= 0)
             {
-                std::cerr << "Write to log file failed: errno=" << errno
-                          << '\n';
+                lg2::error("Write to log file failed: {ERRNO}", "ERRNO", errno);
                 return;
             }
             p += written;
@@ -140,13 +140,6 @@ class LogFile
     bool is_open() const noexcept
     {
         return fd_.get() >= 0;
-    }
-
-    // For TeeStreambuf, which writes to the same file until the lg2 migration
-    // retires it.
-    int fd() const noexcept
-    {
-        return fd_.get();
     }
 
   private:
@@ -245,8 +238,8 @@ class OutputTee final : public std::enable_shared_from_this<OutputTee>
         std::ignore = stream_.close(ec);
         if (ec)
         {
-            std::cerr << "OutputTee: failed to close stream: " << ec.message()
-                      << "\n";
+            lg2::error("OutputTee: failed to close stream: {ERROR}", "ERROR",
+                       ec.message());
         }
     }
 
