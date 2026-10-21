@@ -260,6 +260,7 @@ if get_option('tests').enabled()
             sdbusplus,
             nlohmann_json_dep,
             phosphor_logging_dep,
+            libarchive_dep,
             gmock_dep,
             gtest_dep,
         ],

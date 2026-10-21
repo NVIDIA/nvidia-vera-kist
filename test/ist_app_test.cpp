@@ -14,6 +14,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include <archive.h>
+#include <archive_entry.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -382,6 +384,47 @@ class IstServiceTest : public ::testing::Test
         io_.run();
         io_.restart();
         return path;
+    }
+
+    // The archiver removes each file once it is in the tarball, so a member
+    // can only be read back out of the archive itself.
+    std::string read_from_results_tar(const std::string& member)
+    {
+        static constexpr std::size_t k_archive_block_size = 16384;
+        static constexpr std::size_t k_archive_read_buf_size = 4096;
+
+        archive* ar = archive_read_new();
+        archive_read_support_filter_all(ar);
+        archive_read_support_format_all(ar);
+
+        std::string path =
+            (tmp_dir_ / "results" / "ist_results.tar.gz").string();
+        if (archive_read_open_filename(ar, path.c_str(),
+                                       k_archive_block_size) != ARCHIVE_OK)
+        {
+            archive_read_free(ar);
+            return {};
+        }
+
+        std::string content;
+        archive_entry* entry = nullptr;
+        while (archive_read_next_header(ar, &entry) == ARCHIVE_OK)
+        {
+            if (member != archive_entry_pathname(entry))
+            {
+                continue;
+            }
+            std::array<char, k_archive_read_buf_size> buf{};
+            la_ssize_t n = 0;
+            while ((n = archive_read_data(ar, buf.data(), buf.size())) > 0)
+            {
+                content.append(buf.data(), static_cast<size_t>(n));
+            }
+            break;
+        }
+
+        archive_read_free(ar);
+        return content;
     }
 
     int begin_start_update(std::string* object_path = nullptr)
@@ -4426,6 +4469,41 @@ TEST_F(IstServiceTest, NoErrorOnSuccessfulRun)
 
     EXPECT_THAT(err, ::testing::Not(::testing::HasSubstr("IST_ERROR:")));
     EXPECT_EQ(service_->state().status, IstStatus::completed);
+}
+
+// The tool that reads the results tarball looks for IST_service.log and
+// matches a line containing "IST_ERROR: category=<>, <key>=<>", so the name,
+// the archive membership and the line's shape are all part of the contract.
+TEST_F(IstServiceTest, CategorizedFailureReachesTheResultsTarball)
+{
+    init_from_file(config_path_);
+
+    EXPECT_CALL(*hook_runner_,
+                async_run(::testing::_, StrEq("istBootAssert hook"),
+                          ::testing::_, ::testing::_, ::testing::_))
+        .WillOnce([](const std::string&, const std::string&, DoneCb done,
+                     const std::vector<std::string>&,
+                     std::chrono::seconds) { done(true); });
+    EXPECT_CALL(*power_monitor_, async_wait_for_power_cycle(::testing::_))
+        .WillOnce([](DoneCb done) { done(true); });
+    EXPECT_CALL(*itm_runner_, async_run(::testing::_, ::testing::_,
+                                        ::testing::_, ::testing::_))
+        .WillOnce([](const IstTestConfig&, const IstPlatformConfig&,
+                     ItmDoneCb done, ProgressCb) { done(0); });
+    EXPECT_CALL(*hook_runner_,
+                async_run(::testing::_, StrEq("istBootDeassert hook"),
+                          ::testing::_, ::testing::_, ::testing::_))
+        .WillOnce([](const std::string&, const std::string&, DoneCb done,
+                     const std::vector<std::string>&,
+                     std::chrono::seconds) { done(false); });
+
+    start_ist();
+
+    ASSERT_EQ(service_->state().status, IstStatus::failed);
+
+    std::string log = read_from_results_tar("IST_service.log");
+    EXPECT_THAT(log, ::testing::HasSubstr("IST_ERROR: category=HOOK, "
+                                          "reason=ist_boot_deassert_failed"));
 }
 
 TEST_F(IstServiceTest, ServiceMessagesReachTheRunLogWithTimestamps)
