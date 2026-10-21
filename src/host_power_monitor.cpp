@@ -16,12 +16,13 @@
  */
 #include <boost/asio/steady_timer.hpp>
 #include <ist_app.hpp>
+#include <phosphor-logging/lg2.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/bus/match.hpp>
 #include <sdbusplus/exception.hpp>
 
 #include <algorithm>
-#include <iostream>
+#include <format>
 #include <memory>
 #include <string>
 #include <utility>
@@ -88,7 +89,9 @@ void HostPowerMonitorImpl::async_wait_for_power_cycle(
             {
                 return;
             }
-            std::cerr << "Failed to receive power cycle in 10 minutes\n";
+            log_to_results("ERR", "Failed to receive power cycle in 10 "
+                                  "minutes");
+            lg2::error("Failed to receive power cycle in 10 minutes");
             self->finish(false);
         });
 }
@@ -105,8 +108,8 @@ void HostPowerMonitorImpl::read_current_state()
             }
             if (ec)
             {
-                std::cerr << "Failed to read CurrentPowerState: "
-                          << ec.message() << '\n';
+                lg2::error("Failed to read CurrentPowerState: {ERROR}", "ERROR",
+                           ec.message());
                 return;
             }
             const std::string* state = std::get_if<std::string>(&value);
@@ -131,8 +134,8 @@ void HostPowerMonitorImpl::on_properties_changed(sdbusplus::message_t& msg)
     }
     catch (const sdbusplus::exception_t& e)
     {
-        std::cerr << "Failed to read PropertiesChanged signal: " << e.what()
-                  << '\n';
+        lg2::error("Failed to read PropertiesChanged signal: {ERROR}", "ERROR",
+                   e.what());
         return;
     }
     auto it = std::ranges::find_if(
@@ -157,8 +160,12 @@ void HostPowerMonitorImpl::on_state_changed(const std::string& state)
     else if (saw_off_ &&
              state == "xyz.openbmc_project.State.Chassis.PowerState.On")
     {
-        std::cout << "Detected power cycle (chassis power state: " << state
-                  << ")\n";
+        log_to_results("INFO",
+                       std::format("Detected power cycle (chassis power "
+                                   "state: {})",
+                                   state));
+        lg2::info("Detected power cycle (chassis power state: {STATE})",
+                  "STATE", state);
         finish(true);
     }
 }

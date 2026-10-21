@@ -24,6 +24,7 @@
 #include <ist_app.hpp>
 #include <ist_errors.hpp>
 #include <ist_results.hpp>
+#include <phosphor-logging/lg2.hpp>
 
 #include <array>
 #include <cerrno>
@@ -31,7 +32,6 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
-#include <iostream>
 #include <memory>
 #include <vector>
 
@@ -102,8 +102,8 @@ class ArchiveWriter
         if (archive_write_open_filename(ar_, archive_path_.c_str()) !=
             ARCHIVE_OK)
         {
-            std::cerr << "IST: archive_write_open_filename failed: "
-                      << archive_error_string(ar_) << '\n';
+            lg2::error("IST: archive_write_open_filename failed: {ERROR}",
+                       "ERROR", archive_error_string(ar_));
             archive_write_free(ar_);
             ar_ = nullptr;
             return false;
@@ -117,8 +117,8 @@ class ArchiveWriter
         struct stat st;
         if (::stat(file.c_str(), &st) != 0)
         {
-            std::cerr << "IST: stat failed for " << file << ": " << errno
-                      << '\n';
+            lg2::error("IST: stat failed for {PATH}: {ERRNO}", "PATH", file,
+                       "ERRNO", errno);
             failed_ = true;
             return false;
         }
@@ -133,8 +133,8 @@ class ArchiveWriter
         archive_entry_free(entry);
         if (rc != ARCHIVE_OK)
         {
-            std::cerr << "IST: archive_write_header failed: "
-                      << archive_error_string(ar_) << '\n';
+            lg2::error("IST: archive_write_header failed: {ERROR}", "ERROR",
+                       archive_error_string(ar_));
             failed_ = true;
             return false;
         }
@@ -143,8 +143,8 @@ class ArchiveWriter
         int fd = ::open(file.c_str(), O_RDONLY | O_CLOEXEC);
         if (fd < 0)
         {
-            std::cerr << "IST: open failed for " << file << ": " << errno
-                      << '\n';
+            lg2::error("IST: open failed for {PATH}: {ERRNO}", "PATH", file,
+                       "ERRNO", errno);
             failed_ = true;
             return false;
         }
@@ -164,7 +164,7 @@ class ArchiveWriter
         ssize_t nread = ::read(fd_.get(), buf_.data(), buf_.size());
         if (nread < 0)
         {
-            std::cerr << "IST: read failed: " << errno << '\n';
+            lg2::error("IST: read failed: {ERRNO}", "ERRNO", errno);
             failed_ = true;
             return Pump::error;
         }
@@ -176,8 +176,8 @@ class ArchiveWriter
         if (archive_write_data(ar_, buf_.data(), static_cast<size_t>(nread)) <
             0)
         {
-            std::cerr << "IST: archive_write_data failed: "
-                      << archive_error_string(ar_) << '\n';
+            lg2::error("IST: archive_write_data failed: {ERROR}", "ERROR",
+                       archive_error_string(ar_));
             failed_ = true;
             return Pump::error;
         }
@@ -191,8 +191,8 @@ class ArchiveWriter
         {
             if (archive_write_close(ar_) != ARCHIVE_OK)
             {
-                std::cerr << "IST: archive_write_close failed: "
-                          << archive_error_string(ar_) << '\n';
+                lg2::error("IST: archive_write_close failed: {ERROR}", "ERROR",
+                           archive_error_string(ar_));
                 close_ok = false;
             }
             archive_write_free(ar_);
@@ -224,8 +224,8 @@ bool archive_results(const fs::path& results_dir)
     std::vector<fs::path> files = collect_result_files(results_dir);
     if (files.empty())
     {
-        std::cerr << "IST: no result files to archive in " << results_dir
-                  << '\n';
+        lg2::error("IST: no result files to archive in {PATH}", "PATH",
+                   results_dir);
         return false;
     }
 
@@ -254,8 +254,8 @@ bool archive_results(const fs::path& results_dir)
         fs::remove(file, ec);
         if (ec)
         {
-            std::cerr << "IST: failed to remove " << file << ": "
-                      << ec.message() << '\n';
+            lg2::error("IST: failed to remove {PATH}: {ERROR}", "PATH", file,
+                       "ERROR", ec.message());
         }
     }
 
@@ -307,8 +307,8 @@ class ArchiveSession : public std::enable_shared_from_this<ArchiveSession>
             files_ = collect_result_files(results_dir_);
             if (files_.empty())
             {
-                std::cerr << "IST: no result files to archive in "
-                          << results_dir_ << '\n';
+                lg2::error("IST: no result files to archive in {PATH}", "PATH",
+                           results_dir_);
                 finish(false);
                 return;
             }
@@ -356,8 +356,8 @@ class ArchiveSession : public std::enable_shared_from_this<ArchiveSession>
         fs::remove(files_[index_], ec);
         if (ec)
         {
-            std::cerr << "IST: failed to remove " << files_[index_] << ": "
-                      << ec.message() << '\n';
+            lg2::error("IST: failed to remove {PATH}: {ERROR}", "PATH",
+                       files_[index_], "ERROR", ec.message());
         }
         ++index_;
         entry_open_ = false;
@@ -410,7 +410,7 @@ sdbusplus::message::unix_fd IstService::get_results_fd()
     const fs::path& results_dir = platform_cfg_.storage.result_storage_path;
     if (results_dir.empty())
     {
-        std::cerr << "IST: resultStoragePath not configured\n";
+        lg2::error("IST: resultStoragePath not configured");
         throw ist_err::InternalFailure{};
     }
 
@@ -420,8 +420,8 @@ sdbusplus::message::unix_fd IstService::get_results_fd()
     int fd = ::open(archive_path.c_str(), O_RDONLY | O_CLOEXEC);
     if (fd < 0)
     {
-        std::cerr << "IST: no results archive at " << archive_path << ": "
-                  << errno << '\n';
+        lg2::error("IST: no results archive at {PATH}: {ERRNO}", "PATH",
+                   archive_path, "ERRNO", errno);
         throw ist_err::ResourceNotFound{};
     }
 
@@ -429,14 +429,16 @@ sdbusplus::message::unix_fd IstService::get_results_fd()
     if (::fstat(fd, &st) < 0)
     {
         int err = errno;
-        std::cerr << "IST: fstat failed on results archive: " << err << '\n';
+        lg2::error("IST: fstat failed on results archive: {ERRNO}", "ERRNO",
+                   err);
         ::close(fd);
         throw ist_err::InternalFailure{};
     }
     if (st.st_size > k_max_result_size)
     {
-        std::cerr << "IST: results archive too large (" << st.st_size
-                  << " bytes, max " << k_max_result_size << ")\n";
+        lg2::error("IST: results archive too large ({SIZE} bytes, max "
+                   "{LIMIT})",
+                   "SIZE", st.st_size, "LIMIT", k_max_result_size);
         ::close(fd);
         throw ist_err::InternalFailure{};
     }
