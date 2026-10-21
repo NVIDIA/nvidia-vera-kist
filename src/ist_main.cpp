@@ -19,11 +19,11 @@
 
 #include <ist_app.hpp>
 #include <ist_errors.hpp>
+#include <phosphor-logging/lg2.hpp>
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/message/types.hpp>
 
 #include <cerrno>
-#include <iostream>
 #include <set>
 #include <string>
 #include <vector>
@@ -45,8 +45,8 @@ static sdbusplus::message::unix_fd
     boost::asio::post(io, [raw_fd]() {
         if (::close(raw_fd) < 0)
         {
-            std::cerr << "IST: close fd " << raw_fd << " failed: " << errno
-                      << '\n';
+            lg2::error("IST: close fd {FD} failed: {ERRNO}", "FD", raw_fd,
+                       "ERRNO", errno);
         }
     });
     return fd;
@@ -98,7 +98,7 @@ int main(int, char**)
     IstPlatformConfig platform_cfg;
     if (!parse_platform_config(platform_cfg, config_path))
     {
-        std::cerr << "IST: failed to parse platform config, exiting\n";
+        lg2::error("IST: failed to parse platform config, exiting");
         return 1;
     }
 
@@ -113,7 +113,7 @@ int main(int, char**)
 
     if (!service->initialize(std::move(platform_cfg)))
     {
-        std::cerr << "IST: failed to initialize, exiting\n";
+        lg2::error("IST: failed to initialize, exiting");
         return 1;
     }
 
@@ -137,9 +137,8 @@ int main(int, char**)
                                       const std::vector<std::string>& paths) {
                     if (ec)
                     {
-                        std::cerr
-                            << "ObjectMapper CPU query failed: " << ec.message()
-                            << '\n';
+                        lg2::error("ObjectMapper CPU query failed: {ERROR}",
+                                   "ERROR", ec.message());
                         done({});
                         return;
                     }

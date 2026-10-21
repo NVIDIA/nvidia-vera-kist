@@ -28,6 +28,7 @@
 #include <boost/asio/steady_timer.hpp>
 #include <ist_app.hpp>
 #include <ist_errors.hpp>
+#include <phosphor-logging/lg2.hpp>
 #include <sdbusplus/exception.hpp>
 #include <vector_manager.hpp>
 
@@ -38,7 +39,6 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
-#include <iostream>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -248,8 +248,9 @@ static bool validate_pldm_header(const std::vector<uint8_t>& hdr,
 {
     if (hdr.size() < k_pldm_min_header_size)
     {
-        std::cerr << "validate_pldm_header called with short buffer ("
-                  << hdr.size() << " bytes)\n";
+        lg2::error("validate_pldm_header called with short buffer "
+                   "({SIZE} bytes)",
+                   "SIZE", hdr.size());
         return false;
     }
 
@@ -258,8 +259,9 @@ static bool validate_pldm_header(const std::vector<uint8_t>& hdr,
 
     if (hdr.size() < header_size)
     {
-        std::cerr << "PLDM header truncated: have " << hdr.size()
-                  << " bytes, header declares " << header_size << '\n';
+        lg2::error("PLDM header truncated: have {HAVE} bytes, header "
+                   "declares {DECLARED}",
+                   "HAVE", hdr.size(), "DECLARED", header_size);
         return false;
     }
 
@@ -267,9 +269,9 @@ static bool validate_pldm_header(const std::vector<uint8_t>& hdr,
     // that includes PackagePayloadChecksum.
     if (revision < 4)
     {
-        std::cerr << "PLDM revision 0x" << std::hex
-                  << static_cast<unsigned>(revision) << std::dec
-                  << " does not include payload checksum; rejecting\n";
+        lg2::error("PLDM revision {REVISION} does not include payload "
+                   "checksum; rejecting",
+                   "REVISION", lg2::hex, static_cast<unsigned>(revision));
         return false;
     }
 
@@ -277,7 +279,7 @@ static bool validate_pldm_header(const std::vector<uint8_t>& hdr,
     constexpr size_t trailer_size = 8;
     if (header_size < k_pldm_min_header_size + trailer_size)
     {
-        std::cerr << "PLDM header too small for trailer\n";
+        lg2::error("PLDM header too small for trailer");
         return false;
     }
 
@@ -286,9 +288,10 @@ static bool validate_pldm_header(const std::vector<uint8_t>& hdr,
     uint32_t computed_crc = compute_crc32(hdr.data(), crc_offset);
     if (stored_crc != computed_crc)
     {
-        std::cerr << "PLDM header CRC mismatch: stored 0x" << std::hex
-                  << stored_crc << " computed 0x" << computed_crc << std::dec
-                  << '\n';
+        lg2::error("PLDM header CRC mismatch: stored {STORED} computed "
+                   "{COMPUTED}",
+                   "STORED", lg2::hex, stored_crc, "COMPUTED", lg2::hex,
+                   computed_crc);
         return false;
     }
 
@@ -299,10 +302,11 @@ static bool validate_pldm_header(const std::vector<uint8_t>& hdr,
     comp.payload_size =
         package_size > header_size ? package_size - header_size : 0;
 
-    std::cerr << "PLDM revision 0x" << std::hex
-              << static_cast<unsigned>(revision) << std::dec << ", header size "
-              << header_size << "; payload starts at offset " << comp.offset
-              << " and spans " << comp.payload_size << " bytes\n";
+    lg2::info("PLDM revision {REVISION}, header size {HEADER_SIZE}; payload "
+              "starts at offset {OFFSET} and spans {SPAN} bytes",
+              "REVISION", lg2::hex, static_cast<unsigned>(revision),
+              "HEADER_SIZE", header_size, "OFFSET", comp.offset, "SPAN",
+              comp.payload_size);
     return true;
 }
 
@@ -325,13 +329,13 @@ static std::optional<LoopDevice> setup_loop_device(const fs::path& image_path,
     UniqueFd ctl_fd(::open("/dev/loop-control", O_RDWR | O_CLOEXEC));
     if (ctl_fd.get() < 0)
     {
-        std::cerr << "open loop-control: " << errno << '\n';
+        lg2::error("open loop-control: {ERRNO}", "ERRNO", errno);
         return std::nullopt;
     }
     int loop_num = ::ioctl(ctl_fd.get(), LOOP_CTL_GET_FREE);
     if (loop_num < 0)
     {
-        std::cerr << "LOOP_CTL_GET_FREE: " << errno << '\n';
+        lg2::error("LOOP_CTL_GET_FREE: {ERRNO}", "ERRNO", errno);
         return std::nullopt;
     }
 
@@ -340,18 +344,19 @@ static std::optional<LoopDevice> setup_loop_device(const fs::path& image_path,
     UniqueFd loop_fd(::open(loop_dev.c_str(), open_flags | O_CLOEXEC));
     if (loop_fd.get() < 0)
     {
-        std::cerr << "open " << loop_dev << ": " << errno << '\n';
+        lg2::error("open {PATH}: {ERRNO}", "PATH", loop_dev, "ERRNO", errno);
         return std::nullopt;
     }
     UniqueFd img_fd(::open(image_path.c_str(), open_flags | O_CLOEXEC));
     if (img_fd.get() < 0)
     {
-        std::cerr << "open " << image_path << ": " << errno << '\n';
+        lg2::error("open {PATH}: {ERRNO}", "PATH", image_path, "ERRNO", errno);
         return std::nullopt;
     }
     if (::ioctl(loop_fd.get(), LOOP_SET_FD, img_fd.get()) < 0)
     {
-        std::cerr << "LOOP_SET_FD for " << image_path << ": " << errno << '\n';
+        lg2::error("LOOP_SET_FD for {PATH}: {ERRNO}", "PATH", image_path,
+                   "ERRNO", errno);
         return std::nullopt;
     }
 
@@ -359,8 +364,8 @@ static std::optional<LoopDevice> setup_loop_device(const fs::path& image_path,
     info.lo_flags = LO_FLAGS_AUTOCLEAR;
     if (::ioctl(loop_fd.get(), LOOP_SET_STATUS64, &info) < 0)
     {
-        std::cerr << "LOOP_SET_STATUS64 for " << loop_dev << ": " << errno
-                  << '\n';
+        lg2::error("LOOP_SET_STATUS64 for {PATH}: {ERRNO}", "PATH", loop_dev,
+                   "ERRNO", errno);
         ::ioctl(loop_fd.get(), LOOP_CLR_FD);
         return std::nullopt;
     }
@@ -433,12 +438,13 @@ class PldmHeaderPeekSession :
         {
             if (prefix_.empty())
             {
-                std::cerr << "Transfer aborted before PLDM header received\n";
+                lg2::error("Transfer aborted before PLDM header received");
                 finish(false);
             }
             else
             {
-                std::cerr << "Upload ended before full PLDM header received\n";
+                lg2::error("Upload ended before full PLDM header "
+                           "received");
                 finish(false);
             }
             return;
@@ -453,12 +459,12 @@ class PldmHeaderPeekSession :
                 read_next();
                 return;
             case PldmHeaderCheck::invalid_header:
-                std::cerr << "Invalid PLDM header size in upload\n";
+                lg2::error("Invalid PLDM header size in upload");
                 finish(false);
                 return;
             case PldmHeaderCheck::component_uuid_mismatch:
-                std::cerr << "PLDM component UUID mismatch (expected IST "
-                             "vectors component)\n";
+                lg2::error("PLDM component UUID mismatch (expected IST "
+                           "vectors component)");
                 finish(false);
                 return;
             case PldmHeaderCheck::ok:
@@ -467,7 +473,7 @@ class PldmHeaderPeekSession :
                     finish(false);
                     return;
                 }
-                std::cout << "PLDM header verified\n";
+                lg2::info("PLDM header verified");
                 finish(true);
                 return;
         }
@@ -479,7 +485,7 @@ class PldmHeaderPeekSession :
         {
             return;
         }
-        std::cerr << "Timed out waiting for PLDM header\n";
+        lg2::error("Timed out waiting for PLDM header");
         finish(false);
     }
 
@@ -499,8 +505,8 @@ class PldmHeaderPeekSession :
             std::ignore = stream_.close(ec);
             if (ec)
             {
-                std::cerr << "Failed to close read stream: " << ec.message()
-                          << '\n';
+                lg2::error("Failed to close read stream: {ERROR}", "ERROR",
+                           ec.message());
             }
         }
 
@@ -612,7 +618,7 @@ class TransferSession : public std::enable_shared_from_this<TransferSession>
                       static_cast<std::streamsize>(len));
         if (!output_)
         {
-            std::cerr << "Write to image file failed\n";
+            lg2::error("Write to image file failed");
             finish(false);
             return false;
         }
@@ -711,8 +717,8 @@ class TransferSession : public std::enable_shared_from_this<TransferSession>
         {
             if (ec != boost::asio::error::eof)
             {
-                std::cerr << "Image transfer read error: " << ec.message()
-                          << '\n';
+                lg2::error("Image transfer read error: {ERROR}", "ERROR",
+                           ec.message());
             }
             verify_and_finish();
             return;
@@ -732,16 +738,18 @@ class TransferSession : public std::enable_shared_from_this<TransferSession>
         uint32_t computed = ~crc_state_;
         if (computed != expected_crc_)
         {
-            std::cerr << "PLDM payload CRC mismatch: stored 0x" << std::hex
-                      << expected_crc_ << " computed 0x" << computed << std::dec
-                      << " (" << payload_bytes_
-                      << " payload bytes received; truncated transfer?)\n";
+            lg2::error("PLDM payload CRC mismatch: stored {STORED} computed "
+                       "{COMPUTED} ({BYTES} payload bytes received; truncated "
+                       "transfer?)",
+                       "STORED", lg2::hex, expected_crc_, "COMPUTED", lg2::hex,
+                       computed, "BYTES", payload_bytes_);
             finish(false);
             return;
         }
 
-        std::cout << "Image transfer complete: " << payload_bytes_
-                  << " payload bytes, CRC verified\n";
+        lg2::info("Image transfer complete: {BYTES} payload bytes, CRC "
+                  "verified",
+                  "BYTES", payload_bytes_);
         committed_ = true;
         finish(true);
     }
@@ -752,9 +760,9 @@ class TransferSession : public std::enable_shared_from_this<TransferSession>
         {
             return;
         }
-        std::cerr << "Transfer timed out after " << timeout_.count()
-                  << "s of inactivity (" << payload_bytes_
-                  << " payload bytes received)\n";
+        lg2::error("Transfer timed out after {TIMEOUT}s of inactivity "
+                   "({BYTES} payload bytes received)",
+                   "TIMEOUT", timeout_.count(), "BYTES", payload_bytes_);
         stream_.close();
         finish(false);
     }
@@ -840,23 +848,25 @@ std::string VectorManager::start_update(UniqueFd image,
 {
     if (update_in_progress_)
     {
-        std::cerr << "StartUpdate rejected: an update is already in progress\n";
+        lg2::error("StartUpdate rejected: an update is already in "
+                   "progress");
         throw ist_err::Unavailable{};
     }
     if (platform_cfg_.storage.vector_storage_path.empty())
     {
-        std::cerr << "StartUpdate rejected: vector storage path is empty\n";
+        lg2::error("StartUpdate rejected: vector storage path is empty");
         throw ist_err::InternalFailure{};
     }
     if (image.get() < 0)
     {
-        std::cerr << "StartUpdate rejected: invalid image fd\n";
+        lg2::error("StartUpdate rejected: invalid image fd");
         throw ist_err::InternalFailure{};
     }
     if (!is_allowed_apply_time(apply_time))
     {
-        std::cerr << "StartUpdate rejected: unsupported apply time '"
-                  << apply_time << "'\n";
+        lg2::error("StartUpdate rejected: unsupported apply time "
+                   "'{APPLY_TIME}'",
+                   "APPLY_TIME", apply_time);
         throw ist_err::InvalidArgument{};
     }
     (void)apply_time; // Immediate and OnReset are accepted; apply is always
@@ -892,12 +902,12 @@ void VectorManager::on_transfer_complete(bool ok)
     active_transfer_.reset();
     if (!ok)
     {
-        std::cerr << "Image transfer failed\n";
+        lg2::error("Image transfer failed");
         finish_update(false);
         return;
     }
 
-    std::cout << "Image transfer succeeded (payload verified); mounting\n";
+    lg2::info("Image transfer succeeded (payload verified); mounting");
     publisher_.publish_activation_progress(100);
     publisher_.remove_activation_progress();
 
@@ -918,16 +928,16 @@ bool VectorManager::teardown_mounts()
     if (umount2(golden_mount.c_str(), 0) != 0 && errno != EINVAL &&
         errno != ENOENT && errno != EPERM)
     {
-        std::cerr << "Failed to unmount " << golden_mount << ": " << errno
-                  << '\n';
+        lg2::error("Failed to unmount {PATH}: {ERRNO}", "PATH", golden_mount,
+                   "ERRNO", errno);
         ok = false;
     }
 
     if (umount2(mount_path.c_str(), 0) != 0 && errno != EINVAL &&
         errno != ENOENT && errno != EPERM)
     {
-        std::cerr << "Failed to unmount " << mount_path << ": " << errno
-                  << '\n';
+        lg2::error("Failed to unmount {PATH}: {ERRNO}", "PATH", mount_path,
+                   "ERRNO", errno);
         ok = false;
     }
 
@@ -941,13 +951,13 @@ bool VectorManager::mount_images()
 
     if (storage_path.empty() || mount_path.empty())
     {
-        std::cerr << "vectorStoragePath or vectorMountPath not configured\n";
+        lg2::error("vectorStoragePath or vectorMountPath not configured");
         return false;
     }
 
     if (!teardown_mounts())
     {
-        std::cerr << "Cannot mount: failed to unmount existing images\n";
+        lg2::error("Cannot mount: failed to unmount existing images");
         return false;
     }
 
@@ -956,21 +966,22 @@ bool VectorManager::mount_images()
     bool exists = fs::exists(image_path, ec);
     if (ec)
     {
-        std::cerr << "Failed to stat " << image_path << ": " << ec.message()
-                  << '\n';
+        lg2::error("Failed to stat {PATH}: {ERROR}", "PATH", image_path,
+                   "ERROR", ec.message());
         return false;
     }
     if (!exists)
     {
-        std::cout << "No IST image at " << image_path << "; nothing to mount\n";
+        lg2::info("No IST image at {PATH}; nothing to mount", "PATH",
+                  image_path);
         return false;
     }
 
     fs::create_directories(mount_path, ec);
     if (ec)
     {
-        std::cerr << "Failed to create " << mount_path << ": " << ec.message()
-                  << '\n';
+        lg2::error("Failed to create {PATH}: {ERROR}", "PATH", mount_path,
+                   "ERROR", ec.message());
         return false;
     }
 
@@ -984,10 +995,11 @@ bool VectorManager::mount_images()
     if (::mount(ext4_loop->path.c_str(), mount_path.c_str(), "ext4",
                 MS_RDONLY | MS_NOATIME, nullptr) != 0)
     {
-        std::cerr << "mount ext4 at " << mount_path << ": " << errno << '\n';
+        lg2::error("mount ext4 at {PATH}: {ERRNO}", "PATH", mount_path, "ERRNO",
+                   errno);
         return false;
     }
-    std::cout << "Mounted ext4 image at " << mount_path << '\n';
+    lg2::info("Mounted ext4 image at {PATH}", "PATH", mount_path);
 
     auto undo_ext4 = [&mount_path]() { ::umount2(mount_path.c_str(), 0); };
 
@@ -995,14 +1007,14 @@ bool VectorManager::mount_images()
     exists = fs::exists(sqsh_path, ec);
     if (ec)
     {
-        std::cerr << "Failed to stat " << sqsh_path << ": " << ec.message()
-                  << '\n';
+        lg2::error("Failed to stat {PATH}: {ERROR}", "PATH", sqsh_path, "ERROR",
+                   ec.message());
         undo_ext4();
         return false;
     }
     if (!exists)
     {
-        std::cerr << "Golden results image not found: " << sqsh_path << '\n';
+        lg2::error("Golden results image not found: {PATH}", "PATH", sqsh_path);
         undo_ext4();
         return false;
     }
@@ -1011,8 +1023,8 @@ bool VectorManager::mount_images()
     fs::create_directories(golden_mount, ec);
     if (ec)
     {
-        std::cerr << "Failed to create " << golden_mount << ": " << ec.message()
-                  << '\n';
+        lg2::error("Failed to create {PATH}: {ERROR}", "PATH", golden_mount,
+                   "ERROR", ec.message());
         undo_ext4();
         return false;
     }
@@ -1021,7 +1033,7 @@ bool VectorManager::mount_images()
         setup_loop_device(sqsh_path, O_RDONLY);
     if (!sqsh_loop)
     {
-        std::cerr << "Failed to set up loop device for squashfs\n";
+        lg2::error("Failed to set up loop device for squashfs");
         undo_ext4();
         return false;
     }
@@ -1029,12 +1041,12 @@ bool VectorManager::mount_images()
     if (::mount(sqsh_loop->path.c_str(), golden_mount.c_str(), "squashfs",
                 MS_RDONLY, nullptr) != 0)
     {
-        std::cerr << "mount squashfs at " << golden_mount << ": " << errno
-                  << '\n';
+        lg2::error("mount squashfs at {PATH}: {ERRNO}", "PATH", golden_mount,
+                   "ERRNO", errno);
         undo_ext4();
         return false;
     }
-    std::cout << "Mounted golden results at " << golden_mount << '\n';
+    lg2::info("Mounted golden results at {PATH}", "PATH", golden_mount);
 
     return true;
 }
@@ -1044,7 +1056,8 @@ void VectorManager::read_and_publish_version()
     const fs::path& mount_path = platform_cfg_.storage.vector_mount_path;
     if (mount_path.empty())
     {
-        std::cerr << "vectorMountPath not configured; skipping version read\n";
+        lg2::error("vectorMountPath not configured; skipping version "
+                   "read");
         return;
     }
 
@@ -1052,15 +1065,15 @@ void VectorManager::read_and_publish_version()
     std::ifstream f(version_file);
     if (!f.is_open())
     {
-        std::cout << "No version.txt at " << version_file
-                  << "; version unavailable\n";
+        lg2::info("No version.txt at {PATH}; version unavailable", "PATH",
+                  version_file);
         return;
     }
 
     std::string version;
     if (!std::getline(f, version))
     {
-        std::cerr << "Failed to read " << version_file << '\n';
+        lg2::error("Failed to read {PATH}", "PATH", version_file);
         return;
     }
 
@@ -1069,19 +1082,20 @@ void VectorManager::read_and_publish_version()
     constexpr size_t k_max_version_length = 256;
     if (version.size() > k_max_version_length)
     {
-        std::cerr << "Version string too long (" << version.size()
-                  << " chars), truncating to " << k_max_version_length << '\n';
+        lg2::error("Version string too long ({SIZE} chars), truncating to "
+                   "{LIMIT}",
+                   "SIZE", version.size(), "LIMIT", k_max_version_length);
         version.resize(k_max_version_length);
     }
 
     if (version.empty())
     {
-        std::cerr << "version.txt at " << version_file << " is empty\n";
+        lg2::error("version.txt at {PATH} is empty", "PATH", version_file);
         return;
     }
 
     publisher_.publish_version(version);
-    std::cout << "IST vector version: " << version << '\n';
+    lg2::info("IST vector version: {VERSION}", "VERSION", version);
 }
 
 void VectorManager::finish_update(bool ok)
@@ -1117,14 +1131,14 @@ void VectorManager::on_teardown_complete(bool ok, UniqueFd read_fd,
 {
     if (!ok)
     {
-        std::cerr << "Failed to unmount existing images; rejecting update\n";
+        lg2::error("Failed to unmount existing images; rejecting update");
         finish_update(false);
         return;
     }
 
     if (read_fd.get() < 0)
     {
-        std::cerr << "Failed to start image transfer\n";
+        lg2::error("Failed to start image transfer");
         finish_update(false);
         return;
     }
@@ -1160,7 +1174,7 @@ void VectorManager::on_teardown_complete(bool ok, UniqueFd read_fd,
     }
     catch (const std::system_error& e)
     {
-        std::cerr << "Failed to start transfer: " << e.what() << '\n';
+        lg2::error("Failed to start transfer: {ERROR}", "ERROR", e.what());
         finish_update(false);
     }
 }
@@ -1169,7 +1183,7 @@ void VectorManager::on_mount_complete(bool ok)
 {
     if (!ok)
     {
-        std::cerr << "Failed to mount images after transfer\n";
+        lg2::error("Failed to mount images after transfer");
         finish_update(false);
         return;
     }
@@ -1193,7 +1207,7 @@ void VectorManager::ensure_mounted()
         return;
     }
 
-    std::cout << "Test vectors not mounted; attempting mount\n";
+    lg2::info("Test vectors not mounted; attempting mount");
     if (mount_images())
     {
         read_and_publish_version();
@@ -1211,13 +1225,14 @@ std::string IstService::start_update(int image_fd, std::string_view apply_time)
     UniqueFd image(image_fd);
     if (!initialized_)
     {
-        std::cerr << "StartUpdate rejected: service not initialized\n";
+        lg2::error("StartUpdate rejected: service not initialized");
         throw ist_err::Unavailable{};
     }
     if (state_.stage != IstStage::idle)
     {
-        std::cerr << "StartUpdate rejected: IST is running (stage="
-                  << ist_stage_to_string(state_.stage) << ")\n";
+        lg2::error("StartUpdate rejected: IST is running "
+                   "(stage={STAGE})",
+                   "STAGE", ist_stage_to_string(state_.stage));
         throw ist_err::Unavailable{};
     }
     return vector_manager_->start_update(std::move(image), apply_time);

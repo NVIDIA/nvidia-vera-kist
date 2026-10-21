@@ -177,7 +177,7 @@ endif
 ist_shm_a = static_library(
     'ist_shm_a',
     'src/shm_telemetry.cpp',
-    dependencies: [nvidia_tal_dep],
+    dependencies: [nvidia_tal_dep, phosphor_logging_dep],
     include_directories: 'include',
     cpp_args: ['-frtti'],
 )

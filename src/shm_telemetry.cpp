@@ -14,13 +14,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include <phosphor-logging/lg2.hpp>
 #include <shm_telemetry.hpp>
 #ifdef NVIDIA_SHMEM
 #include <tal.hpp>
 
 #include <chrono>
 #include <cstdint>
-#include <iostream>
 #include <vector>
 #endif
 
@@ -30,8 +30,8 @@ void init_shm_telemetry()
     if (!tal::TelemetryAggregator::namespaceInit(tal::ProcessType::Producer,
                                                  "nvidia-vera-kist"))
     {
-        std::cerr << "Shared memory telemetry init reported a failure; test "
-                     "vector state may be absent from metric reports\n";
+        lg2::error("Shared memory telemetry init reported a failure; test "
+                   "vector state may be absent from metric reports");
     }
 #endif
 }

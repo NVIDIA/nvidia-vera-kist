@@ -21,15 +21,16 @@
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/post.hpp>
 #include <ist_app.hpp>
+#include <phosphor-logging/lg2.hpp>
 #include <signature_verify.hpp>
 
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <functional>
-#include <iostream>
 #include <memory>
 #include <optional>
 #include <set>
@@ -77,19 +78,27 @@ static EvpPkeyPtr load_public_key(const fs::path& path)
     BioPtr bio(BIO_new_file(path.c_str(), "r"));
     if (!bio)
     {
-        std::cerr << "Failed to open public key file: " << path << '\n';
+        log_to_results("ERR", std::format("Failed to open public key file: "
+                                          "{}",
+                                          path.string()));
+        lg2::error("Failed to open public key file: {PATH}", "PATH", path);
         return nullptr;
     }
 
     EVP_PKEY* raw = PEM_read_bio_PUBKEY(bio.get(), nullptr, nullptr, nullptr);
     if (raw == nullptr)
     {
-        std::cerr << "Failed to parse PEM public key: " << path << '\n';
+        log_to_results("ERR", std::format("Failed to parse PEM public key: "
+                                          "{}",
+                                          path.string()));
+        lg2::error("Failed to parse PEM public key: {PATH}", "PATH", path);
         return nullptr;
     }
     if (EVP_PKEY_bits(raw) != 384)
     {
-        std::cerr << "Public key is not P-384: " << path << '\n';
+        log_to_results(
+            "ERR", std::format("Public key is not P-384: {}", path.string()));
+        lg2::error("Public key is not P-384: {PATH}", "PATH", path);
         EVP_PKEY_free(raw);
         return nullptr;
     }
@@ -151,35 +160,37 @@ class FileVerifier
         std::ifstream sig_stream(sig_file);
         if (!sig_stream)
         {
-            std::cerr << "Failed to open signature file: " << sig_file << '\n';
+            lg2::error("Failed to open signature file: {PATH}", "PATH",
+                       sig_file);
             return false;
         }
         std::string sig_b64((std::istreambuf_iterator<char>(sig_stream)),
                             std::istreambuf_iterator<char>());
         if (!base64_decode(sig_b64, sig_bytes_))
         {
-            std::cerr << "Failed to base64-decode signature: " << sig_file
-                      << '\n';
+            lg2::error("Failed to base64-decode signature: {PATH}", "PATH",
+                       sig_file);
             return false;
         }
 
         ctx_.reset(EVP_MD_CTX_new());
         if (!ctx_)
         {
-            std::cerr << "Failed to create EVP_MD_CTX\n";
+            lg2::error("Failed to create EVP_MD_CTX");
             return false;
         }
         if (EVP_DigestVerifyInit(ctx_.get(), nullptr, EVP_sha384(), nullptr,
                                  pub_key_.get()) != 1)
         {
-            std::cerr << "EVP_DigestVerifyInit failed for: " << file_ << '\n';
+            lg2::error("EVP_DigestVerifyInit failed for: {PATH}", "PATH",
+                       file_);
             return false;
         }
 
         data_stream_.open(file_, std::ios::binary);
         if (!data_stream_)
         {
-            std::cerr << "Failed to open data file: " << file_ << '\n';
+            lg2::error("Failed to open data file: {PATH}", "PATH", file_);
             return false;
         }
         return true;
@@ -201,8 +212,8 @@ class FileVerifier
             if (n > 0 && EVP_DigestVerifyUpdate(ctx_.get(), buf.data(),
                                                 static_cast<size_t>(n)) != 1)
             {
-                std::cerr << "EVP_DigestVerifyUpdate failed for: " << file_
-                          << '\n';
+                lg2::error("EVP_DigestVerifyUpdate failed for: {PATH}", "PATH",
+                           file_);
                 return State::error;
             }
             return State::more;
@@ -212,10 +223,16 @@ class FileVerifier
                                        sig_bytes_.size());
         if (rc != 1)
         {
-            std::cerr << "Signature verification FAILED for: " << file_ << '\n';
+            log_to_results("ERR",
+                           std::format("Signature verification FAILED for: {}",
+                                       file_.string()));
+            lg2::error("Signature verification FAILED for: {PATH}", "PATH",
+                       file_);
             return State::error;
         }
-        std::cerr << "Signature verified OK: " << file_ << '\n';
+        log_to_results(
+            "INFO", std::format("Signature verified OK: {}", file_.string()));
+        lg2::info("Signature verified OK: {PATH}", "PATH", file_);
         return State::done;
     }
 
@@ -259,8 +276,10 @@ static std::optional<std::vector<VerifyTarget>>
     std::error_code ec;
     if (!fs::exists(cfg.signing_key_path, ec) || ec)
     {
-        std::cerr << "Verification key not found: " << cfg.signing_key_path
-                  << '\n';
+        log_to_results("ERR", std::format("Verification key not found: {}",
+                                          cfg.signing_key_path.string()));
+        lg2::error("Verification key not found: {PATH}", "PATH",
+                   cfg.signing_key_path);
         return std::nullopt;
     }
 
@@ -271,8 +290,11 @@ static std::optional<std::vector<VerifyTarget>>
     binary_sig += ".sig";
     if (!fs::exists(binary_sig, ec) || ec)
     {
-        std::cerr << "Signature file missing for binary: " << binary_sig
-                  << '\n';
+        log_to_results("ERR",
+                       std::format("Signature file missing for binary: {}",
+                                   binary_sig.string()));
+        lg2::error("Signature file missing for binary: {PATH}", "PATH",
+                   binary_sig);
         return std::nullopt;
     }
     targets.push_back({cfg.itm_binary_path, binary_sig});
@@ -289,8 +311,8 @@ static std::optional<std::vector<VerifyTarget>>
     bool is_dir = fs::is_directory(cfg.itm_lib_dir, ec);
     if (ec)
     {
-        std::cerr << "Cannot access lib directory '" << cfg.itm_lib_dir
-                  << "': " << ec.message() << '\n';
+        lg2::error("Cannot access lib directory '{PATH}': {ERROR}", "PATH",
+                   cfg.itm_lib_dir, "ERROR", ec.message());
         return std::nullopt;
     }
     if (!is_dir)
@@ -304,8 +326,8 @@ static std::optional<std::vector<VerifyTarget>>
     {
         if (ec)
         {
-            std::cerr << "Error iterating lib directory: " << ec.message()
-                      << '\n';
+            lg2::error("Error iterating lib directory: {ERROR}", "ERROR",
+                       ec.message());
             return std::nullopt;
         }
 
@@ -324,8 +346,8 @@ static std::optional<std::vector<VerifyTarget>>
         }
         if (entry_ec)
         {
-            std::cerr << "Failed to stat " << path << ": " << entry_ec.message()
-                      << '\n';
+            lg2::error("Failed to stat {PATH}: {ERROR}", "PATH", path, "ERROR",
+                       entry_ec.message());
             return std::nullopt;
         }
 
@@ -333,8 +355,8 @@ static std::optional<std::vector<VerifyTarget>>
         {
             if (entry_ec)
             {
-                std::cerr << "Failed to stat " << path << ": "
-                          << entry_ec.message() << '\n';
+                lg2::error("Failed to stat {PATH}: {ERROR}", "PATH", path,
+                           "ERROR", entry_ec.message());
                 return std::nullopt;
             }
             continue;
@@ -344,15 +366,20 @@ static std::optional<std::vector<VerifyTarget>>
         lib_sig += ".sig";
         if (!fs::exists(lib_sig, ec) || ec)
         {
-            std::cerr << "Signature file missing for library: " << path << '\n';
+            log_to_results("ERR",
+                           std::format("Signature file missing for library: "
+                                       "{}",
+                                       path.string()));
+            lg2::error("Signature file missing for library: {PATH}", "PATH",
+                       path);
             return std::nullopt;
         }
 
         fs::path lib_real = fs::canonical(path, ec);
         if (ec)
         {
-            std::cerr << "Failed to resolve library path " << path << ": "
-                      << ec.message() << '\n';
+            lg2::error("Failed to resolve library path {PATH}: {ERROR}", "PATH",
+                       path, "ERROR", ec.message());
             return std::nullopt;
         }
         verified_real.insert(lib_real);
@@ -360,7 +387,8 @@ static std::optional<std::vector<VerifyTarget>>
     }
     if (ec)
     {
-        std::cerr << "Error iterating lib directory: " << ec.message() << '\n';
+        lg2::error("Error iterating lib directory: {ERROR}", "ERROR",
+                   ec.message());
         return std::nullopt;
     }
 
@@ -369,14 +397,20 @@ static std::optional<std::vector<VerifyTarget>>
         fs::path link_real = fs::canonical(link, ec);
         if (ec)
         {
-            std::cerr << "Symlink target could not be resolved: " << link
-                      << ": " << ec.message() << '\n';
+            lg2::error("Symlink target could not be resolved: {LINK}: "
+                       "{ERROR}",
+                       "LINK", link, "ERROR", ec.message());
             return std::nullopt;
         }
         if (!verified_real.contains(link_real))
         {
-            std::cerr << "Symlink resolves outside the verified set: " << link
-                      << " -> " << link_real << '\n';
+            log_to_results("ERR",
+                           std::format("Symlink resolves outside the verified "
+                                       "set: {} -> {}",
+                                       link.string(), link_real.string()));
+            lg2::error("Symlink resolves outside the verified set: {LINK} -> "
+                       "{TARGET}",
+                       "LINK", link, "TARGET", link_real);
             return std::nullopt;
         }
     }

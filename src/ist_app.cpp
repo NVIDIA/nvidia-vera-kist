@@ -76,15 +76,17 @@ static bool is_path_within(const fs::path& child, const fs::path& parent)
     fs::path canonical_child = fs::canonical(child, ec);
     if (ec)
     {
-        std::cerr << "is_path_within: cannot resolve child path '"
-                  << child.string() << "': " << ec.message() << '\n';
+        lg2::error("is_path_within: cannot resolve child path '{PATH}': "
+                   "{ERROR}",
+                   "PATH", child.string(), "ERROR", ec.message());
         return false;
     }
     fs::path canonical_parent = fs::canonical(parent, ec);
     if (ec)
     {
-        std::cerr << "is_path_within: cannot resolve parent path '"
-                  << parent.string() << "': " << ec.message() << '\n';
+        lg2::error("is_path_within: cannot resolve parent path '{PATH}': "
+                   "{ERROR}",
+                   "PATH", parent.string(), "ERROR", ec.message());
         return false;
     }
 
@@ -257,7 +259,7 @@ bool parse_platform_config(IstPlatformConfig& out, const std::string& path,
     std::ifstream f(path);
     if (!f)
     {
-        std::cerr << "Failed to open " << path << '\n';
+        lg2::error("Failed to open {PATH}", "PATH", path);
         return false;
     }
 
@@ -268,13 +270,13 @@ bool parse_platform_config(IstPlatformConfig& out, const std::string& path,
     }
     catch (const std::exception& e)
     {
-        std::cerr << "Failed to parse JSON: " << e.what() << '\n';
+        lg2::error("Failed to parse JSON: {ERROR}", "ERROR", e.what());
         return false;
     }
 
     if (!d.contains("hookDirectory") || !d["hookDirectory"].is_string())
     {
-        std::cerr << "hookDirectory missing or not a string\n";
+        lg2::error("hookDirectory missing or not a string");
         return false;
     }
     out.hook_dir = d["hookDirectory"].get<std::string>();
@@ -282,23 +284,23 @@ bool parse_platform_config(IstPlatformConfig& out, const std::string& path,
     std::error_code fs_ec;
     if (!fs::is_directory(out.hook_dir, fs_ec) || fs_ec)
     {
-        std::cerr << "hookDirectory does not exist or is not a directory: "
-                  << out.hook_dir << '\n';
+        lg2::error("hookDirectory does not exist or is not a directory: {PATH}",
+                   "PATH", out.hook_dir);
         return false;
     }
 
     if (!is_path_within(out.hook_dir, fs::path(hook_root)))
     {
-        std::cerr << "hookDirectory '" << out.hook_dir
-                  << "' resolves outside the trusted hook root '" << hook_root
-                  << "'\n";
+        lg2::error("hookDirectory '{PATH}' resolves outside the trusted hook "
+                   "root '{ROOT}'",
+                   "PATH", out.hook_dir, "ROOT", hook_root);
         return false;
     }
 
     if (!d.contains("softwareInventoryId") ||
         !d["softwareInventoryId"].is_string())
     {
-        std::cerr << "softwareInventoryId is missing or not a string\n";
+        lg2::error("softwareInventoryId is missing or not a string");
         return false;
     }
     std::string id = d["softwareInventoryId"].get<std::string>();
@@ -306,8 +308,8 @@ bool parse_platform_config(IstPlatformConfig& out, const std::string& path,
             return std::isalnum(static_cast<unsigned char>(c)) == 0 && c != '_';
         }))
     {
-        std::cerr << "softwareInventoryId contains invalid characters: " << id
-                  << "\n";
+        lg2::error("softwareInventoryId contains invalid characters: {ID}",
+                   "ID", id);
         return false;
     }
     out.software_inventory_id = std::move(id);
@@ -338,16 +340,16 @@ bool parse_platform_config(IstPlatformConfig& out, const std::string& path,
         {
             if (hp.contains(name))
             {
-                std::cerr << "Hook '" << name << "' has empty path\n";
+                lg2::error("Hook '{NAME}' has empty path", "NAME", name);
                 return false;
             }
             continue;
         }
         if (!is_path_within(hookPath, out.hook_dir))
         {
-            std::cerr << "Hook '" << name << "' path '" << hookPath
-                      << "' is outside hookDirectory '" << out.hook_dir
-                      << "'\n";
+            lg2::error("Hook '{NAME}' path '{PATH}' is outside hookDirectory "
+                       "'{DIR}'",
+                       "NAME", name, "PATH", hookPath, "DIR", out.hook_dir);
             return false;
         }
     }
@@ -357,30 +359,29 @@ bool parse_platform_config(IstPlatformConfig& out, const std::string& path,
 
 void IstService::print_ist_platform_config() const
 {
-    std::cout << "istHookPath:    " << platform_cfg_.hook_dir << '\n';
-    std::cout << "itmBinaryPath:  " << platform_cfg_.itm_binary_path << '\n';
-    std::cout << "itmLibDir:      " << platform_cfg_.itm_lib_dir << '\n';
-    std::cout << "hooks:\n";
-    std::cout << "  istBootAssert = " << platform_cfg_.hooks.ist_boot_assert
-              << '\n';
-    std::cout << "  istBootDeassert = " << platform_cfg_.hooks.ist_boot_deassert
-              << '\n';
-    std::cout << "  resetSystem = " << platform_cfg_.hooks.reset_system << '\n';
-    std::cout << "  errorCheck = " << platform_cfg_.hooks.error_check << '\n';
-    std::cout << "storage:\n";
-    std::cout << "  vectorMountPath = "
-              << platform_cfg_.storage.vector_mount_path << '\n';
-    std::cout << "  vectorStoragePath = "
-              << platform_cfg_.storage.vector_storage_path << '\n';
-    std::cout << "  resultStoragePath = "
-              << platform_cfg_.storage.result_storage_path << '\n';
+    lg2::info("Platform config: hookPath={HOOK_DIR}, itmBinary={ITM_BINARY}, "
+              "itmLibDir={ITM_LIB_DIR}, bootAssert={BOOT_ASSERT}, "
+              "bootDeassert={BOOT_DEASSERT}, resetSystem={RESET_SYSTEM}, "
+              "errorCheck={ERROR_CHECK}, vectorMountPath={VECTOR_MOUNT}, "
+              "vectorStoragePath={VECTOR_STORAGE}, "
+              "resultStoragePath={RESULT_STORAGE}",
+              "HOOK_DIR", platform_cfg_.hook_dir, "ITM_BINARY",
+              platform_cfg_.itm_binary_path, "ITM_LIB_DIR",
+              platform_cfg_.itm_lib_dir, "BOOT_ASSERT",
+              platform_cfg_.hooks.ist_boot_assert, "BOOT_DEASSERT",
+              platform_cfg_.hooks.ist_boot_deassert, "RESET_SYSTEM",
+              platform_cfg_.hooks.reset_system, "ERROR_CHECK",
+              platform_cfg_.hooks.error_check, "VECTOR_MOUNT",
+              platform_cfg_.storage.vector_mount_path, "VECTOR_STORAGE",
+              platform_cfg_.storage.vector_storage_path, "RESULT_STORAGE",
+              platform_cfg_.storage.result_storage_path);
 }
 
 bool IstService::initialize(IstPlatformConfig cfg)
 {
     if (initialized_)
     {
-        std::cerr << "Already initialized\n";
+        lg2::error("Already initialized");
         return false;
     }
 
@@ -395,8 +396,8 @@ bool IstService::initialize(IstPlatformConfig cfg)
             hook_cmd, "istBootDeassert on startup", [](bool ok) {
                 if (!ok)
                 {
-                    std::cerr << "istBootDeassert on startup "
-                                 "failed (non-fatal)\n";
+                    lg2::warning("istBootDeassert on startup failed "
+                                 "(non-fatal)");
                 }
             });
     }
@@ -421,8 +422,8 @@ bool IstService::get_ist_params(const ParamMap& test_params)
         if (const std::string* s = std::get_if<std::string>(&val);
             s && s->length() > max_param_string_length)
         {
-            std::cerr << "Parameter '" << key << "' exceeds max length ("
-                      << max_param_string_length << ")\n";
+            lg2::error("Parameter '{KEY}' exceeds max length ({LIMIT})", "KEY",
+                       key, "LIMIT", max_param_string_length);
             return false;
         }
 
@@ -436,8 +437,8 @@ bool IstService::get_ist_params(const ParamMap& test_params)
             }
             else
             {
-                std::cerr << "Parameter 'istSwTimeoutSec' has wrong type "
-                             "(expected int)\n";
+                lg2::error("Parameter 'istSwTimeoutSec' has wrong type "
+                           "(expected int)");
                 return false;
             }
         }
@@ -449,8 +450,8 @@ bool IstService::get_ist_params(const ParamMap& test_params)
             }
             else
             {
-                std::cerr << "Parameter 'customTestList' has wrong type "
-                             "(expected string)\n";
+                lg2::error("Parameter 'customTestList' has wrong type "
+                           "(expected string)");
                 return false;
             }
         }
@@ -462,8 +463,8 @@ bool IstService::get_ist_params(const ParamMap& test_params)
             }
             else
             {
-                std::cerr << "Parameter 'customSocketList' has wrong type "
-                             "(expected string)\n";
+                lg2::error("Parameter 'customSocketList' has wrong type "
+                           "(expected string)");
                 return false;
             }
         }
@@ -475,8 +476,8 @@ bool IstService::get_ist_params(const ParamMap& test_params)
             }
             else
             {
-                std::cerr << "Parameter 'istContinueOnFail' has wrong type "
-                             "(expected bool)\n";
+                lg2::error("Parameter 'istContinueOnFail' has wrong type "
+                           "(expected bool)");
                 return false;
             }
         }
@@ -488,8 +489,8 @@ bool IstService::get_ist_params(const ParamMap& test_params)
             }
             else
             {
-                std::cerr << "Parameter 'istSaveResOnPass' has wrong type "
-                             "(expected bool)\n";
+                lg2::error("Parameter 'istSaveResOnPass' has wrong type "
+                           "(expected bool)");
                 return false;
             }
         }
@@ -501,8 +502,8 @@ bool IstService::get_ist_params(const ParamMap& test_params)
             }
             else
             {
-                std::cerr << "Parameter 'istSaveResOnFail' has wrong type "
-                             "(expected bool)\n";
+                lg2::error("Parameter 'istSaveResOnFail' has wrong type "
+                           "(expected bool)");
                 return false;
             }
         }
@@ -514,14 +515,14 @@ bool IstService::get_ist_params(const ParamMap& test_params)
             }
             else
             {
-                std::cerr << "Parameter 'autoRebootOnComplete' has wrong type "
-                             "(expected bool)\n";
+                lg2::error("Parameter 'autoRebootOnComplete' has wrong type "
+                           "(expected bool)");
                 return false;
             }
         }
         else
         {
-            std::cerr << "Unknown IST test param: " << key << '\n';
+            lg2::error("Unknown IST test param: {KEY}", "KEY", key);
             return false;
         }
     }
@@ -532,20 +533,16 @@ bool IstService::collateral_verification()
 {
     if (platform_cfg_.storage.vector_mount_path.empty())
     {
-        std::cerr << "vectorMountPath not configured in platform config!\n";
+        lg2::error("vectorMountPath not configured in platform config!");
         return false;
     }
     std::error_code fs_ec;
     if (!fs::exists(platform_cfg_.storage.vector_mount_path, fs_ec) || fs_ec)
     {
-        std::cerr << "Vector storage path '"
-                  << platform_cfg_.storage.vector_mount_path
-                  << "' does not exist or is inaccessible";
-        if (fs_ec)
-        {
-            std::cerr << ": " << fs_ec.message();
-        }
-        std::cerr << '\n';
+        lg2::error("Vector storage path '{PATH}' does not exist or is "
+                   "inaccessible: {ERROR}",
+                   "PATH", platform_cfg_.storage.vector_mount_path, "ERROR",
+                   fs_ec ? fs_ec.message() : std::string("no error reported"));
         return false;
     }
 
@@ -553,8 +550,9 @@ bool IstService::collateral_verification()
 
     if (!fs::exists(platform_cfg_.itm_binary_path, fs_ec) || fs_ec)
     {
-        std::cerr << "IST binary '" << platform_cfg_.itm_binary_path
-                  << "' not found; test vectors may not be mounted\n";
+        lg2::error("IST binary '{PATH}' not found; test vectors may not be "
+                   "mounted",
+                   "PATH", platform_cfg_.itm_binary_path);
         return false;
     }
 
@@ -563,9 +561,9 @@ bool IstService::collateral_verification()
     if (!fs::exists(golden_res, fs_ec) || fs_ec ||
         fs::is_empty(golden_res, fs_ec) || fs_ec)
     {
-        std::cerr << "GOLDEN_RES not found or empty under '"
-                  << platform_cfg_.storage.vector_mount_path
-                  << "'; test vectors may not be mounted\n";
+        lg2::error("GOLDEN_RES not found or empty under '{PATH}'; test vectors "
+                   "may not be mounted",
+                   "PATH", platform_cfg_.storage.vector_mount_path);
         return false;
     }
 
@@ -576,15 +574,15 @@ bool IstService::prepare_result_storage()
 {
     if (platform_cfg_.storage.result_storage_path.empty())
     {
-        std::cerr << "resultStoragePath not configured in platform config!\n";
+        lg2::error("resultStoragePath not configured in platform config!");
         return false;
     }
     std::error_code fs_ec;
     fs::create_directories(platform_cfg_.storage.result_storage_path, fs_ec);
     if (fs_ec)
     {
-        std::cerr << "Failed to create results directory: " << fs_ec.message()
-                  << '\n';
+        lg2::error("Failed to create results directory: {ERROR}", "ERROR",
+                   fs_ec.message());
         return false;
     }
 
@@ -599,7 +597,7 @@ void IstService::on_ist_boot_assert_done(bool ok)
 {
     if (!ok)
     {
-        std::cerr << "Failed to assert IST boot\n";
+        lg2::error("Failed to assert IST boot");
         state_.progress = 0;
         fail_run_with_archive("category=HOOK, reason=ist_boot_assert_failed");
         return;
@@ -622,9 +620,9 @@ void IstService::on_ist_boot_assert_done(bool ok)
                 fs::remove(entry.path(), ec);
                 if (ec)
                 {
-                    std::cerr << "Failed to remove marker '"
-                              << entry.path().string() << "': " << ec.message()
-                              << "\n";
+                    lg2::error("Failed to remove marker '{PATH}': {ERROR}",
+                               "PATH", entry.path().string(), "ERROR",
+                               ec.message());
                 }
             }
         }
@@ -657,7 +655,7 @@ void IstService::on_power_cycle_done(bool ok)
 {
     if (!ok)
     {
-        std::cerr << "Unable to detect power cycle, running cleanup\n";
+        lg2::error("Unable to detect power cycle, running cleanup");
         failure_info_.emplace_back("category=POWER_CYCLE, reason=not_detected");
         run_ist_cleanup(-1);
         return;
@@ -672,9 +670,14 @@ void IstService::on_power_cycle_done(bool ok)
     {
         if (!is_path_within(cak_script, platform_cfg_.hook_dir))
         {
-            std::cerr << "CAK bypass script '" << cak_script.string()
-                      << "' resolves outside hookDirectory '"
-                      << platform_cfg_.hook_dir.string() << "'\n";
+            log_to_results("ERR", std::format("CAK bypass script '{}' resolves "
+                                              "outside hookDirectory '{}'",
+                                              cak_script.string(),
+                                              platform_cfg_.hook_dir.string()));
+            lg2::error("CAK bypass script '{PATH}' resolves outside "
+                       "hookDirectory '{DIR}'",
+                       "PATH", cak_script.string(), "DIR",
+                       platform_cfg_.hook_dir.string());
             failure_info_.emplace_back(
                 "category=SECURITY, reason=cak_bypass_path_escape");
             run_ist_cleanup(-1);
@@ -685,7 +688,7 @@ void IstService::on_power_cycle_done(bool ok)
             [self = shared_from_this()](bool ok_cak) {
                 if (!ok_cak)
                 {
-                    std::cerr << "CAK bypass hook failed, aborting IST\n";
+                    lg2::error("CAK bypass hook failed, aborting IST");
                     self->failure_info_.emplace_back(
                         "category=HOOK, reason=cak_bypass_failed");
                     self->run_ist_cleanup(-1);
@@ -734,11 +737,15 @@ void IstService::run_ist_cleanup(int itm_exit)
 {
     if (itm_exit >= 0)
     {
-        std::cout << "kist_itm exited with code " << itm_exit << '\n';
+        log_to_results("INFO",
+                       std::format("kist_itm exited with code {}", itm_exit));
+        lg2::info("kist_itm exited with code {EXIT_CODE}", "EXIT_CODE",
+                  itm_exit);
     }
     else
     {
-        std::cerr << "Failed to execute IST (code=" << itm_exit << ")\n";
+        lg2::error("Failed to execute IST (code={EXIT_CODE})", "EXIT_CODE",
+                   itm_exit);
     }
     emit_ist_event_log(itm_exit);
     for (const auto& info : failure_info_)
@@ -769,7 +776,7 @@ void IstService::on_archive_done(int itm_exit, bool ok_deassert)
         const fs::path& reset_cmd = platform_cfg_.hooks.reset_system;
         if (reset_cmd.empty())
         {
-            std::cerr << "resetSystem hook not found, failing cleanup\n";
+            lg2::error("resetSystem hook not found, failing cleanup");
             transition_to(IstStage::idle, IstStatus::failed,
                           "category=HOOK, reason=reset_system_not_found");
             return;
@@ -849,7 +856,7 @@ void IstService::on_deassert_done(int itm_exit, bool ok_deassert)
 {
     if (!ok_deassert)
     {
-        std::cerr << "istBootDeassert hook failed during cleanup\n";
+        lg2::error("istBootDeassert hook failed during cleanup");
         emit_ist_error("category=HOOK, reason=ist_boot_deassert_failed");
     }
 
@@ -859,7 +866,7 @@ void IstService::on_deassert_done(int itm_exit, bool ok_deassert)
         [weak = weak_from_this(), itm_exit, ok_deassert](bool ok) {
             if (!ok)
             {
-                std::cerr << "IST: results archiving failed\n";
+                lg2::error("IST: results archiving failed");
             }
             if (auto self = weak.lock())
             {
@@ -877,7 +884,7 @@ void IstService::fail_run_with_archive(std::string_view error_info)
     archive_results_async(io_, results_dir, [weak = weak_from_this()](bool ok) {
         if (!ok)
         {
-            std::cerr << "IST: results archiving failed\n";
+            lg2::error("IST: results archiving failed");
         }
         if (auto self = weak.lock())
         {
@@ -908,12 +915,12 @@ std::string IstService::start_ist(const ParamMap& test_params)
 {
     if (state_.stage != IstStage::idle)
     {
-        std::cerr << "Another IST run is in progress\n";
+        lg2::error("Another IST run is in progress");
         throw sdbusplus::exception::SdBusError(EBUSY, "IST already running");
     }
     if (vector_manager_->in_progress())
     {
-        std::cerr << "Cannot start IST while update is in progress\n";
+        lg2::error("Cannot start IST while update is in progress");
         throw sdbusplus::exception::SdBusError(
             EBUSY, "Cannot start IST while update is in progress");
     }
@@ -973,8 +980,8 @@ std::string IstService::start_ist(const ParamMap& test_params)
         fs::remove_all(entry.path(), rm_ec);
         if (rm_ec)
         {
-            std::cerr << "Failed to remove " << entry.path() << ": "
-                      << rm_ec.message() << '\n';
+            lg2::error("Failed to remove {PATH}: {ERROR}", "PATH", entry.path(),
+                       "ERROR", rm_ec.message());
         }
     }
 
@@ -991,7 +998,7 @@ void IstService::on_signature_verify_done(bool ok)
 {
     if (!ok)
     {
-        std::cerr << "IST binary/library signature verification failed\n";
+        lg2::error("IST binary/library signature verification failed");
         fail_run_with_archive(
             "category=SECURITY, reason=signature_verification_failed");
         return;
@@ -999,20 +1006,26 @@ void IstService::on_signature_verify_done(bool ok)
 
     if (test_.custom_socket_list.has_value())
     {
-        std::cout << "Using user-provided socket list: "
-                  << *test_.custom_socket_list << '\n';
+        log_to_results("INFO",
+                       std::format("Using user-provided socket list: {}",
+                                   *test_.custom_socket_list));
+        lg2::info("Using user-provided socket list: {SOCKETS}", "SOCKETS",
+                  *test_.custom_socket_list);
         launch_boot_assert();
         return;
     }
 
     if (!cpu_discoverer_)
     {
-        std::cout << "No CPU discoverer configured, skipping discovery\n";
+        log_to_results("INFO", "No CPU discoverer configured, skipping "
+                               "discovery");
+        lg2::info("No CPU discoverer configured, skipping discovery");
         launch_boot_assert();
         return;
     }
 
-    std::cout << "Starting CPU discovery via Entity Manager\n";
+    log_to_results("INFO", "Starting CPU discovery via Entity Manager");
+    lg2::info("Starting CPU discovery via Entity Manager");
     cpu_discoverer_(
         [self = shared_from_this()](const std::vector<std::string>& cpu_paths) {
             self->on_cpu_discovery_done(cpu_paths);
@@ -1024,7 +1037,7 @@ void IstService::on_cpu_discovery_done(
 {
     if (cpu_paths.empty())
     {
-        std::cerr << "No CPUs discovered via Entity Manager\n";
+        lg2::error("No CPUs discovered via Entity Manager");
         fail_run_with_archive("category=DISCOVERY, reason=no_cpus_found");
         return;
     }
@@ -1036,7 +1049,11 @@ void IstService::on_cpu_discovery_done(
         auto pos = cpu_name.rfind('_');
         if (pos == std::string::npos || pos + 1 >= cpu_name.size())
         {
-            std::cerr << "Cannot extract socket number from: " << path << '\n';
+            log_to_results(
+                "ERR",
+                std::format("Cannot extract socket number from: {}", path));
+            lg2::error("Cannot extract socket number from: {PATH}", "PATH",
+                       path);
             fail_run_with_archive(
                 "category=DISCOVERY, reason=package_parse_failed");
             return;
@@ -1048,7 +1065,10 @@ void IstService::on_cpu_discovery_done(
             std::from_chars(digits.data(), digits.data() + digits.size(), id);
         if (ec != std::errc{} || ptr != digits.data() + digits.size())
         {
-            std::cerr << "Cannot parse socket number from: " << path << '\n';
+            log_to_results(
+                "ERR",
+                std::format("Cannot parse socket number from: {}", path));
+            lg2::error("Cannot parse socket number from: {PATH}", "PATH", path);
             fail_run_with_archive(
                 "category=DISCOVERY, reason=package_parse_failed");
             return;
@@ -1069,8 +1089,13 @@ void IstService::on_cpu_discovery_done(
     {
         if (socket_ids[i] != i)
         {
-            std::cerr << "Non-contiguous CPU sockets detected (expected socket "
-                      << i << ", found " << socket_ids[i] << ")\n";
+            log_to_results("ERR",
+                           std::format("Non-contiguous CPU sockets detected "
+                                       "(expected socket {}, found {})",
+                                       i, socket_ids[i]));
+            lg2::error("Non-contiguous CPU sockets detected (expected socket "
+                       "{EXPECTED}, found {FOUND})",
+                       "EXPECTED", i, "FOUND", socket_ids[i]);
             fail_run_with_archive(
                 "category=DISCOVERY, reason=non_contiguous_packages");
             return;
@@ -1087,9 +1112,15 @@ void IstService::on_cpu_discovery_done(
         socket_list += std::to_string(socket_ids[i]);
     }
     test_.custom_socket_list = std::move(socket_list);
-    std::cout << "Discovered " << socket_ids.size() << " CPU socket(s) from "
-              << cpu_paths.size() << " inventory path(s), socket list: "
-              << *test_.custom_socket_list << '\n';
+    log_to_results("INFO",
+                   std::format("Discovered {} CPU socket(s) from {} inventory "
+                               "path(s), socket list: {}",
+                               socket_ids.size(), cpu_paths.size(),
+                               *test_.custom_socket_list));
+    lg2::info("Discovered {COUNT} CPU socket(s) from {PATHS} inventory "
+              "path(s), socket list: {SOCKETS}",
+              "COUNT", socket_ids.size(), "PATHS", cpu_paths.size(), "SOCKETS",
+              *test_.custom_socket_list);
 
     launch_boot_assert();
 }

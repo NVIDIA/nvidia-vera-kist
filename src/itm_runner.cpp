@@ -22,13 +22,14 @@
 #include <boost/process/v2/process.hpp>
 #include <boost/process/v2/stdio.hpp>
 #include <ist_app.hpp>
+#include <phosphor-logging/lg2.hpp>
 
 #include <algorithm>
 #include <array>
 #include <cstdint>
 #include <filesystem>
+#include <format>
 #include <fstream>
-#include <iostream>
 #include <memory>
 #include <string>
 #include <thread>
@@ -269,8 +270,11 @@ void ItmProcess::on_deadline_expired(int timeout_sec)
     {
         return; // Process already cleaned up after exit
     }
-    std::cerr << "kist_itm exceeded SW timeout (" << timeout_sec
-              << "s), terminating\n";
+    log_to_results("ERR", std::format("kist_itm exceeded SW timeout ({}s), "
+                                      "terminating",
+                                      timeout_sec));
+    lg2::error("kist_itm exceeded SW timeout ({TIMEOUT}s), terminating",
+               "TIMEOUT", timeout_sec);
     timed_out_ = true;
     proc_->terminate();
 }
@@ -288,13 +292,15 @@ void ItmProcess::on_process_exit(const boost::system::error_code& ec,
 
     if (timed_out_)
     {
-        std::cerr << "kist_itm killed due to SW timeout\n";
+        lg2::error("kist_itm killed due to SW timeout");
         exit_code_ = itm_exit_sw_timeout;
     }
     else if (ec)
     {
-        std::cerr << "kist_itm wait failed: ec=" << ec.message()
-                  << " exit=" << exit_code << '\n';
+        log_to_results("ERR", std::format("kist_itm wait failed: ec={} exit={}",
+                                          ec.message(), exit_code));
+        lg2::error("kist_itm wait failed: ec={ERROR} exit={EXIT_CODE}", "ERROR",
+                   ec.message(), "EXIT_CODE", exit_code);
         exit_code_ = -1;
     }
     else
@@ -320,7 +326,7 @@ void ItmProcess::on_process_exit(const boost::system::error_code& ec,
 
 void ItmProcess::on_drain_timeout()
 {
-    std::cerr << "kist_itm output did not drain, reporting anyway\n";
+    lg2::warning("kist_itm output did not drain, reporting anyway");
     drained_ = true;
     finish();
 }
@@ -433,7 +439,9 @@ void ItmRunnerImpl::async_run(
 {
     if (platform_cfg.storage.result_storage_path.empty())
     {
-        std::cerr << "resultStoragePath not found in platform config\n";
+        log_to_results("ERR", "resultStoragePath not found in platform "
+                              "config");
+        lg2::error("resultStoragePath not found in platform config");
         done(-1);
         return;
     }
@@ -458,8 +466,12 @@ void ItmRunnerImpl::async_run(
     int pipe_fds[2];
     if (::pipe(pipe_fds) < 0)
     {
-        std::cerr << "Failed to create pipe for ITM output: " << strerror(errno)
-                  << '\n';
+        int err = errno;
+        log_to_results(
+            "ERR",
+            std::format("Failed to create pipe for ITM output: {}", err));
+        lg2::error("Failed to create pipe for ITM output: {ERRNO}", "ERRNO",
+                   err);
         itm_log_.close();
         done(-1);
         return;
@@ -479,7 +491,9 @@ void ItmRunnerImpl::async_run(
     }
     catch (const std::exception& e)
     {
-        std::cerr << "Failed to execute kist_itm: " << e.what() << '\n';
+        log_to_results("ERR",
+                       std::format("Failed to execute kist_itm: {}", e.what()));
+        lg2::error("Failed to execute kist_itm: {ERROR}", "ERROR", e.what());
         itm_log_.close();
         done(-1);
         return;

@@ -21,11 +21,12 @@
 #include <boost/process/v2/process.hpp>
 #include <boost/process/v2/stdio.hpp>
 #include <ist_app.hpp>
+#include <phosphor-logging/lg2.hpp>
 
 #include <chrono>
 #include <csignal>
 #include <cstring>
-#include <iostream>
+#include <format>
 #include <memory>
 #include <string>
 #include <vector>
@@ -68,9 +69,10 @@ class HookProcess final : public std::enable_shared_from_this<HookProcess>
 
         if (timeout <= std::chrono::seconds{0})
         {
-            std::cerr << what_ << " timeout " << timeout.count()
-                      << "s is invalid, using default "
-                      << HookRunner::k_default_timeout.count() << "s\n";
+            lg2::warning("{WHAT} timeout {TIMEOUT}s is invalid, using "
+                         "default {DEFAULT}s",
+                         "WHAT", what_, "TIMEOUT", timeout.count(), "DEFAULT",
+                         HookRunner::k_default_timeout.count());
             timeout = HookRunner::k_default_timeout;
         }
         deadline_.expires_after(timeout);
@@ -103,12 +105,15 @@ class HookProcess final : public std::enable_shared_from_this<HookProcess>
         {
             return;
         }
-        std::cerr << what_ << " exceeded timeout, sending SIGTERM\n";
+        log_to_results("ERR", std::format("{} exceeded timeout, sending "
+                                          "SIGTERM",
+                                          what_));
+        lg2::error("{WHAT} exceeded timeout, sending SIGTERM", "WHAT", what_);
         timed_out_ = true;
         if (::kill(-pid_, SIGTERM) != 0)
         {
-            std::cerr << what_ << " kill(SIGTERM) failed: " << strerror(errno)
-                      << '\n';
+            lg2::error("{WHAT} kill(SIGTERM) failed: {ERRNO}", "WHAT", what_,
+                       "ERRNO", errno);
         }
 
         grace_.expires_after(k_grace_timeout);
@@ -131,11 +136,12 @@ class HookProcess final : public std::enable_shared_from_this<HookProcess>
         {
             return;
         }
-        std::cerr << what_ << " did not exit after SIGTERM, sending SIGKILL\n";
+        lg2::error("{WHAT} did not exit after SIGTERM, sending SIGKILL", "WHAT",
+                   what_);
         if (::kill(-pid_, SIGKILL) != 0)
         {
-            std::cerr << what_ << " kill(SIGKILL) failed: " << strerror(errno)
-                      << '\n';
+            lg2::error("{WHAT} kill(SIGKILL) failed: {ERRNO}", "WHAT", what_,
+                       "ERRNO", errno);
         }
     }
 
@@ -147,14 +153,17 @@ class HookProcess final : public std::enable_shared_from_this<HookProcess>
 
         if (timed_out_)
         {
-            std::cerr << what_ << " killed due to timeout\n";
+            lg2::error("{WHAT} killed due to timeout", "WHAT", what_);
             ok_ = false;
         }
         else if (ec || exit_code != 0)
         {
-            std::cerr << "Failed to execute " << what_
-                      << ": ec=" << ec.message() << " exit=" << exit_code
-                      << '\n';
+            log_to_results("ERR",
+                           std::format("Failed to execute {}: ec={} exit={}",
+                                       what_, ec.message(), exit_code));
+            lg2::error("Failed to execute {WHAT}: ec={ERROR} exit={EXIT_CODE}",
+                       "WHAT", what_, "ERROR", ec.message(), "EXIT_CODE",
+                       exit_code);
             ok_ = false;
         }
         else
@@ -180,7 +189,8 @@ class HookProcess final : public std::enable_shared_from_this<HookProcess>
 
     void on_drain_timeout()
     {
-        std::cerr << what_ << " output did not drain, reporting anyway\n";
+        lg2::warning("{WHAT} output did not drain, reporting anyway", "WHAT",
+                     what_);
         drained_ = true;
         finish();
     }
@@ -270,8 +280,8 @@ void HookRunnerImpl::async_run(const std::string& cmd, std::string what,
     int pipe_fds[2];
     if (::pipe(pipe_fds) < 0)
     {
-        std::cerr << "Failed to create pipe for " << what
-                  << " output: " << strerror(errno) << '\n';
+        lg2::error("Failed to create pipe for {WHAT} output: {ERRNO}", "WHAT",
+                   what, "ERRNO", errno);
         done(false);
         return;
     }
@@ -290,7 +300,10 @@ void HookRunnerImpl::async_run(const std::string& cmd, std::string what,
     }
     catch (const std::exception& e)
     {
-        std::cerr << "Failed to execute " << what << ": " << e.what() << '\n';
+        log_to_results("ERR",
+                       std::format("Failed to execute {}: {}", what, e.what()));
+        lg2::error("Failed to execute {WHAT}: {ERROR}", "WHAT", what, "ERROR",
+                   e.what());
         done(false);
         return;
     }
