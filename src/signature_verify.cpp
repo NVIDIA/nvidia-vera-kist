@@ -160,6 +160,9 @@ class FileVerifier
         std::ifstream sig_stream(sig_file);
         if (!sig_stream)
         {
+            log_to_results("ERR",
+                           std::format("Failed to open signature file: {}",
+                                       sig_file.string()));
             lg2::error("Failed to open signature file: {PATH}", "PATH",
                        sig_file);
             return false;
@@ -168,6 +171,9 @@ class FileVerifier
                             std::istreambuf_iterator<char>());
         if (!base64_decode(sig_b64, sig_bytes_))
         {
+            log_to_results("ERR",
+                           std::format("Failed to base64-decode signature: {}",
+                                       sig_file.string()));
             lg2::error("Failed to base64-decode signature: {PATH}", "PATH",
                        sig_file);
             return false;
@@ -182,6 +188,9 @@ class FileVerifier
         if (EVP_DigestVerifyInit(ctx_.get(), nullptr, EVP_sha384(), nullptr,
                                  pub_key_.get()) != 1)
         {
+            log_to_results("ERR",
+                           std::format("EVP_DigestVerifyInit failed for: {}",
+                                       file_.string()));
             lg2::error("EVP_DigestVerifyInit failed for: {PATH}", "PATH",
                        file_);
             return false;
@@ -190,6 +199,8 @@ class FileVerifier
         data_stream_.open(file_, std::ios::binary);
         if (!data_stream_)
         {
+            log_to_results("ERR", std::format("Failed to open data file: {}",
+                                              file_.string()));
             lg2::error("Failed to open data file: {PATH}", "PATH", file_);
             return false;
         }
