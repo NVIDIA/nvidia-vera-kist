@@ -839,6 +839,10 @@ void IstService::on_deassert_done(int itm_exit, bool ok_deassert)
         emit_ist_error("category=HOOK, reason=ist_boot_deassert_failed");
     }
 
+    // The archiver removes each file once it is in the tarball, so the log
+    // has to be closed before it runs. Later messages reach the journal alone.
+    close_service_log();
+
     fs::path results_dir = platform_cfg_.storage.result_storage_path;
     archive_results_async(
         io_, results_dir,
@@ -858,6 +862,8 @@ void IstService::fail_run_with_archive(std::string_view error_info)
 {
     emit_ist_error(error_info);
     transition_to(IstStage::cleanup);
+
+    close_service_log();
 
     fs::path results_dir = platform_cfg_.storage.result_storage_path;
     archive_results_async(io_, results_dir, [weak = weak_from_this()](bool ok) {
