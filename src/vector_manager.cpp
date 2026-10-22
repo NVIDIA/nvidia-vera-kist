@@ -774,6 +774,12 @@ class TransferSession : public std::enable_shared_from_this<TransferSession>
         {
             std::error_code ec;
             fs::remove(image_path_, ec);
+            if (ec)
+            {
+                lg2::error("Failed to remove the partially written image "
+                           "{PATH}: {ERROR}; a later mount may find it",
+                           "PATH", image_path_, "ERROR", ec.message());
+            }
         }
     }
 
