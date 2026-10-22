@@ -23,7 +23,10 @@
 #include <sdbusplus/asio/connection.hpp>
 #include <sdbusplus/message/types.hpp>
 
+#include <array>
 #include <cerrno>
+#include <functional>
+#include <memory>
 #include <set>
 #include <string>
 #include <vector>
@@ -88,6 +91,32 @@ static sdbusplus::message::object_path start_ist_from_dbus(
     return {service->start_ist(params)};
 }
 
+using CpuPathsCb =
+    std::move_only_function<void(const std::vector<std::string>&) const>;
+
+static void
+    discover_cpus(const std::shared_ptr<sdbusplus::asio::connection>& conn,
+                  CpuPathsCb done)
+{
+    conn->async_method_call(
+        [done = std::move(done)](const boost::system::error_code& ec,
+                                 const std::vector<std::string>& paths) {
+            if (ec)
+            {
+                lg2::error("ObjectMapper CPU query failed: {ERROR}", "ERROR",
+                           ec.message());
+                done({});
+                return;
+            }
+            done(paths);
+        },
+        "xyz.openbmc_project.ObjectMapper",
+        "/xyz/openbmc_project/object_mapper",
+        "xyz.openbmc_project.ObjectMapper", "GetSubTreePaths",
+        "/xyz/openbmc_project/inventory", 0,
+        std::array<const char*, 1>{"xyz.openbmc_project.Inventory.Item.Cpu"});
+}
+
 int main(int, char**)
 {
     boost::asio::io_context io;
@@ -127,30 +156,7 @@ int main(int, char**)
             return return_and_post_close(svc->get_results_fd(), io);
         });
 
-    service->set_cpu_discoverer(
-        [conn](
-            std::move_only_function<void(const std::vector<std::string>&) const>
-                done) {
-            conn->async_method_call(
-                [done =
-                     std::move(done)](const boost::system::error_code& ec,
-                                      const std::vector<std::string>& paths) {
-                    if (ec)
-                    {
-                        lg2::error("ObjectMapper CPU query failed: {ERROR}",
-                                   "ERROR", ec.message());
-                        done({});
-                        return;
-                    }
-                    done(paths);
-                },
-                "xyz.openbmc_project.ObjectMapper",
-                "/xyz/openbmc_project/object_mapper",
-                "xyz.openbmc_project.ObjectMapper", "GetSubTreePaths",
-                "/xyz/openbmc_project/inventory", 0,
-                std::array<const char*, 1>{
-                    "xyz.openbmc_project.Inventory.Item.Cpu"});
-        });
+    service->set_cpu_discoverer(std::bind_front(discover_cpus, conn));
 
     // D-Bus control interface
     std::shared_ptr<sdbusplus::asio::dbus_interface> control_iface =
