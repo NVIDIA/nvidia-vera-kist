@@ -38,6 +38,9 @@
 namespace bpv2 = boost::process::v2;
 namespace fs = std::filesystem;
 
+// Used when the caller leaves sw_timeout_sec unset.
+static constexpr int k_default_sw_timeout_sec = 45 * 60;
+
 // Lifetime note: ProgressPoller is stopped in the proc->async_wait
 // callback which fires before io.run() returns.
 //
@@ -506,7 +509,7 @@ void ItmRunnerImpl::async_run(
         io_, progress_path, std::move(on_progress));
     poller->start();
 
-    int timeout_sec = cfg.sw_timeout_sec.value_or(45 * 60);
+    int timeout_sec = cfg.sw_timeout_sec.value_or(k_default_sw_timeout_sec);
 
     std::move_only_function<void(int) const> on_done =
         [this, done = std::move(done)](int exit_code) {
