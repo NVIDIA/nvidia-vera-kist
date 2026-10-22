@@ -32,7 +32,6 @@
 #include <filesystem>
 #include <format>
 #include <functional>
-#include <iostream>
 #include <memory>
 #include <string_view>
 #include <tuple>
@@ -92,6 +91,27 @@ class UniqueFd
 // Run-log writer
 // ----------------
 
+inline bool write_all(int fd, std::string_view data)
+{
+    const char* p = data.data();
+    std::size_t remaining = data.size();
+    while (remaining > 0)
+    {
+        ssize_t written = ::write(fd, p, remaining);
+        if (written < 0 && errno == EINTR)
+        {
+            continue;
+        }
+        if (written <= 0)
+        {
+            return false;
+        }
+        p += written;
+        remaining -= static_cast<std::size_t>(written);
+    }
+    return true;
+}
+
 // Hook output keeps arriving while the run is being torn down, so write()
 // after close() has to be silent rather than an EBADF per line.
 class LogFile
@@ -117,18 +137,9 @@ class LogFile
         {
             return;
         }
-        const char* p = data.data();
-        std::size_t remaining = data.size();
-        while (remaining > 0)
+        if (!write_all(fd_.get(), data))
         {
-            ssize_t written = ::write(fd_.get(), p, remaining);
-            if (written <= 0)
-            {
-                lg2::error("Write to log file failed: {ERRNO}", "ERRNO", errno);
-                return;
-            }
-            p += written;
-            remaining -= static_cast<std::size_t>(written);
+            lg2::error("Write to log file failed: {ERRNO}", "ERRNO", errno);
         }
     }
 
@@ -255,10 +266,19 @@ class OutputTee final : public std::enable_shared_from_this<OutputTee>
                     self->on_eof(); // EOF or pipe closed
                     return;
                 }
-                self->log_.write(std::string_view(self->buf_.data(), n));
-                std::ignore = ::write(STDOUT_FILENO, self->buf_.data(), n);
+                self->on_chunk(n);
                 self->read_next();
             });
+    }
+
+    void on_chunk(std::size_t n)
+    {
+        std::string_view chunk(buf_.data(), n);
+        log_.write(chunk);
+        if (!write_all(STDOUT_FILENO, chunk))
+        {
+            lg2::error("Write to stdout failed: {ERRNO}", "ERRNO", errno);
+        }
     }
 
     void on_eof()
