@@ -546,6 +546,11 @@ bool IstService::collateral_verification()
         return false;
     }
 
+    if (!signature_files_present(platform_cfg_))
+    {
+        return false;
+    }
+
     return true;
 }
 
@@ -919,6 +924,15 @@ std::string IstService::start_ist(const ParamMap& test_params)
         transition_to(IstStage::idle, IstStatus::aborted,
                       "category=PARAMS, reason=invalid_test_params");
         throw ist_err::InvalidArgument{};
+    }
+
+    if (initialized_ && !verification_key_present(platform_cfg_))
+    {
+        lg2::error("Verification key not found: {PATH}", "PATH",
+                   platform_cfg_.signing_key_path);
+        transition_to(IstStage::idle, IstStatus::failed,
+                      "category=SECURITY, reason=verification_key_missing");
+        throw ist_err::InternalFailure{};
     }
 
     if (!collateral_verification())

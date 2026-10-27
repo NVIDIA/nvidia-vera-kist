@@ -36,6 +36,23 @@ bool verify_file_signature(const std::filesystem::path& file,
                            const std::filesystem::path& pub_key_path);
 
 /**
+ * Report whether the verification key is on disk.
+ *
+ * @param cfg Platform configuration (provides signingKeyPath).
+ */
+bool verification_key_present(const IstPlatformConfig& cfg);
+
+/**
+ * Report whether every file to be verified has a signature alongside it.
+ *
+ * Checks presence only; it reads neither the files nor the signatures.
+ *
+ * @param cfg Platform configuration (provides itmBinaryPath, itmLibDir,
+ *            signingKeyPath).
+ */
+bool signature_files_present(const IstPlatformConfig& cfg);
+
+/**
  * Verify signatures of the kist_itm binary and all libraries in its lib dir.
  *
  * Fails if the verification key (cfg.signingKeyPath) does not exist
