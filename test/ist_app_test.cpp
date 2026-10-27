@@ -290,6 +290,8 @@ class IstServiceTest : public ::testing::Test
 
         // Create expected collateral so start_ist() passes verification
         std::ofstream itm_stub(tmp_dir_ / "vectors" / "kist_itm");
+        std::ofstream itm_sig_stub(tmp_dir_ / "vectors" / "kist_itm.sig");
+        std::ofstream key_stub(tmp_dir_ / "verify_key.pem");
         std::ofstream golden_stub(tmp_dir_ / "vectors" / "GOLDEN_RES" /
                                   "placeholder");
 
@@ -350,6 +352,7 @@ class IstServiceTest : public ::testing::Test
         {
             return false;
         }
+        cfg.signing_key_path = tmp_dir_ / "verify_key.pem";
         service_->set_signature_verifier(
             [](const IstPlatformConfig&, DoneCb cb) { cb(true); });
         return service_->initialize(std::move(cfg));
@@ -750,6 +753,29 @@ TEST_F(IstServiceTest, StartIstAbortsOnMissingVectorStorage)
 TEST_F(IstServiceTest, StartIstAbortsOnMissingItmBinary)
 {
     fs::remove(tmp_dir_ / "vectors" / "kist_itm");
+
+    init_from_file(config_path_);
+
+    ParamMap params;
+    EXPECT_THROW(service_->start_ist(params), ist_err::ResourceNotFound);
+    EXPECT_EQ(service_->state().status, IstStatus::aborted);
+    EXPECT_EQ(service_->state().stage, IstStage::idle);
+}
+
+TEST_F(IstServiceTest, StartIstFailsOnMissingVerificationKey)
+{
+    init_from_file(config_path_);
+    fs::remove(tmp_dir_ / "verify_key.pem");
+
+    ParamMap params;
+    EXPECT_THROW(service_->start_ist(params), ist_err::InternalFailure);
+    EXPECT_EQ(service_->state().status, IstStatus::failed);
+    EXPECT_EQ(service_->state().stage, IstStage::idle);
+}
+
+TEST_F(IstServiceTest, StartIstAbortsOnMissingBinarySignature)
+{
+    fs::remove(tmp_dir_ / "vectors" / "kist_itm.sig");
 
     init_from_file(config_path_);
 

@@ -358,6 +358,21 @@ TEST_F(SignatureVerifyTest, VerifyFailsWhenSymlinkResolvesOutsideVerifiedSet)
     EXPECT_FALSE(verify_itm_signatures(cfg));
 }
 
+TEST_F(SignatureVerifyTest, PresenceCheckIgnoresSymlinkOutsideVerifiedSet)
+{
+    fs::path outside = tmp_dir_ / "unsigned_payload.so";
+    std::ofstream(outside) << "unsigned content";
+    create_lib_symlink("libusb-1.0.so.0", outside);
+
+    IstPlatformConfig cfg;
+    cfg.itm_binary_path = binary_path_;
+    cfg.itm_lib_dir = tmp_dir_ / "lib";
+    cfg.signing_key_path = pub_key_path_;
+
+    EXPECT_TRUE(signature_files_present(cfg));
+    EXPECT_FALSE(verify_itm_signatures(cfg));
+}
+
 TEST_F(SignatureVerifyTest, VerifyFailsWhenSymlinkDangling)
 {
     create_lib_symlink("libusb-1.0.so.0", "does-not-exist.so.0.5.0");

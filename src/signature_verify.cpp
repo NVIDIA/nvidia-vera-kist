@@ -278,10 +278,17 @@ struct VerifyTarget
     fs::path sig;
 };
 
+struct CollectedFiles
+{
+    std::vector<VerifyTarget> targets;
+    std::set<fs::path> verified_real;
+    std::vector<fs::path> symlinks;
+};
+
 // Resolve the binary and libraries to the (file, signature) pairs to verify,
 // or nullopt if the key, a signature, or the lib directory is missing. Shared
 // by the synchronous and asynchronous drivers.
-static std::optional<std::vector<VerifyTarget>>
+static std::optional<CollectedFiles>
     collect_files_to_verify(const IstPlatformConfig& cfg)
 {
     std::error_code ec;
@@ -296,6 +303,7 @@ static std::optional<std::vector<VerifyTarget>>
 
     std::vector<VerifyTarget> targets;
     std::set<fs::path> verified_real;
+    std::vector<fs::path> symlinks;
 
     fs::path binary_sig = cfg.itm_binary_path;
     binary_sig += ".sig";
@@ -317,7 +325,8 @@ static std::optional<std::vector<VerifyTarget>>
 
     if (cfg.itm_lib_dir.empty())
     {
-        return targets;
+        return CollectedFiles{std::move(targets), std::move(verified_real),
+                              std::move(symlinks)};
     }
     bool is_dir = fs::is_directory(cfg.itm_lib_dir, ec);
     if (ec)
@@ -328,10 +337,9 @@ static std::optional<std::vector<VerifyTarget>>
     }
     if (!is_dir)
     {
-        return targets;
+        return CollectedFiles{std::move(targets), std::move(verified_real),
+                              std::move(symlinks)};
     }
-
-    std::vector<fs::path> symlinks;
 
     for (const auto& entry : fs::directory_iterator(cfg.itm_lib_dir, ec))
     {
@@ -403,7 +411,16 @@ static std::optional<std::vector<VerifyTarget>>
         return std::nullopt;
     }
 
-    for (const fs::path& link : symlinks)
+    return CollectedFiles{std::move(targets), std::move(verified_real),
+                          std::move(symlinks)};
+}
+
+// Every library symlink must resolve to a file that is itself being verified,
+// so a signed library cannot stand in for unsigned content.
+static bool symlinks_within_verified_set(const CollectedFiles& files)
+{
+    std::error_code ec;
+    for (const fs::path& link : files.symlinks)
     {
         fs::path link_real = fs::canonical(link, ec);
         if (ec)
@@ -411,9 +428,9 @@ static std::optional<std::vector<VerifyTarget>>
             lg2::error("Symlink target could not be resolved: {LINK}: "
                        "{ERROR}",
                        "LINK", link, "ERROR", ec.message());
-            return std::nullopt;
+            return false;
         }
-        if (!verified_real.contains(link_real))
+        if (!files.verified_real.contains(link_real))
         {
             log_to_results("ERR",
                            std::format("Symlink resolves outside the verified "
@@ -422,22 +439,31 @@ static std::optional<std::vector<VerifyTarget>>
             lg2::error("Symlink resolves outside the verified set: {LINK} -> "
                        "{TARGET}",
                        "LINK", link, "TARGET", link_real);
-            return std::nullopt;
+            return false;
         }
     }
+    return true;
+}
 
-    return targets;
+bool verification_key_present(const IstPlatformConfig& cfg)
+{
+    std::error_code ec;
+    return fs::exists(cfg.signing_key_path, ec) && !ec;
+}
+
+bool signature_files_present(const IstPlatformConfig& cfg)
+{
+    return collect_files_to_verify(cfg).has_value();
 }
 
 bool verify_itm_signatures(const IstPlatformConfig& cfg)
 {
-    std::optional<std::vector<VerifyTarget>> targets =
-        collect_files_to_verify(cfg);
-    if (!targets)
+    std::optional<CollectedFiles> files = collect_files_to_verify(cfg);
+    if (!files || !symlinks_within_verified_set(*files))
     {
         return false;
     }
-    for (const VerifyTarget& t : *targets)
+    for (const VerifyTarget& t : files->targets)
     {
         if (!verify_file_signature(t.file, t.sig, cfg.signing_key_path))
         {
@@ -489,14 +515,13 @@ class SignatureVerifySession :
         // delivered asynchronously, never inline from start().
         if (!enumerated_)
         {
-            std::optional<std::vector<VerifyTarget>> targets =
-                collect_files_to_verify(cfg_);
-            if (!targets)
+            std::optional<CollectedFiles> files = collect_files_to_verify(cfg_);
+            if (!files || !symlinks_within_verified_set(*files))
             {
                 finish(false);
                 return;
             }
-            targets_ = std::move(*targets);
+            targets_ = std::move(files->targets);
             enumerated_ = true;
             post_step();
             return;
