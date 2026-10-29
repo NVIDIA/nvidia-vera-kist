@@ -32,6 +32,7 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <sstream>
 #include <vector>
 
 #include <gmock/gmock.h>
@@ -362,6 +363,26 @@ class IstServiceTest : public ::testing::Test
     {
         std::ofstream f(config_path_);
         f << content;
+    }
+
+    // Adds hookConfig.cakBypass to the config and, if asked, an executable
+    // ist_cak_bypass.sh to the hook directory.
+    void declare_cak_bypass(bool install_script)
+    {
+        std::stringstream cfg;
+        cfg << std::ifstream(config_path_).rdbuf();
+        write_config(R"({ "hookConfig": { "cakBypass": {} },)" +
+                     cfg.str().substr(cfg.str().find('{') + 1));
+        if (install_script)
+        {
+            const fs::path script = tmp_dir_ / "hooks" / "ist_cak_bypass.sh";
+            std::ofstream out(script);
+            ASSERT_TRUE(out.is_open());
+            out.close();
+            ASSERT_FALSE(out.fail());
+            fs::permissions(script, fs::perms::owner_exec,
+                            fs::perm_options::add);
+        }
     }
 
     void TearDown() override
@@ -1061,7 +1082,7 @@ TEST_F(IstServiceTest, PowerCycleSuccessStartsItm)
 
 TEST_F(IstServiceTest, CakBypassScriptRunsWhenPresent)
 {
-    std::ofstream give_me_a_name(tmp_dir_ / "hooks" / "ist_cak_bypass.sh");
+    declare_cak_bypass(true);
     init_from_file(config_path_);
 
     std::move_only_function<void(bool) const> assert_done;
@@ -1107,7 +1128,7 @@ TEST_F(IstServiceTest, CakBypassScriptRunsWhenPresent)
 
 TEST_F(IstServiceTest, CakBypassFailureAbortsIst)
 {
-    std::ofstream give_me_a_name(tmp_dir_ / "hooks" / "ist_cak_bypass.sh");
+    declare_cak_bypass(true);
     init_from_file(config_path_);
 
     std::move_only_function<void(bool) const> assert_done;
@@ -1164,8 +1185,12 @@ TEST_F(IstServiceTest, CakBypassFailureAbortsIst)
     EXPECT_EQ(service_->state().stage, IstStage::idle);
 }
 
-TEST_F(IstServiceTest, CakBypassSkippedWhenScriptMissing)
+TEST_F(IstServiceTest, CakBypassSkippedWhenNotDeclared)
 {
+    // The script alone does not turn the bypass on.
+    std::ofstream give_me_a_name(tmp_dir_ / "hooks" / "ist_cak_bypass.sh");
+    fs::permissions(tmp_dir_ / "hooks" / "ist_cak_bypass.sh",
+                    fs::perms::owner_exec, fs::perm_options::add);
     init_from_file(config_path_);
 
     std::move_only_function<void(bool) const> assert_done;
@@ -1199,6 +1224,58 @@ TEST_F(IstServiceTest, CakBypassSkippedWhenScriptMissing)
 
     EXPECT_EQ(service_->state().stage, IstStage::running_ist);
     ASSERT_TRUE(itm_done);
+}
+
+TEST_F(IstServiceTest, CakBypassDeclaredButMissingFailsIst)
+{
+    declare_cak_bypass(false);
+    ASSERT_TRUE(init_from_file(config_path_));
+
+    DoneCb assert_done;
+    EXPECT_CALL(*hook_runner_,
+                async_run(::testing::_, StrEq("istBootAssert hook"),
+                          ::testing::_, ::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::string&, DoneCb done,
+                      const std::vector<std::string>&,
+                      std::chrono::seconds) { assert_done = std::move(done); });
+
+    DoneCb power_done;
+    EXPECT_CALL(*power_monitor_, async_wait_for_power_cycle(::testing::_))
+        .WillOnce([&](DoneCb done) { power_done = std::move(done); });
+
+    EXPECT_CALL(*hook_runner_,
+                async_run(::testing::_, StrEq("CAK bypass"), ::testing::_,
+                          ::testing::_, ::testing::_))
+        .Times(0);
+    EXPECT_CALL(*itm_runner_, async_run(::testing::_, ::testing::_,
+                                        ::testing::_, ::testing::_))
+        .Times(0);
+
+    DoneCb deassert_done;
+    EXPECT_CALL(*hook_runner_,
+                async_run(::testing::_, StrEq("istBootDeassert hook"),
+                          ::testing::_, ::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::string&, DoneCb done,
+                      const std::vector<std::string>&, std::chrono::seconds) {
+            deassert_done = std::move(done);
+        });
+
+    testing::internal::CaptureStderr();
+    start_ist();
+    assert_done(true);
+    power_done(true);
+    io_.run();
+    io_.restart();
+    ASSERT_TRUE(deassert_done);
+    deassert_done(true);
+    io_.run();
+    io_.restart();
+    std::string err = testing::internal::GetCapturedStderr();
+
+    EXPECT_EQ(service_->state().status, IstStatus::failed);
+    EXPECT_THAT(err,
+                ::testing::HasSubstr(
+                    "IST_ERROR: category=HOOK, reason=cak_bypass_missing"));
 }
 
 TEST_F(IstServiceTest, AutoRebootPassesSkipCakToResetHook)
@@ -4209,7 +4286,7 @@ TEST_F(IstServiceTest, ErrorHookResetNotFound)
 
 TEST_F(IstServiceTest, ErrorHookCakBypassFailed)
 {
-    std::ofstream give_me_a_name(tmp_dir_ / "hooks" / "ist_cak_bypass.sh");
+    declare_cak_bypass(true);
     init_from_file(config_path_);
 
     DoneCb assert_done;

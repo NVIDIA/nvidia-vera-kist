@@ -219,6 +219,31 @@ executable(
     link_with: [ist_app_a],
 )
 
+# The hooks read /etc/ist/platform.env, which the image recipe generates
+# from the board's platform_cfg.json with hooks/ist_platform_env.py. Off by
+# default so a build that does not generate it installs no hooks.
+if get_option('hooks').enabled()
+    hook_install_dir = get_option('datadir') / 'ist' / 'hooks'
+    install_data(
+        'hooks/ist_boot_enable.sh',
+        'hooks/ist_boot_disable.sh',
+        'hooks/ist_sys_rst.sh',
+        'hooks/ist_check_error.sh',
+        'hooks/ist_cak_bypass.sh',
+        'hooks/ist_marker.sh',
+        install_dir: hook_install_dir,
+        install_mode: 'rwxr-xr-x',
+    )
+    install_data(
+        'hooks/ist_hook.sh',
+        'hooks/ist_cpu_reset.sh',
+        'hooks/ist_cak_common.sh',
+        'hooks/ist_mctp_common.sh',
+        install_dir: hook_install_dir,
+        install_mode: 'rw-r--r--',
+    )
+endif
+
 if get_option('tests').enabled()
     gtest_dep = dependency(
         'gtest',

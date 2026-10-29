@@ -1,0 +1,209 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "platform_cfg.json hookConfig object",
+    "description": "Board facts for the shared IST hooks. The build turns this object into /etc/ist/platform.env, which the hooks source.",
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["domains"],
+    "properties": {
+        "domains": {
+            "description": "One entry per set of IST lines (a CPU board or module), handled in order.",
+            "type": "array",
+            "minItems": 1,
+            "items": { "$ref": "#/definitions/domain" }
+        },
+        "resetMethod": {
+            "description": "How ist_sys_rst.sh resets the CPUs. Omitted means gpio; that default is intended, so resetMethod is deliberately not required. gpio: drive preResetGpio, wait for shutdownOkGpio, pulse sysResetGpio. command: run resetCommand and nothing else (no MCTP wait, no CAK bypass). hostWarmReboot: for boards whose CPU reset lines belong to x86-power-control (vc-256); request ForceWarmReboot on host0 and wait for CpuResetIndicator to go 0 then 1.",
+            "enum": ["gpio", "command", "hostWarmReboot"]
+        },
+        "resetCommand": {
+            "description": "Command run by ist_sys_rst.sh for resetMethod command; its exit status is the hook's.",
+            "$ref": "#/definitions/text"
+        },
+        "cakBypass": {
+            "description": "Present: the daemon runs ist_cak_bypass.sh after each power cycle and fails the run if it is missing, and ist_sys_rst.sh runs it after the reset. Absent: the board has no volatile DOT support and no CAK bypass runs.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["dotObjectPrefix"],
+            "properties": {
+                "dotObjectPrefix": {
+                    "description": "NSM DOT object path prefix; the CPU index is appended, e.g. /xyz/openbmc_project/DOT/IRoT_CPU_.",
+                    "$ref": "#/definitions/text"
+                },
+                "requiredCpus": {
+                    "description": "Skip the CAK bypass (exit 0) when fewer CPUs than this are present: a short count means a partially populated machine, which is not an IST configuration (vr-nvl). Only for boards whose CPU discovery is definitive (GPIO detect). Must not exceed the CPUs declared, and cannot be combined with absentOnProduct, where a short count is a smaller product that still needs the bypass.",
+                    "type": "integer",
+                    "minimum": 1
+                }
+            }
+        },
+        "timings": {
+            "description": "Optional timing overrides. None is read for resetMethod command.",
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "shutdownOkTimeoutS": {
+                    "description": "gpio: wait for shutdownOkGpio to assert after preResetGpio. hostWarmReboot: each of the two CpuResetIndicator waits. Default 10.",
+                    "type": "integer",
+                    "minimum": 1
+                },
+                "shutdownOkPollS": {
+                    "description": "gpio only: shutdownOkGpio poll interval. Default 0.2.",
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                },
+                "sysResetHoldS": {
+                    "description": "gpio only: how long sysResetGpio is held low. Default 5.",
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                },
+                "eidTimeoutS": {
+                    "description": "gpio and hostWarmReboot: wait for the CPU MCTP endpoints after a reset, before one more reset and a second wait. A healthy C2 reset has taken 3 to 15 s and expiring early costs an unneeded CPU reset, but two waits and a reset must still fit in the IST service's hook timeout. Default 45.",
+                    "type": "integer",
+                    "minimum": 1
+                }
+            }
+        }
+    },
+    "allOf": [
+        {
+            "if": {
+                "properties": { "resetMethod": { "const": "command" } },
+                "required": ["resetMethod"]
+            },
+            "then": {
+                "required": ["resetCommand"],
+                "not": { "required": ["cakBypass"] }
+            },
+            "else": {
+                "not": { "required": ["resetCommand"] },
+                "properties": {
+                    "domains": { "items": { "required": ["cpus"] } }
+                }
+            }
+        },
+        {
+            "$comment": "resetMethod is not required here on purpose: omitted means gpio.",
+            "if": {
+                "properties": { "resetMethod": { "const": "gpio" } }
+            },
+            "then": {
+                "properties": {
+                    "domains": {
+                        "items": {
+                            "required": [
+                                "preResetGpio",
+                                "shutdownOkGpio",
+                                "sysResetGpio"
+                            ]
+                        }
+                    }
+                }
+            },
+            "else": {
+                "properties": {
+                    "domains": {
+                        "items": {
+                            "properties": { "detect": { "const": false } }
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "if": {
+                "properties": {
+                    "cakBypass": { "required": ["requiredCpus"] }
+                },
+                "required": ["cakBypass"]
+            },
+            "then": {
+                "properties": {
+                    "domains": {
+                        "items": {
+                            "properties": {
+                                "cpus": {
+                                    "items": {
+                                        "not": {
+                                            "required": ["absentOnProduct"]
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    ],
+    "definitions": {
+        "text": { "type": "string", "pattern": "^[A-Za-z0-9_./ -]+$" },
+        "gpio": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+$" },
+        "domain": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "istBootGpio"],
+            "properties": {
+                "name": {
+                    "description": "Name used in hook messages.",
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_]+$"
+                },
+                "detect": {
+                    "description": "Treat the domain as present only if gpiofind finds its GPIO lines; a domain not found is skipped by every hook. This is SKU identification, not just absent-tray handling: vr-nvl has an internal single-CPU configuration with no FRU field to identify it, so GPIO presence is the only way to tell. gpio resetMethod only, because presence is decided by preResetGpio.",
+                    "type": "boolean"
+                },
+                "istBootGpio": {
+                    "description": "Driven 1 by ist_boot_enable.sh and 0 by ist_boot_disable.sh.",
+                    "$ref": "#/definitions/gpio"
+                },
+                "preResetGpio": {
+                    "description": "gpio resetMethod: asserted low to request the CPU shutdown.",
+                    "$ref": "#/definitions/gpio"
+                },
+                "shutdownOkGpio": {
+                    "description": "gpio resetMethod: reads 0 once the CPU is ready for reset.",
+                    "$ref": "#/definitions/gpio"
+                },
+                "sysResetGpio": {
+                    "description": "gpio resetMethod: pulsed low for sysResetHoldS to reset the CPU.",
+                    "$ref": "#/definitions/gpio"
+                },
+                "fruProductMatch": {
+                    "description": "Substrings of FruDevice PRODUCT_PRODUCT_NAME; the first FRU containing one gives the domain's product, which absentOnProduct is compared against.",
+                    "type": "array",
+                    "minItems": 1,
+                    "items": { "$ref": "#/definitions/text" }
+                },
+                "cpus": {
+                    "description": "CPUs reset with this domain. Required unless resetMethod is command.",
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["index", "eid"],
+                        "properties": {
+                            "index": {
+                                "description": "CPU index, appended to dotObjectPrefix. Unique across domains.",
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 63
+                            },
+                            "eid": {
+                                "description": "MCTP EID that must return after a reset. Must match StaticEndpointID in the board's entity-manager MCTP configuration.",
+                                "type": "integer",
+                                "minimum": 8,
+                                "maximum": 254
+                            },
+                            "absentOnProduct": {
+                                "description": "The CPU is not fitted when the domain's product is this fruProductMatch entry, e.g. CPU 1 on an MGX C1. That smaller product is a valid configuration and still gets the CAK bypass; cannot be combined with requiredCpus.",
+                                "$ref": "#/definitions/text"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

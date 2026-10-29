@@ -101,6 +101,8 @@ struct IstPlatformConfig
         "/usr/share/ist/kist_itm_verify_key.pem"};
     HookPaths hooks;
     StoragePaths storage;
+    // hookConfig.cakBypass is present: run ist_cak_bypass.sh before the test.
+    bool cak_bypass{false};
     std::chrono::seconds transfer_inactivity_timeout{60};
     std::chrono::seconds transfer_progress_interval{120};
 };

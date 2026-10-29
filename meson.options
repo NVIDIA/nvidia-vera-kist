@@ -20,3 +20,9 @@ option(
     value: '',
     description: 'Architecture subdirectory for kist_itm (e.g. aarch64, armhf)',
 )
+option(
+    'hooks',
+    type: 'feature',
+    value: 'disabled',
+    description: 'Install the shared hook scripts into /usr/share/ist/hooks',
+)

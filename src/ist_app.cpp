@@ -15,6 +15,7 @@
  * limitations under the License.
  */
 #include <fcntl.h>
+#include <unistd.h>
 
 #include <ist_app.hpp>
 #include <ist_errors.hpp>
@@ -303,6 +304,10 @@ bool parse_platform_config(IstPlatformConfig& out, const std::string& path,
     out.storage.vector_mount_path = json_path(sc, "vectorMountPath");
     out.storage.vector_storage_path = json_path(sc, "vectorStoragePath");
     out.storage.result_storage_path = json_path(sc, "resultStoragePath");
+
+    // The hooks read the rest of hookConfig from platform.env.
+    out.cak_bypass =
+        d.value("hookConfig", json::object()).contains("cakBypass");
 
     resolve_itm_paths(out);
 
@@ -649,9 +654,21 @@ void IstService::on_power_cycle_done(bool ok)
 
     std::filesystem::path cak_script =
         platform_cfg_.hook_dir / "ist_cak_bypass.sh";
-    std::error_code ec;
-    if (std::filesystem::exists(cak_script, ec) && !ec)
+    if (platform_cfg_.cak_bypass)
     {
+        if (access(cak_script.c_str(), X_OK) != 0)
+        {
+            log_to_results("ERR", std::format("CAK bypass script '{}' is "
+                                              "missing or not executable",
+                                              cak_script.string()));
+            lg2::error("CAK bypass script '{PATH}' is missing or not "
+                       "executable",
+                       "PATH", cak_script.string());
+            failure_info_.emplace_back(
+                "category=HOOK, reason=cak_bypass_missing");
+            run_ist_cleanup(-1);
+            return;
+        }
         if (!is_path_within(cak_script, platform_cfg_.hook_dir))
         {
             log_to_results("ERR", std::format("CAK bypass script '{}' resolves "
