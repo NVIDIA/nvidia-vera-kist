@@ -21,8 +21,8 @@
 #                       can report only those.
 #
 # Parameters:
-#   IST_EID_TIMEOUT_S     Wait for the EIDs, from hookConfig.timings
-#                         eidTimeoutS via platform.env.
+#   IST_EID_TIMEOUT_S     Wait for the EIDs, from the IST record
+#                         EidTimeoutS via ist_em.sh.
 #   IST_POLL_INTERVAL_S   Poll interval (default 1).
 
 MCTP_SERVICE="au.com.codeconstruct.MCTP1"

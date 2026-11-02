@@ -36,13 +36,12 @@ and include it in the image:
 IMAGE_INSTALL:append = " nvidia-vera-kist"
 ```
 
-Board-specific `.bbappend` files should install:
+With `-Dhooks=enabled` the build installs the shared hooks into
+`/usr/share/ist/hooks/` and `/etc/ist/platform_cfg.json`. Board-specific
+`.bbappend` files should install:
 
-- `/etc/ist/platform_cfg.json` — runtime configuration
 - `/usr/share/ist/kist_itm_verify_key.pem` — ECDSA-P384 public key for
   `kist_itm` signature verification
-- Hook scripts referenced by `hookPaths` in the platform configuration, or the
-  shared ones from this repository (see [Adding a platform](#adding-a-platform))
 
 ### Runtime Configuration
 
@@ -61,60 +60,35 @@ The daemon reads `/etc/ist/platform_cfg.json` at startup:
     "vectorMountPath": "/var/emmc/ist/IST_Test_Package/",
     "vectorStoragePath": "/var/emmc/ist/",
     "resultStoragePath": "/var/emmc/ist/results/"
-  },
-  "softwareInventoryId": "IST_Vectors"
+  }
 }
 ```
 
 ### Adding a platform
 
-`platform_cfg.json` must keep `hookDirectory`, `hookPaths`, `storageConfig` and
-`softwareInventoryId` as above; tegra MODS in the factory also reads them from
-this file. To use the shared hooks in `hooks/`, add a `hookConfig` object with
-the board's facts:
+`platform_cfg.json` is the same on every board; tegra MODS in the factory also
+reads its storage paths. The board's facts come from entity-manager records
+(schema `nvidia_ist.json` in entity-manager), which the daemon and the hooks
+read over D-Bus:
 
-| Field                                                      | Meaning                                                                                                                                                                                                                                                            |
-| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `domains[]`                                                | One entry per set of IST lines, run in order: `name`, `istBootGpio` (required)                                                                                                                                                                                     |
-| `domains[].detect`                                         | Treat the domain as present only if its GPIO lines are found. This is SKU identification: vr-nvl has an internal single-CPU configuration with no FRU field, so GPIO presence is the only way to tell. `resetMethod` `gpio` only                                   |
-| `domains[].preResetGpio`, `shutdownOkGpio`, `sysResetGpio` | CPU reset lines; required for `resetMethod` `gpio`                                                                                                                                                                                                                 |
-| `domains[].fruProductMatch[]`                              | FruDevice product names to look for; the first match is the board's product                                                                                                                                                                                        |
-| `domains[].cpus[]`                                         | `index` (DOT object suffix), `eid` (MCTP EID), optional `absentOnProduct` (CPU not fitted on that product, e.g. MGX C1; the bypass still runs); required unless `resetMethod` is `command`                                                                         |
-| `resetMethod`                                              | `gpio` (default): drive the reset lines. `command`: run `resetCommand`. `hostWarmReboot`: request `ForceWarmReboot` from x86-power-control and wait for `CpuResetIndicator` to go 0 then 1                                                                         |
-| `resetCommand`                                             | Command for `resetMethod` `command`                                                                                                                                                                                                                                |
-| `cakBypass`                                                | `dotObjectPrefix`, optional `requiredCpus` (fewer CPUs present means a partial machine: skip the bypass; not with `absentOnProduct`). Present: the daemon runs `ist_cak_bypass.sh` after the power cycle and fails the run if it is missing; absent: no CAK bypass |
-| `timings`                                                  | `shutdownOkTimeoutS` (10), `shutdownOkPollS` (0.2), `sysResetHoldS` (5), `eidTimeoutS` (45); the schema says which reset method reads each                                                                                                                         |
+| `IST` record (one per board) | Meaning                                                                                                                                                                                    |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `SoftwareInventoryId`        | Name of the vector inventory object, `/xyz/openbmc_project/inventory_software/<id>`                                                                                                        |
+| `ResetMethod`                | `gpio` (default): drive the reset lines. `command`: run `ResetCommand`. `hostWarmReboot`: request `ForceWarmReboot` from x86-power-control and wait for `CpuResetIndicator` to go 0 then 1 |
+| `ResetCommand`               | Command for `ResetMethod` `command`                                                                                                                                                        |
+| `DotObjectPrefix`            | Present: CAK bypass on (the daemon runs `ist_cak_bypass.sh` after the power cycle and fails the run if it is missing); the CPU index is appended                                           |
+| `RequiredCpus`               | Fewer CPUs present means a partial machine: skip the bypass                                                                                                                                |
+| Timings                      | `ShutdownOkTimeoutS` (10), `ShutdownOkPollS` (0.2), `SysResetHoldS` (5), `EidTimeoutS` (45)                                                                                                |
 
-`hooks/ist_platform_cfg.schema.json` holds the full rules. Example:
+| `ISTDomain` record (one per set of IST lines)    | Meaning                                                                       |
+| ------------------------------------------------ | ----------------------------------------------------------------------------- |
+| `Name`, `Index`                                  | Name used in hook messages; domains run in `Index` order                      |
+| `BootGpio`                                       | Driven 1 by `ist_boot_enable.sh` and 0 by `ist_boot_disable.sh`               |
+| `PreResetGpio`, `ShutdownOkGpio`, `SysResetGpio` | CPU reset lines for `ResetMethod` `gpio`                                      |
+| `Detect`                                         | Present only if its GPIO lines are found (vr-nvl single-CPU SKU); `gpio` only |
+| `Cpus`                                           | CPU indices reset with this domain                                            |
 
-```json
-"hookConfig": {
-  "domains": [
-    {
-      "name": "B0_M1",
-      "istBootGpio": "B0_M1_CPU_IST_BOOT_HMC-O",
-      "preResetGpio": "B0_M1_HMC_IST_PRE_RST_L-O",
-      "shutdownOkGpio": "B0_M1_CPU_SHDN_OK_L_3V3-I",
-      "sysResetGpio": "B0_M1_IST_SYS_RST_L-O",
-      "cpus": [
-        { "index": 0, "eid": 16 },
-        { "index": 1, "eid": 17 }
-      ]
-    }
-  ],
-  "cakBypass": { "dotObjectPrefix": "/xyz/openbmc_project/DOT/IRoT_CPU_" }
-}
-```
-
-The recipe builds with `-Dhooks=enabled` and, after installing the board's
-`platform_cfg.json`, generates `/etc/ist/platform.env` from it, which the hooks
-source:
-
-```bash
-${PYTHON} ${S}/hooks/ist_platform_env.py \
-    --schema ${S}/hooks/ist_platform_cfg.schema.json \
-    ${D}/etc/ist/platform_cfg.json ${D}/etc/ist/platform.env
-```
-
-The generator checks the file against the schema and fails the build when
-`hookConfig` is absent, since the hooks cannot run without `platform.env`.
+A CPU's MCTP EID comes from its `USBRCMRecovery` record (`FW_CPU_<i>` or
+`HGX_FW_CPU_<i>`, `MctpEID`); a CPU with no such record is not fitted, which is
+how the MGX C1 drops CPU 1. The hooks exit 1 when there is no `IST` record, and
+the daemon waits for one before it starts.

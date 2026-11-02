@@ -3,23 +3,18 @@
 # All rights reserved. SPDX-License-Identifier: Apache-2.0
 
 # How this board resets its CPUs and which MCTP EIDs must come back,
-# from /etc/ist/platform.env. Sourced by ist_hook.sh for sys_rst and
+# from entity-manager (ist_em.sh). Sourced by ist_hook.sh for sys_rst and
 # cak_bypass; provides ist_reset_cpus and ist_expected_eids for
 # ist_mctp_common.sh and list_present_cpus for ist_cak_common.sh.
 
 # shellcheck disable=SC2046 # gpiofind output is "<chip> <line>" on purpose
 
-# shellcheck source=/dev/null
-. /etc/ist/platform.env || exit 1
+# shellcheck source=hooks/ist_em.sh
+. /usr/share/ist/hooks/ist_em.sh
+ist_em_load || exit 1
 
-# The timing defaults are set by ist_platform_env.py.
+# The timing defaults are set by ist_em_load.
 TIMEOUT_S=$IST_SHDN_TIMEOUT_S
-
-FRU_SERVICE="xyz.openbmc_project.FruDevice"
-FRU_SUBTREE="/xyz/openbmc_project/FruDevice"
-MAPPER_SERVICE="xyz.openbmc_project.ObjectMapper"
-MAPPER_OBJECT="/xyz/openbmc_project/object_mapper"
-MAPPER_IFACE="xyz.openbmc_project.ObjectMapper"
 
 # dvar <domain> <field>
 function dvar() {
@@ -33,56 +28,13 @@ function domain_present() {
     gpiofind "$(dvar "$1" "$2_GPIO")" >/dev/null 2>&1
 }
 
-# First FRU whose product name contains one of the domain's match strings.
-function detect_product() {
-    local d=$1 path name k n pat="" v
-
-    n=$(dvar "$d" FRU_MATCH_COUNT)
-    for path in $(busctl call "$MAPPER_SERVICE" "$MAPPER_OBJECT" \
-            "$MAPPER_IFACE" GetSubTreePaths sias "$FRU_SUBTREE" 0 1 \
-            "$FRU_SERVICE" 2>/dev/null | grep -oE '"[^"]+"' | tr -d '"'); do
-        name=$(busctl get-property "$FRU_SERVICE" "$path" "$FRU_SERVICE" \
-            PRODUCT_PRODUCT_NAME 2>/dev/null | awk -F'"' '{print $2}')
-        for ((k = 0; k < n; k++)); do
-            v="IST_D${d}_FRU_MATCH_$k"
-            case "$name" in
-                *"${!v}"*)
-                    pat=${!v}
-                    echo "Matched '$name' on $path" >&2
-                    break 2
-                    ;;
-            esac
-        done
-    done
-
-    echo "$pat"
-}
-
-function domain_product() {
-    local p
-    p=$(dvar "$1" PRODUCT)
-    if [ -n "$p" ]; then
-        echo "$p"
-        return
-    fi
-    detect_product "$1"
-}
-
 # One line per present domain: "<cpu>:<eid> ...".
 function expected_cpus() {
-    local d cpu product absent v line
+    local d cpu v line
     for d in $IST_DOMAINS; do
         domain_present "$d" PRE_RST || continue
-        product=""
-        if [ -n "$(dvar "$d" FRU_MATCH_COUNT)" ]; then
-            product=$(domain_product "$d")
-        fi
         line=""
         for cpu in $(dvar "$d" CPUS); do
-            absent="IST_CPU${cpu}_ABSENT_ON"
-            if [ -n "${!absent}" ] && [ "$product" = "${!absent}" ]; then
-                continue
-            fi
             v="IST_CPU${cpu}_EID"
             line="${line:+$line }$cpu:${!v}"
         done
@@ -239,14 +191,6 @@ function ist_reset_cpus() {
 
     return 0
 }
-
-# Cached here because callers use command substitution.
-for _d in $IST_DOMAINS; do
-    if [ -n "$(dvar "$_d" FRU_MATCH_COUNT)" ]; then
-        printf -v "IST_D${_d}_PRODUCT" '%s' "$(detect_product "$_d")"
-    fi
-done
-unset _d
 
 trap cleanup_gpios EXIT
 trap 'exit 1' INT TERM

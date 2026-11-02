@@ -35,6 +35,7 @@
 #include <iostream>
 #include <map>
 #include <string>
+#include <variant>
 
 namespace fs = std::filesystem;
 namespace ist_err = sdbusplus::error::com::nvidia::vera::ist;
@@ -277,23 +278,6 @@ bool parse_platform_config(IstPlatformConfig& out, const std::string& path,
         return false;
     }
 
-    if (!d.contains("softwareInventoryId") ||
-        !d["softwareInventoryId"].is_string())
-    {
-        lg2::error("softwareInventoryId is missing or not a string");
-        return false;
-    }
-    std::string id = d["softwareInventoryId"].get<std::string>();
-    if (id.empty() || std::any_of(id.begin(), id.end(), [](char c) {
-            return std::isalnum(static_cast<unsigned char>(c)) == 0 && c != '_';
-        }))
-    {
-        lg2::error("softwareInventoryId contains invalid characters: {ID}",
-                   "ID", id);
-        return false;
-    }
-    out.software_inventory_id = std::move(id);
-
     json hp = d.value("hookPaths", json::object());
     out.hooks.ist_boot_assert = json_path(hp, "istBootAssert");
     out.hooks.ist_boot_deassert = json_path(hp, "istBootDeassert");
@@ -304,10 +288,6 @@ bool parse_platform_config(IstPlatformConfig& out, const std::string& path,
     out.storage.vector_mount_path = json_path(sc, "vectorMountPath");
     out.storage.vector_storage_path = json_path(sc, "vectorStoragePath");
     out.storage.result_storage_path = json_path(sc, "resultStoragePath");
-
-    // The hooks read the rest of hookConfig from platform.env.
-    out.cak_bypass =
-        d.value("hookConfig", json::object()).contains("cakBypass");
 
     resolve_itm_paths(out);
 
@@ -338,6 +318,29 @@ bool parse_platform_config(IstPlatformConfig& out, const std::string& path,
         }
     }
 
+    return true;
+}
+
+bool apply_ist_record(IstPlatformConfig& out, const IstRecord& record)
+{
+    auto it = record.find("SoftwareInventoryId");
+    const auto* id =
+        it == record.end() ? nullptr : std::get_if<std::string>(&it->second);
+    if (id == nullptr)
+    {
+        lg2::error("SoftwareInventoryId is missing or not a string");
+        return false;
+    }
+    if (id->empty() || std::any_of(id->begin(), id->end(), [](char c) {
+            return std::isalnum(static_cast<unsigned char>(c)) == 0 && c != '_';
+        }))
+    {
+        lg2::error("SoftwareInventoryId contains invalid characters: {ID}",
+                   "ID", *id);
+        return false;
+    }
+    out.software_inventory_id = *id;
+    out.cak_bypass = record.contains("DotObjectPrefix");
     return true;
 }
 

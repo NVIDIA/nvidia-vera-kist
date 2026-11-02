@@ -32,7 +32,6 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
-#include <sstream>
 #include <vector>
 
 #include <gmock/gmock.h>
@@ -322,8 +321,7 @@ class IstServiceTest : public ::testing::Test
                      (tmp_dir_ / "storage").string() + R"(",
                 "resultStoragePath": ")" +
                      (tmp_dir_ / "results").string() + R"("
-            },
-            "softwareInventoryId": "IST_Vectors"
+            }
         })");
 
         create_service();
@@ -353,6 +351,15 @@ class IstServiceTest : public ::testing::Test
         {
             return false;
         }
+        IstRecord record{{"SoftwareInventoryId", "IST_Vectors"}};
+        if (cak_bypass_)
+        {
+            record["DotObjectPrefix"] = "/xyz/openbmc_project/DOT/IRoT_CPU_";
+        }
+        if (!apply_ist_record(cfg, record))
+        {
+            return false;
+        }
         cfg.signing_key_path = tmp_dir_ / "verify_key.pem";
         service_->set_signature_verifier(
             [](const IstPlatformConfig&, DoneCb cb) { cb(true); });
@@ -365,14 +372,11 @@ class IstServiceTest : public ::testing::Test
         f << content;
     }
 
-    // Adds hookConfig.cakBypass to the config and, if asked, an executable
-    // ist_cak_bypass.sh to the hook directory.
+    // Gives the IST record a DotObjectPrefix and, if asked, adds an
+    // executable ist_cak_bypass.sh to the hook directory.
     void declare_cak_bypass(bool install_script)
     {
-        std::stringstream cfg;
-        cfg << std::ifstream(config_path_).rdbuf();
-        write_config(R"({ "hookConfig": { "cakBypass": {} },)" +
-                     cfg.str().substr(cfg.str().find('{') + 1));
+        cak_bypass_ = true;
         if (install_script)
         {
             const fs::path script = tmp_dir_ / "hooks" / "ist_cak_bypass.sh";
@@ -392,6 +396,7 @@ class IstServiceTest : public ::testing::Test
     }
 
     boost::asio::io_context io_;
+    bool cak_bypass_{false};
     std::shared_ptr<IstService> service_;
 
     MockStatePublisher* publisher_ = nullptr;
@@ -498,213 +503,46 @@ TEST_F(IstServiceTest, InitializeRejectsDoubleInit)
     EXPECT_FALSE(init_from_file(config_path_));
 }
 
-TEST_F(IstServiceTest, SoftwareInventoryIdMissingFails)
+TEST(IstRecordTest, AppliesSoftwareInventoryId)
 {
-    write_config(R"({
-        "hookDirectory": ")" +
-                 (tmp_dir_ / "hooks").string() + R"(",
-        "hookPaths": {
-            "istBootAssert": ")" +
-                 (tmp_dir_ / "hooks/assert.sh").string() + R"(",
-            "istBootDeassert": ")" +
-                 (tmp_dir_ / "hooks/deassert.sh").string() + R"(",
-            "resetSystem": ")" +
-                 (tmp_dir_ / "hooks/reset.sh").string() + R"("
-        },
-        "storageConfig": {
-            "vectorMountPath": ")" +
-                 (tmp_dir_ / "vectors").string() + R"(",
-            "vectorStoragePath": ")" +
-                 (tmp_dir_ / "storage").string() + R"(",
-            "resultStoragePath": ")" +
-                 (tmp_dir_ / "results").string() + R"("
-        }
-    })");
-    EXPECT_FALSE(init_from_file(config_path_));
+    IstPlatformConfig cfg;
+    ASSERT_TRUE(
+        apply_ist_record(cfg, {{"SoftwareInventoryId", "Custom_Vectors"}}));
+    EXPECT_EQ(cfg.software_inventory_id, "Custom_Vectors");
+    EXPECT_FALSE(cfg.cak_bypass);
 }
 
-TEST_F(IstServiceTest, SoftwareInventoryIdCustomValue)
+TEST(IstRecordTest, SoftwareInventoryIdAcceptsUnderscoresAndDigits)
 {
-    write_config(R"({
-        "hookDirectory": ")" +
-                 (tmp_dir_ / "hooks").string() + R"(",
-        "hookPaths": {
-            "istBootAssert": ")" +
-                 (tmp_dir_ / "hooks/assert.sh").string() + R"(",
-            "istBootDeassert": ")" +
-                 (tmp_dir_ / "hooks/deassert.sh").string() + R"(",
-            "resetSystem": ")" +
-                 (tmp_dir_ / "hooks/reset.sh").string() + R"("
-        },
-        "storageConfig": {
-            "vectorMountPath": ")" +
-                 (tmp_dir_ / "vectors").string() + R"(",
-            "vectorStoragePath": ")" +
-                 (tmp_dir_ / "storage").string() + R"(",
-            "resultStoragePath": ")" +
-                 (tmp_dir_ / "results").string() + R"("
-        },
-        "softwareInventoryId": "Custom_Vectors"
-    })");
-    EXPECT_TRUE(init_from_file(config_path_));
-    EXPECT_EQ(service_->software_inventory_id(), "Custom_Vectors");
+    IstPlatformConfig cfg;
+    ASSERT_TRUE(apply_ist_record(cfg, {{"SoftwareInventoryId", "___123___"}}));
+    EXPECT_EQ(cfg.software_inventory_id, "___123___");
 }
 
-TEST_F(IstServiceTest, SoftwareInventoryIdRejectsInvalidChars)
+TEST(IstRecordTest, SoftwareInventoryIdRejectsInvalidValues)
 {
-    write_config(R"({
-        "hookDirectory": ")" +
-                 (tmp_dir_ / "hooks").string() + R"(",
-        "hookPaths": {
-            "istBootAssert": ")" +
-                 (tmp_dir_ / "hooks/assert.sh").string() + R"(",
-            "istBootDeassert": ")" +
-                 (tmp_dir_ / "hooks/deassert.sh").string() + R"(",
-            "resetSystem": ")" +
-                 (tmp_dir_ / "hooks/reset.sh").string() + R"("
-        },
-        "storageConfig": {
-            "vectorMountPath": ")" +
-                 (tmp_dir_ / "vectors").string() + R"(",
-            "vectorStoragePath": ")" +
-                 (tmp_dir_ / "storage").string() + R"(",
-            "resultStoragePath": ")" +
-                 (tmp_dir_ / "results").string() + R"("
-        },
-        "softwareInventoryId": "bad/path"
-    })");
-    EXPECT_FALSE(init_from_file(config_path_));
+    for (const char* id : {"bad/path", "bad-id", "bad id", "bad.id", ""})
+    {
+        IstPlatformConfig cfg;
+        EXPECT_FALSE(apply_ist_record(cfg, {{"SoftwareInventoryId", id}}))
+            << id;
+    }
 }
 
-TEST_F(IstServiceTest, SoftwareInventoryIdRejectsDash)
+TEST(IstRecordTest, SoftwareInventoryIdMissingOrNotString)
 {
-    write_config(R"({
-        "hookDirectory": ")" +
-                 (tmp_dir_ / "hooks").string() + R"(",
-        "hookPaths": {
-            "istBootAssert": ")" +
-                 (tmp_dir_ / "hooks/assert.sh").string() + R"(",
-            "istBootDeassert": ")" +
-                 (tmp_dir_ / "hooks/deassert.sh").string() + R"(",
-            "resetSystem": ")" +
-                 (tmp_dir_ / "hooks/reset.sh").string() + R"("
-        },
-        "storageConfig": {
-            "vectorMountPath": ")" +
-                 (tmp_dir_ / "vectors").string() + R"(",
-            "vectorStoragePath": ")" +
-                 (tmp_dir_ / "storage").string() + R"(",
-            "resultStoragePath": ")" +
-                 (tmp_dir_ / "results").string() + R"("
-        },
-        "softwareInventoryId": "bad-id"
-    })");
-    EXPECT_FALSE(init_from_file(config_path_));
+    IstPlatformConfig cfg;
+    EXPECT_FALSE(apply_ist_record(cfg, {}));
+    EXPECT_FALSE(apply_ist_record(cfg, {{"SoftwareInventoryId", uint64_t{1}}}));
 }
 
-TEST_F(IstServiceTest, SoftwareInventoryIdRejectsSpace)
+TEST(IstRecordTest, DotObjectPrefixEnablesCakBypass)
 {
-    write_config(R"({
-        "hookDirectory": ")" +
-                 (tmp_dir_ / "hooks").string() + R"(",
-        "hookPaths": {
-            "istBootAssert": ")" +
-                 (tmp_dir_ / "hooks/assert.sh").string() + R"(",
-            "istBootDeassert": ")" +
-                 (tmp_dir_ / "hooks/deassert.sh").string() + R"(",
-            "resetSystem": ")" +
-                 (tmp_dir_ / "hooks/reset.sh").string() + R"("
-        },
-        "storageConfig": {
-            "vectorMountPath": ")" +
-                 (tmp_dir_ / "vectors").string() + R"(",
-            "vectorStoragePath": ")" +
-                 (tmp_dir_ / "storage").string() + R"(",
-            "resultStoragePath": ")" +
-                 (tmp_dir_ / "results").string() + R"("
-        },
-        "softwareInventoryId": "bad id"
-    })");
-    EXPECT_FALSE(init_from_file(config_path_));
-}
-
-TEST_F(IstServiceTest, SoftwareInventoryIdRejectsDot)
-{
-    write_config(R"({
-        "hookDirectory": ")" +
-                 (tmp_dir_ / "hooks").string() + R"(",
-        "hookPaths": {
-            "istBootAssert": ")" +
-                 (tmp_dir_ / "hooks/assert.sh").string() + R"(",
-            "istBootDeassert": ")" +
-                 (tmp_dir_ / "hooks/deassert.sh").string() + R"(",
-            "resetSystem": ")" +
-                 (tmp_dir_ / "hooks/reset.sh").string() + R"("
-        },
-        "storageConfig": {
-            "vectorMountPath": ")" +
-                 (tmp_dir_ / "vectors").string() + R"(",
-            "vectorStoragePath": ")" +
-                 (tmp_dir_ / "storage").string() + R"(",
-            "resultStoragePath": ")" +
-                 (tmp_dir_ / "results").string() + R"("
-        },
-        "softwareInventoryId": "bad.id"
-    })");
-    EXPECT_FALSE(init_from_file(config_path_));
-}
-
-TEST_F(IstServiceTest, SoftwareInventoryIdRejectsEmpty)
-{
-    write_config(R"({
-        "hookDirectory": ")" +
-                 (tmp_dir_ / "hooks").string() + R"(",
-        "hookPaths": {
-            "istBootAssert": ")" +
-                 (tmp_dir_ / "hooks/assert.sh").string() + R"(",
-            "istBootDeassert": ")" +
-                 (tmp_dir_ / "hooks/deassert.sh").string() + R"(",
-            "resetSystem": ")" +
-                 (tmp_dir_ / "hooks/reset.sh").string() + R"("
-        },
-        "storageConfig": {
-            "vectorMountPath": ")" +
-                 (tmp_dir_ / "vectors").string() + R"(",
-            "vectorStoragePath": ")" +
-                 (tmp_dir_ / "storage").string() + R"(",
-            "resultStoragePath": ")" +
-                 (tmp_dir_ / "results").string() + R"("
-        },
-        "softwareInventoryId": ""
-    })");
-    EXPECT_FALSE(init_from_file(config_path_));
-}
-
-TEST_F(IstServiceTest, SoftwareInventoryIdAcceptsUnderscoresAndDigits)
-{
-    write_config(R"({
-        "hookDirectory": ")" +
-                 (tmp_dir_ / "hooks").string() + R"(",
-        "hookPaths": {
-            "istBootAssert": ")" +
-                 (tmp_dir_ / "hooks/assert.sh").string() + R"(",
-            "istBootDeassert": ")" +
-                 (tmp_dir_ / "hooks/deassert.sh").string() + R"(",
-            "resetSystem": ")" +
-                 (tmp_dir_ / "hooks/reset.sh").string() + R"("
-        },
-        "storageConfig": {
-            "vectorMountPath": ")" +
-                 (tmp_dir_ / "vectors").string() + R"(",
-            "vectorStoragePath": ")" +
-                 (tmp_dir_ / "storage").string() + R"(",
-            "resultStoragePath": ")" +
-                 (tmp_dir_ / "results").string() + R"("
-        },
-        "softwareInventoryId": "___123___"
-    })");
-    EXPECT_TRUE(init_from_file(config_path_));
-    EXPECT_EQ(service_->software_inventory_id(), "___123___");
+    IstPlatformConfig cfg;
+    ASSERT_TRUE(apply_ist_record(
+        cfg, {{"SoftwareInventoryId", "IST_Vectors"},
+              {"DotObjectPrefix", "/xyz/openbmc_project/DOT/IRoT_CPU_"}}));
+    EXPECT_TRUE(cfg.cak_bypass);
 }
 
 TEST_F(IstServiceTest, StartUpdateBeforeInitializeThrows)
@@ -721,8 +559,7 @@ TEST_F(IstServiceTest, InitializeRejectsHookOutsideHookDir)
         "hookPaths": {
             "istBootAssert": "/etc/shadow"
         },
-        "storageConfig": {},
-        "softwareInventoryId": "IST_Vectors"
+        "storageConfig": {}
     })");
     EXPECT_FALSE(init_from_file(config_path_));
 }
@@ -1654,8 +1491,7 @@ TEST_F(IstServiceTest, InitializeRejectsHookDirOutsideTrustedRoot)
             "istBootDeassert": ")" +
                  (outside / "hooks/deassert.sh").string() + R"("
         },
-        "storageConfig": {},
-        "softwareInventoryId": "IST_Vectors"
+        "storageConfig": {}
     })");
     EXPECT_FALSE(init_from_file(config_path_));
 
@@ -1670,8 +1506,7 @@ TEST_F(IstServiceTest, InitializeRejectsEmptyHookPath)
         "hookPaths": {
             "istBootAssert": ""
         },
-        "storageConfig": {},
-        "softwareInventoryId": "IST_Vectors"
+        "storageConfig": {}
     })");
     EXPECT_FALSE(init_from_file(config_path_));
 }
@@ -1693,8 +1528,7 @@ TEST_F(IstServiceTest, StartIstThrowsWhenAssertHookMissing)
                  (tmp_dir_ / "storage").string() + R"(",
             "resultStoragePath": ")" +
                  (tmp_dir_ / "results").string() + R"("
-        },
-        "softwareInventoryId": "IST_Vectors"
+        }
     })");
     init_from_file(config_path_);
 
@@ -1879,8 +1713,7 @@ TEST_F(IstServiceTest, AutoRebootFailsWhenResetHookMissing)
                  (tmp_dir_ / "storage").string() + R"(",
             "resultStoragePath": ")" +
                  (tmp_dir_ / "results").string() + R"("
-        },
-        "softwareInventoryId": "IST_Vectors"
+        }
     })");
     init_from_file(config_path_);
 
@@ -1944,8 +1777,7 @@ TEST_F(IstServiceTest, StartIstAbortsOnMissingResultStorageConfig)
         "storageConfig": {
             "vectorMountPath": ")" +
                  (tmp_dir_ / "vectors").string() + R"("
-        },
-        "softwareInventoryId": "IST_Vectors"
+        }
     })");
     init_from_file(config_path_);
 
@@ -2785,8 +2617,7 @@ TEST_F(IstServiceTest, StartUpdateRejectsEmptyStoragePath)
                  (tmp_dir_ / "vectors").string() + R"(",
             "resultStoragePath": ")" +
                  (tmp_dir_ / "results").string() + R"("
-        },
-        "softwareInventoryId": "IST_Vectors"
+        }
     })");
     init_from_file(config_path_);
 
@@ -3131,8 +2962,7 @@ TEST_F(IstServiceTest, InitNoStoragePathPublishesActivationFailed)
             "vectorStoragePath": "",
             "resultStoragePath": ")" +
                  (tmp_dir_ / "results").string() + R"("
-        },
-        "softwareInventoryId": "IST_Vectors"
+        }
     })");
 
     EXPECT_CALL(*publisher_, publish_activation(StrEq(k_activation_failed)))
@@ -4064,8 +3894,7 @@ TEST_F(IstServiceTest, ErrorHookAssertNotFound)
                  (tmp_dir_ / "storage").string() + R"(",
             "resultStoragePath": ")" +
                  (tmp_dir_ / "results").string() + R"("
-        },
-        "softwareInventoryId": "IST_Vectors"
+        }
     })");
     init_from_file(config_path_);
 
@@ -4117,8 +3946,7 @@ TEST_F(IstServiceTest, ErrorHookDeassertNotFound)
                  (tmp_dir_ / "storage").string() + R"(",
             "resultStoragePath": ")" +
                  (tmp_dir_ / "results").string() + R"("
-        },
-        "softwareInventoryId": "IST_Vectors"
+        }
     })");
     init_from_file(config_path_);
 
@@ -4247,8 +4075,7 @@ TEST_F(IstServiceTest, ErrorHookResetNotFound)
                  (tmp_dir_ / "storage").string() + R"(",
             "resultStoragePath": ")" +
                  (tmp_dir_ / "results").string() + R"("
-        },
-        "softwareInventoryId": "IST_Vectors"
+        }
     })");
     init_from_file(config_path_);
 

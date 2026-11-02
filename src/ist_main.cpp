@@ -25,10 +25,13 @@
 
 #include <array>
 #include <cerrno>
+#include <chrono>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace ist_err = sdbusplus::error::com::nvidia::vera::ist;
@@ -36,6 +39,8 @@ namespace ist_err = sdbusplus::error::com::nvidia::vera::ist;
 static constexpr const char* config_path = "/etc/ist/platform_cfg.json";
 static constexpr const char* sw_path_prefix =
     "/xyz/openbmc_project/inventory_software/";
+static constexpr const char* ist_record_iface =
+    "xyz.openbmc_project.Configuration.IST";
 
 // The D-Bus layer dup()s the FD into the reply message, so we own a
 // now-redundant copy.  Post the close so it runs after the reply is
@@ -117,6 +122,60 @@ static void
         std::array<const char*, 1>{"xyz.openbmc_project.Inventory.Item.Cpu"});
 }
 
+using IstRecordCb = std::move_only_function<void(const IstRecord&)>;
+
+// Waits for entity-manager to publish the IST record, retrying every few
+// seconds, since this service can start before entity-manager has probed.
+static void
+    read_ist_record(const std::shared_ptr<sdbusplus::asio::connection>& conn,
+                    const std::shared_ptr<boost::asio::steady_timer>& timer,
+                    IstRecordCb done)
+{
+    auto retry = [conn, timer](IstRecordCb cb) {
+        static bool logged = false;
+        if (!std::exchange(logged, true))
+        {
+            lg2::info("IST: waiting for the entity-manager IST record");
+        }
+        timer->expires_after(std::chrono::seconds(5));
+        timer->async_wait([conn, timer, cb = std::move(cb)](
+                              const boost::system::error_code& ec) mutable {
+            if (!ec)
+            {
+                read_ist_record(conn, timer, std::move(cb));
+            }
+        });
+    };
+    conn->async_method_call(
+        [conn, retry, done = std::move(done)](
+            const boost::system::error_code& ec,
+            const std::vector<std::string>& paths) mutable {
+            if (ec || paths.empty())
+            {
+                retry(std::move(done));
+                return;
+            }
+            conn->async_method_call(
+                [retry,
+                 done = std::move(done)](const boost::system::error_code& ec2,
+                                         const IstRecord& record) mutable {
+                    if (ec2)
+                    {
+                        retry(std::move(done));
+                        return;
+                    }
+                    done(record);
+                },
+                "xyz.openbmc_project.EntityManager", paths.front(),
+                "org.freedesktop.DBus.Properties", "GetAll", ist_record_iface);
+        },
+        "xyz.openbmc_project.ObjectMapper",
+        "/xyz/openbmc_project/object_mapper",
+        "xyz.openbmc_project.ObjectMapper", "GetSubTreePaths",
+        "/xyz/openbmc_project/inventory", 0,
+        std::array<const char*, 1>{ist_record_iface});
+}
+
 int main(int, char**)
 {
     boost::asio::io_context io;
@@ -128,6 +187,22 @@ int main(int, char**)
     if (!parse_platform_config(platform_cfg, config_path))
     {
         lg2::error("IST: failed to parse platform config, exiting");
+        return 1;
+    }
+
+    // Run the loop only until the record arrives; the rest of startup needs
+    // softwareInventoryId for the object path.
+    std::optional<IstRecord> record;
+    read_ist_record(conn, std::make_shared<boost::asio::steady_timer>(io),
+                    [&](const IstRecord& r) {
+                        record = r;
+                        io.stop();
+                    });
+    io.run();
+    io.restart();
+    if (!record || !apply_ist_record(platform_cfg, *record))
+    {
+        lg2::error("IST: invalid entity-manager IST record, exiting");
         return 1;
     }
 

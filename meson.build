@@ -219,10 +219,13 @@ executable(
     link_with: [ist_app_a],
 )
 
-# The hooks read /etc/ist/platform.env, which the image recipe generates
-# from the board's platform_cfg.json with hooks/ist_platform_env.py. Off by
-# default so a build that does not generate it installs no hooks.
+# The hooks read the board's facts from entity-manager. platform_cfg.json
+# goes with them because tegra MODS also reads its storage paths.
 if get_option('hooks').enabled()
+    install_data(
+        'platform_cfg.json',
+        install_dir: get_option('sysconfdir') / 'ist',
+    )
     hook_install_dir = get_option('datadir') / 'ist' / 'hooks'
     install_data(
         'hooks/ist_boot_enable.sh',
@@ -239,6 +242,7 @@ if get_option('hooks').enabled()
         'hooks/ist_cpu_reset.sh',
         'hooks/ist_cak_common.sh',
         'hooks/ist_mctp_common.sh',
+        'hooks/ist_em.sh',
         install_dir: hook_install_dir,
         install_mode: 'rw-r--r--',
     )

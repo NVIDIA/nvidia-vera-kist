@@ -1,0 +1,14 @@
+{
+    "hookDirectory": "/usr/share/ist/hooks/",
+    "hookPaths": {
+        "istBootAssert": "/usr/share/ist/hooks/ist_boot_enable.sh",
+        "istBootDeassert": "/usr/share/ist/hooks/ist_boot_disable.sh",
+        "resetSystem": "/usr/share/ist/hooks/ist_sys_rst.sh",
+        "errorCheck": "/usr/share/ist/hooks/ist_check_error.sh"
+    },
+    "storageConfig": {
+        "vectorMountPath": "/var/emmc/ist/IST_Test_Package/",
+        "vectorStoragePath": "/var/emmc/ist/",
+        "resultStoragePath": "/var/emmc/ist/results/"
+    }
+}

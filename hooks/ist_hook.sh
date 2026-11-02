@@ -3,16 +3,16 @@
 # All rights reserved. SPDX-License-Identifier: Apache-2.0
 
 # Board-independent IST hook logic, sourced by the per-hook wrappers so
-# $0 stays the wrapper. Board facts come from platform.env, generated at
-# build time from the "hookConfig" object of platform_cfg.json.
+# $0 stays the wrapper. Board facts come from entity-manager (ist_em.sh).
 # Usage: . ist_hook.sh boot_enable|boot_disable|sys_rst|cak_bypass|check_error
 
 # shellcheck disable=SC2046 # gpiofind output is "<chip> <line>" on purpose
 
 HOOKS=/usr/share/ist/hooks
 
-# shellcheck source=/dev/null
-. /etc/ist/platform.env || exit 1
+# shellcheck source=hooks/ist_em.sh
+. "$HOOKS/ist_em.sh"
+ist_em_load || exit 1
 
 STEP=$1
 shift
@@ -108,7 +108,7 @@ function sys_rst() {
         exit 1
     fi
 
-    # Set only when hookConfig.cakBypass is present; a missing script fails.
+    # Set only when the IST record has DotObjectPrefix; a missing script fails.
     if [ "$skip_cak" = false ] && [ -n "$IST_DOT_PREFIX" ]; then
         echo "Running CAK bypass script: $cak"
         if ! "$cak"; then
