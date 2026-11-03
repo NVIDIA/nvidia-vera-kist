@@ -39,7 +39,7 @@ function em_set() {
 }
 
 function ist_em_load() {
-    local p d c v cpus
+    local p d c v cpus declared=0
 
     [ -n "$IST_EM_LOADED" ] && return 0
     p=$(em_paths IST | head -n 1)
@@ -77,6 +77,7 @@ function ist_em_load() {
         em_set "IST_D${d}_SYS_RST_GPIO" "$p" ISTDomain SysResetGpio
         cpus=""
         for c in $(em_get "$p" ISTDomain Cpus); do
+            declared=$((declared + 1))
             v="IST_CPU${c}_EID"
             [ -n "${!v}" ] && cpus="${cpus:+$cpus }$c"
         done
@@ -84,5 +85,10 @@ function ist_em_load() {
     done
     # shellcheck disable=SC2086 # one index per word
     IST_DOMAINS=$(printf '%s\n' $IST_DOMAINS | sort -n | tr '\n' ' ')
+    if [ -n "$IST_REQUIRE_CPUS" ] && [ "$IST_REQUIRE_CPUS" -gt "$declared" ]; then
+        echo "IST RequiredCpus $IST_REQUIRE_CPUS exceeds the $declared CPUs" \
+            "the ISTDomain records declare" >&2
+        return 1
+    fi
     IST_EM_LOADED=1
 }

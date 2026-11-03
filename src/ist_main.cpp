@@ -132,12 +132,22 @@ static void
                     IstRecordCb done)
 {
     auto retry = [conn, timer](IstRecordCb cb) {
-        static bool logged = false;
-        if (!std::exchange(logged, true))
+        constexpr auto retry_delay = std::chrono::seconds(5);
+        constexpr int missing_after_tries = 36; // 3 minutes
+        static int tries = 0;
+        if (++tries == 1)
         {
             lg2::info("IST: waiting for the entity-manager IST record");
         }
-        timer->expires_after(std::chrono::seconds(5));
+        else if (tries == missing_after_tries)
+        {
+            lg2::error(
+                "IST: no entity-manager IST record after {SECONDS} s; the "
+                "in-system test is unavailable on this board until it "
+                "appears",
+                "SECONDS", missing_after_tries * retry_delay.count());
+        }
+        timer->expires_after(retry_delay);
         timer->async_wait([conn, timer, cb = std::move(cb)](
                               const boost::system::error_code& ec) mutable {
             if (!ec)
