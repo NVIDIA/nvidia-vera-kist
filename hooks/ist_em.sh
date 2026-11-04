@@ -2,10 +2,11 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES.
 # All rights reserved. SPDX-License-Identifier: Apache-2.0
 
-# Board facts for the IST hooks, from the entity-manager IST, ISTDomain and
-# USBRCMRecovery records. ist_em_load sets IST_DOMAINS, IST_D<n>_* and
+# Board facts for the IST hooks, from the entity-manager IST and ISTDomain
+# records and the CPU NvDevice records, or USBRCMRecovery records where
+# there are none. ist_em_load sets IST_DOMAINS, IST_D<n>_* and
 # IST_CPU<i>_EID plus the reset, CAK and timing variables. A domain CPU
-# with no USBRCMRecovery record is not fitted and is left out.
+# with no such record is not fitted and is left out.
 
 EM_SERVICE="xyz.openbmc_project.EntityManager"
 EM_CFG="xyz.openbmc_project.Configuration"
@@ -39,7 +40,7 @@ function em_set() {
 }
 
 function ist_em_load() {
-    local p d c v cpus declared=0
+    local p d c v t e paths cpus declared=0
 
     [ -n "$IST_EM_LOADED" ] && return 0
     p=$(em_paths IST | head -n 1)
@@ -56,12 +57,21 @@ function ist_em_load() {
     em_set IST_SYS_RST_HOLD_S "$p" IST SysResetHoldS 5
     em_set IST_EID_TIMEOUT_S "$p" IST EidTimeoutS 45
 
-    # FW_CPU_<i> / HGX_FW_CPU_<i>
-    for p in $(em_paths USBRCMRecovery); do
-        v=$(em_get "$p" USBRCMRecovery Name) || continue
+    # CPU_<i> / HGX_CPU_<i> NvDevice of Kind cpu; without one, the
+    # FW_CPU_<i> / HGX_FW_CPU_<i> USBRCMRecovery records.
+    t=NvDevice e=EID
+    paths=$(for p in $(em_paths NvDevice); do
+            [ "$(em_get "$p" NvDevice Kind)" = cpu ] && echo "$p"
+    done)
+    if [ -z "$paths" ]; then
+        t=USBRCMRecovery e=MctpEID
+        paths=$(em_paths USBRCMRecovery)
+    fi
+    for p in $paths; do
+        v=$(em_get "$p" "$t" Name) || continue
         c=${v##*_}
         [[ "$c" =~ ^[0-9]+$ ]] || continue
-        em_set "IST_CPU${c}_EID" "$p" USBRCMRecovery MctpEID
+        em_set "IST_CPU${c}_EID" "$p" "$t" "$e"
     done
 
     IST_DOMAINS=""

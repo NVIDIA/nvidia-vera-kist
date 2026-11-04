@@ -310,6 +310,9 @@ if get_option('tests').enabled()
     hook_runner_test = executable(
         'hook-runner-test',
         'test/hook_runner_test.cpp',
+        cpp_args: [
+            '-DIST_HOOKS_DIR="' + meson.project_source_root() / 'hooks' + '"',
+        ],
         dependencies: [
             boost,
             sdbusplus,

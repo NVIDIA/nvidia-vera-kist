@@ -219,3 +219,83 @@ TEST_F(HookRunnerTest, SIGKILLEscalationWhenSIGTERMIgnored)
     EXPECT_GT(elapsed, 5s) << "Should have waited for grace period";
     EXPECT_LT(elapsed, 15s) << "Should not hang forever";
 }
+
+// ist_em.sh against a fake busctl serving one line per property:
+// <interface less xyz.openbmc_project.Configuration.> <path> <property>
+// <busctl-typed value>
+class IstEmTest : public HookRunnerTest
+{
+  protected:
+    bool load(const std::string& records, const std::string& expect)
+    {
+        std::ofstream(tmp_dir_ / "records") << board << records;
+        std::ofstream(tmp_dir_ / "busctl") << R"(#!/bin/bash
+db=$(dirname "$0")/records
+cfg=xyz.openbmc_project.Configuration.
+if [ "$1" = call ]; then
+    i=${!#}
+    p=$(awk -v i="${i#$cfg}" '$1 == i { print "\"" $2 "\"" }' "$db" | sort -u)
+    echo "as $(echo "$p" | grep -c .) $p"
+else
+    awk -v p="$3" -v i="${4#$cfg}" -v k="$5" '$1 == i && $2 == p && $3 == k {
+        $1 = $2 = $3 = ""; sub(/^ +/, ""); print; f = 1 } END { exit !f }' "$db"
+fi
+)";
+        fs::permissions(tmp_dir_ / "busctl", fs::perms::owner_all);
+        bool result = false;
+        runner_->async_run(
+            "/bin/bash", "test-ist-em", [&](bool ok) { result = ok; },
+            {"-c", "PATH=" + tmp_dir_.string() +
+                       ":$PATH; . " IST_HOOKS_DIR
+                       "/ist_em.sh && ist_em_load && test \"$IST_CPU0_EID "
+                       "$IST_CPU1_EID|$IST_D0_CPUS\" = \"" +
+                       expect + "\""},
+            10s);
+        io_.restart();
+        io_.run();
+        return result;
+    }
+
+    static constexpr auto board = "IST /b/IST Name s \"IST\"\n"
+                                  "ISTDomain /b/D0 Index t 0\n"
+                                  "ISTDomain /b/D0 Cpus at 2 0 1\n";
+
+    static std::string nv_device(const std::string& name,
+                                 const std::string& kind, int eid)
+    {
+        const std::string p = " /b/" + name + " ";
+        return "NvDevice" + p + "Name s \"" + name + "\"\nNvDevice" + p +
+               "Kind s \"" + kind + "\"\nNvDevice" + p + "EID t " +
+               std::to_string(eid) + "\n";
+    }
+
+    static std::string usbrcm(const std::string& name, int eid)
+    {
+        const std::string p = "USBRCMRecovery /b/" + name + " ";
+        return p + "Name s \"" + name + "\"\n" + p + "MctpEID t " +
+               std::to_string(eid) + "\n";
+    }
+};
+
+// GPU_0 is not a CPU and must not take CPU 0's EID.
+TEST_F(IstEmTest, CpusFromNvDevice)
+{
+    EXPECT_TRUE(load(nv_device("CPU_0", "cpu", 16) +
+                         nv_device("CPU_1", "cpu", 17) +
+                         nv_device("GPU_0", "gpu", 30),
+                     "16 17|0 1"));
+}
+
+TEST_F(IstEmTest, CpusFromUSBRCMRecoveryWithoutCpuNvDevice)
+{
+    EXPECT_TRUE(load(usbrcm("FW_CPU_0", 16) + usbrcm("FW_CPU_1", 17) +
+                         nv_device("GPU_0", "gpu", 30),
+                     "16 17|0 1"));
+}
+
+TEST_F(IstEmTest, NvDeviceTakesPrecedenceOverUSBRCMRecovery)
+{
+    EXPECT_TRUE(
+        load(nv_device("HGX_CPU_0", "cpu", 14) + usbrcm("HGX_FW_CPU_1", 24),
+             "14 |0"));
+}
