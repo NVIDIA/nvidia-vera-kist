@@ -19,11 +19,15 @@ function em_paths() {
         "$EM_CFG.$1" 2>/dev/null | grep -oE '"[^"]+"' | tr -d '"'
 }
 
-# em_get <path> <type> <property>: the bare value; fails if it is absent.
+# em_get <path> <type> <property>: the bare value; returns 1 if the
+# record has no such property, 2 if it cannot be read.
 function em_get() {
-    local v
-    v=$(busctl get-property "$EM_SERVICE" "$1" "$EM_CFG.$2" "$3" \
-        2>/dev/null) || return 1
+    local v i="$EM_CFG.$2"
+    if ! v=$(busctl get-property "$EM_SERVICE" "$1" "$i" "$3" 2>&1); then
+        [[ "$v" == *"Unknown interface $i or property $3."* ]] && return 1
+        echo "$v" >&2
+        return 2
+    fi
     case "$v" in
         a*) read -r _ _ v <<< "$v" ;;
         s*) v=${v#s \"}; v=${v%\"} ;;
@@ -32,15 +36,16 @@ function em_get() {
     echo "$v"
 }
 
-# em_set <var> <path> <type> <property> [default]
+# em_set <var> <path> <type> <property> [default]: fails if unreadable.
 function em_set() {
-    local v
-    v=$(em_get "$2" "$3" "$4") || v=$5
+    local v rc=0
+    v=$(em_get "$2" "$3" "$4") || { rc=$?; v=$5; }
     printf -v "$1" '%s' "$v"
+    [ "$rc" -ne 2 ]
 }
 
 function ist_em_load() {
-    local p d c v t e paths cpus declared=0
+    local p d c v t e paths cpus fitted=0
 
     [ -n "$IST_EM_LOADED" ] && return 0
     p=$(em_paths IST | head -n 1)
@@ -51,7 +56,10 @@ function ist_em_load() {
     em_set IST_RESET_METHOD "$p" IST ResetMethod gpio
     em_set IST_RESET_COMMAND "$p" IST ResetCommand
     em_set IST_DOT_PREFIX "$p" IST DotObjectPrefix
-    em_set IST_REQUIRE_CPUS "$p" IST RequiredCpus
+    if ! em_set IST_REQUIRE_CPUS "$p" IST RequiredCpus; then
+        echo "Cannot read IST RequiredCpus" >&2
+        return 1
+    fi
     em_set IST_SHDN_TIMEOUT_S "$p" IST ShutdownOkTimeoutS 10
     em_set IST_SHDN_POLL_S "$p" IST ShutdownOkPollS 0.2
     em_set IST_SYS_RST_HOLD_S "$p" IST SysResetHoldS 5
@@ -87,17 +95,18 @@ function ist_em_load() {
         em_set "IST_D${d}_SYS_RST_GPIO" "$p" ISTDomain SysResetGpio
         cpus=""
         for c in $(em_get "$p" ISTDomain Cpus); do
-            declared=$((declared + 1))
             v="IST_CPU${c}_EID"
-            [ -n "${!v}" ] && cpus="${cpus:+$cpus }$c"
+            [ -n "${!v}" ] || continue
+            cpus="${cpus:+$cpus }$c"
+            fitted=$((fitted + 1))
         done
         printf -v "IST_D${d}_CPUS" '%s' "$cpus"
     done
     # shellcheck disable=SC2086 # one index per word
     IST_DOMAINS=$(printf '%s\n' $IST_DOMAINS | sort -n | tr '\n' ' ')
-    if [ -n "$IST_REQUIRE_CPUS" ] && [ "$IST_REQUIRE_CPUS" -gt "$declared" ]; then
-        echo "IST RequiredCpus $IST_REQUIRE_CPUS exceeds the $declared CPUs" \
-            "the ISTDomain records declare" >&2
+    if [ -n "$IST_REQUIRE_CPUS" ] && [ "$IST_REQUIRE_CPUS" -gt "$fitted" ]; then
+        echo "IST RequiredCpus $IST_REQUIRE_CPUS exceeds the $fitted CPUs" \
+            "fitted on this board" >&2
         return 1
     fi
     IST_EM_LOADED=1

@@ -222,7 +222,7 @@ TEST_F(HookRunnerTest, SIGKILLEscalationWhenSIGTERMIgnored)
 
 // ist_em.sh against a fake busctl serving one line per property:
 // <interface less xyz.openbmc_project.Configuration.> <path> <property>
-// <busctl-typed value>
+// <busctl-typed value>, or FAIL for a property that cannot be read
 class IstEmTest : public HookRunnerTest
 {
   protected:
@@ -237,8 +237,11 @@ if [ "$1" = call ]; then
     p=$(awk -v i="${i#$cfg}" '$1 == i { print "\"" $2 "\"" }' "$db" | sort -u)
     echo "as $(echo "$p" | grep -c .) $p"
 else
-    awk -v p="$3" -v i="${4#$cfg}" -v k="$5" '$1 == i && $2 == p && $3 == k {
-        $1 = $2 = $3 = ""; sub(/^ +/, ""); print; f = 1 } END { exit !f }' "$db"
+    v=$(awk -v p="$3" -v i="${4#$cfg}" -v k="$5" '$1 == i && $2 == p &&
+        $3 == k { $1 = $2 = $3 = ""; sub(/^ +/, ""); print }' "$db")
+    [ "$v" = FAIL ] && echo "Connection timed out" >&2 && exit 1
+    [ -z "$v" ] && echo "Unknown interface $4 or property $5." >&2 && exit 1
+    echo "$v"
 fi
 )";
         fs::permissions(tmp_dir_ / "busctl", fs::perms::owner_all);
@@ -298,4 +301,23 @@ TEST_F(IstEmTest, NvDeviceTakesPrecedenceOverUSBRCMRecovery)
     EXPECT_TRUE(
         load(nv_device("HGX_CPU_0", "cpu", 14) + usbrcm("HGX_FW_CPU_1", 24),
              "14 |0"));
+}
+
+// The domain declares two CPUs but the board fits one.
+TEST_F(IstEmTest, RequiredCpusAboveFittedFails)
+{
+    const std::string req = "IST /b/IST RequiredCpus t ";
+    EXPECT_TRUE(load(req + "1\n" + nv_device("CPU_0", "cpu", 16), "16 |0"));
+    EXPECT_FALSE(load(req + "2\n" + nv_device("CPU_0", "cpu", 16), "16 |0"));
+    EXPECT_TRUE(
+        load(req + "2\n" + usbrcm("FW_CPU_0", 16) + usbrcm("FW_CPU_1", 17),
+             "16 17|0 1"));
+}
+
+// An absent RequiredCpus is no floor; one that cannot be read is an error.
+TEST_F(IstEmTest, UnreadableRequiredCpusFails)
+{
+    EXPECT_FALSE(
+        load("IST /b/IST RequiredCpus FAIL\n" + nv_device("CPU_0", "cpu", 16),
+             "16 |0"));
 }
