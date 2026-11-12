@@ -32,6 +32,7 @@
 #include <set>
 #include <string>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace ist_err = sdbusplus::error::com::nvidia::vera::ist;
@@ -39,8 +40,8 @@ namespace ist_err = sdbusplus::error::com::nvidia::vera::ist;
 static constexpr const char* config_path = "/etc/ist/platform_cfg.json";
 static constexpr const char* sw_path_prefix =
     "/xyz/openbmc_project/inventory_software/";
-static constexpr const char* ist_record_iface =
-    "xyz.openbmc_project.Configuration.IST";
+static constexpr const char* nv_device_iface =
+    "xyz.openbmc_project.Configuration.NvDevice";
 
 // The D-Bus layer dup()s the FD into the reply message, so we own a
 // now-redundant copy.  Post the close so it runs after the reply is
@@ -122,27 +123,58 @@ static void
         std::array<const char*, 1>{"xyz.openbmc_project.Inventory.Item.Cpu"});
 }
 
-using IstRecordCb = std::move_only_function<void(const IstRecord&)>;
+using CpuNameCb = std::move_only_function<void(const std::string&)>;
+using NoCpuCb = std::move_only_function<void(CpuNameCb)>;
 
-// Waits for entity-manager to publish the IST record, retrying every few
-// seconds, since this service can start before entity-manager has probed.
-static void
-    read_ist_record(const std::shared_ptr<sdbusplus::asio::connection>& conn,
-                    const std::shared_ptr<boost::asio::steady_timer>& timer,
-                    IstRecordCb done)
+// Calls found with the name of the first of paths[i..] whose Kind is cpu,
+// or none if there is no such record.
+static void find_cpu(const std::shared_ptr<sdbusplus::asio::connection>& conn,
+                     std::vector<std::string> paths, size_t i, CpuNameCb found,
+                     NoCpuCb none)
 {
-    auto retry = [conn, timer](IstRecordCb cb) {
+    if (i == paths.size())
+    {
+        none(std::move(found));
+        return;
+    }
+    const std::string path = paths[i];
+    conn->async_method_call(
+        [conn, paths = std::move(paths), i, found = std::move(found),
+         none =
+             std::move(none)](const boost::system::error_code& ec,
+                              const std::variant<std::string>& kind) mutable {
+            if (!ec && std::get<std::string>(kind) == "cpu")
+            {
+                found(sdbusplus::object_path(paths[i]).filename());
+                return;
+            }
+            find_cpu(conn, std::move(paths), i + 1, std::move(found),
+                     std::move(none));
+        },
+        "xyz.openbmc_project.EntityManager", path,
+        "org.freedesktop.DBus.Properties", "Get", nv_device_iface, "Kind");
+}
+
+// Waits for entity-manager to publish a CPU NvDevice record (Kind cpu) and
+// returns its name, retrying every few seconds, since this service can
+// start before entity-manager has probed.
+static void
+    read_cpu_name(const std::shared_ptr<sdbusplus::asio::connection>& conn,
+                  const std::shared_ptr<boost::asio::steady_timer>& timer,
+                  CpuNameCb done)
+{
+    NoCpuCb retry = [conn, timer](CpuNameCb cb) {
         constexpr auto retry_delay = std::chrono::seconds(5);
         constexpr int missing_after_tries = 36; // 3 minutes
         static int tries = 0;
         if (++tries == 1)
         {
-            lg2::info("IST: waiting for the entity-manager IST record");
+            lg2::info("IST: waiting for the entity-manager CPU records");
         }
         else if (tries == missing_after_tries)
         {
             lg2::error(
-                "IST: no entity-manager IST record after {SECONDS} s; the "
+                "IST: no entity-manager CPU record after {SECONDS} s; the "
                 "in-system test is unavailable on this board until it "
                 "appears",
                 "SECONDS", missing_after_tries * retry_delay.count());
@@ -152,38 +184,26 @@ static void
                               const boost::system::error_code& ec) mutable {
             if (!ec)
             {
-                read_ist_record(conn, timer, std::move(cb));
+                read_cpu_name(conn, timer, std::move(cb));
             }
         });
     };
     conn->async_method_call(
-        [conn, retry, done = std::move(done)](
-            const boost::system::error_code& ec,
-            const std::vector<std::string>& paths) mutable {
-            if (ec || paths.empty())
+        [conn, retry = std::move(retry),
+         done = std::move(done)](const boost::system::error_code& ec,
+                                 std::vector<std::string> paths) mutable {
+            if (ec)
             {
-                retry(std::move(done));
-                return;
+                paths.clear();
             }
-            conn->async_method_call(
-                [retry,
-                 done = std::move(done)](const boost::system::error_code& ec2,
-                                         const IstRecord& record) mutable {
-                    if (ec2)
-                    {
-                        retry(std::move(done));
-                        return;
-                    }
-                    done(record);
-                },
-                "xyz.openbmc_project.EntityManager", paths.front(),
-                "org.freedesktop.DBus.Properties", "GetAll", ist_record_iface);
+            find_cpu(conn, std::move(paths), 0, std::move(done),
+                     std::move(retry));
         },
         "xyz.openbmc_project.ObjectMapper",
         "/xyz/openbmc_project/object_mapper",
         "xyz.openbmc_project.ObjectMapper", "GetSubTreePaths",
         "/xyz/openbmc_project/inventory", 0,
-        std::array<const char*, 1>{ist_record_iface});
+        std::array<const char*, 1>{nv_device_iface});
 }
 
 int main(int, char**)
@@ -200,19 +220,19 @@ int main(int, char**)
         return 1;
     }
 
-    // Run the loop only until the record arrives; the rest of startup needs
-    // softwareInventoryId for the object path.
-    std::optional<IstRecord> record;
-    read_ist_record(conn, std::make_shared<boost::asio::steady_timer>(io),
-                    [&](const IstRecord& r) {
-                        record = r;
-                        io.stop();
-                    });
+    // Run the loop only until a CPU record arrives; the rest of startup
+    // needs softwareInventoryId for the object path.
+    std::optional<std::string> cpu_name;
+    read_cpu_name(conn, std::make_shared<boost::asio::steady_timer>(io),
+                  [&](const std::string& name) {
+                      cpu_name = name;
+                      io.stop();
+                  });
     io.run();
     io.restart();
-    if (!record || !apply_ist_record(platform_cfg, *record))
+    if (!cpu_name || !apply_cpu_name(platform_cfg, *cpu_name))
     {
-        lg2::error("IST: invalid entity-manager IST record, exiting");
+        lg2::error("IST: no usable entity-manager CPU record, exiting");
         return 1;
     }
 

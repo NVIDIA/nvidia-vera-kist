@@ -321,26 +321,26 @@ bool parse_platform_config(IstPlatformConfig& out, const std::string& path,
     return true;
 }
 
-bool apply_ist_record(IstPlatformConfig& out, const IstRecord& record)
+bool apply_cpu_name(IstPlatformConfig& out, std::string_view cpu_name)
 {
-    auto it = record.find("SoftwareInventoryId");
-    const auto* id =
-        it == record.end() ? nullptr : std::get_if<std::string>(&it->second);
-    if (id == nullptr)
+    const auto pos = cpu_name.rfind("CPU_");
+    const auto prefix = cpu_name.substr(0, pos);
+    const auto index = pos == std::string_view::npos ? std::string_view{}
+                                                     : cpu_name.substr(pos + 4);
+    const auto is_digit = [](char c) {
+        return std::isdigit(static_cast<unsigned char>(c)) != 0;
+    };
+    const auto is_name_char = [](char c) {
+        return std::isalnum(static_cast<unsigned char>(c)) != 0 || c == '_';
+    };
+    if (index.empty() || !std::ranges::all_of(index, is_digit) ||
+        !std::ranges::all_of(prefix, is_name_char))
     {
-        lg2::error("SoftwareInventoryId is missing or not a string");
+        lg2::error("Not a CPU record name: {NAME}", "NAME", cpu_name);
         return false;
     }
-    if (id->empty() || std::any_of(id->begin(), id->end(), [](char c) {
-            return std::isalnum(static_cast<unsigned char>(c)) == 0 && c != '_';
-        }))
-    {
-        lg2::error("SoftwareInventoryId contains invalid characters: {ID}",
-                   "ID", *id);
-        return false;
-    }
-    out.software_inventory_id = *id;
-    out.cak_bypass = record.contains("DotObjectPrefix");
+    out.software_inventory_id = std::string(prefix) + "IST_Vectors";
+    out.cak_bypass = true;
     return true;
 }
 

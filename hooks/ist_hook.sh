@@ -108,7 +108,7 @@ function sys_rst() {
         exit 1
     fi
 
-    # Set only when the IST record has DotObjectPrefix; a missing script fails.
+    # A missing CAK bypass script fails the run.
     if [ "$skip_cak" = false ] && [ -n "$IST_DOT_PREFIX" ]; then
         echo "Running CAK bypass script: $cak"
         if ! "$cak"; then

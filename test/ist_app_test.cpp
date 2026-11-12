@@ -351,15 +351,11 @@ class IstServiceTest : public ::testing::Test
         {
             return false;
         }
-        IstRecord record{{"SoftwareInventoryId", "IST_Vectors"}};
-        if (cak_bypass_)
-        {
-            record["DotObjectPrefix"] = "/xyz/openbmc_project/DOT/IRoT_CPU_";
-        }
-        if (!apply_ist_record(cfg, record))
+        if (!apply_cpu_name(cfg, "CPU_0"))
         {
             return false;
         }
+        cfg.cak_bypass = cak_bypass_;
         cfg.signing_key_path = tmp_dir_ / "verify_key.pem";
         service_->set_signature_verifier(
             [](const IstPlatformConfig&, DoneCb cb) { cb(true); });
@@ -372,8 +368,8 @@ class IstServiceTest : public ::testing::Test
         f << content;
     }
 
-    // Gives the IST record a DotObjectPrefix and, if asked, adds an
-    // executable ist_cak_bypass.sh to the hook directory.
+    // Turns the CAK bypass on and, if asked, adds an executable
+    // ist_cak_bypass.sh to the hook directory.
     void declare_cak_bypass(bool install_script)
     {
         cak_bypass_ = true;
@@ -503,46 +499,29 @@ TEST_F(IstServiceTest, InitializeRejectsDoubleInit)
     EXPECT_FALSE(init_from_file(config_path_));
 }
 
-TEST(IstRecordTest, AppliesSoftwareInventoryId)
+TEST(CpuNameTest, BmcCpuName)
 {
     IstPlatformConfig cfg;
-    ASSERT_TRUE(
-        apply_ist_record(cfg, {{"SoftwareInventoryId", "Custom_Vectors"}}));
-    EXPECT_EQ(cfg.software_inventory_id, "Custom_Vectors");
-    EXPECT_FALSE(cfg.cak_bypass);
+    ASSERT_TRUE(apply_cpu_name(cfg, "CPU_0"));
+    EXPECT_EQ(cfg.software_inventory_id, "IST_Vectors");
+    EXPECT_TRUE(cfg.cak_bypass);
 }
 
-TEST(IstRecordTest, SoftwareInventoryIdAcceptsUnderscoresAndDigits)
+TEST(CpuNameTest, HmcCpuName)
 {
     IstPlatformConfig cfg;
-    ASSERT_TRUE(apply_ist_record(cfg, {{"SoftwareInventoryId", "___123___"}}));
-    EXPECT_EQ(cfg.software_inventory_id, "___123___");
+    ASSERT_TRUE(apply_cpu_name(cfg, "HGX_CPU_12"));
+    EXPECT_EQ(cfg.software_inventory_id, "HGX_IST_Vectors");
 }
 
-TEST(IstRecordTest, SoftwareInventoryIdRejectsInvalidValues)
+TEST(CpuNameTest, RejectsOtherNames)
 {
-    for (const char* id : {"bad/path", "bad-id", "bad id", "bad.id", ""})
+    for (const char* name :
+         {"GPU_0", "CPU_", "CPU_x", "HGX_CPU", "bad-CPU_0", "bad/CPU_0", ""})
     {
         IstPlatformConfig cfg;
-        EXPECT_FALSE(apply_ist_record(cfg, {{"SoftwareInventoryId", id}}))
-            << id;
+        EXPECT_FALSE(apply_cpu_name(cfg, name)) << name;
     }
-}
-
-TEST(IstRecordTest, SoftwareInventoryIdMissingOrNotString)
-{
-    IstPlatformConfig cfg;
-    EXPECT_FALSE(apply_ist_record(cfg, {}));
-    EXPECT_FALSE(apply_ist_record(cfg, {{"SoftwareInventoryId", uint64_t{1}}}));
-}
-
-TEST(IstRecordTest, DotObjectPrefixEnablesCakBypass)
-{
-    IstPlatformConfig cfg;
-    ASSERT_TRUE(apply_ist_record(
-        cfg, {{"SoftwareInventoryId", "IST_Vectors"},
-              {"DotObjectPrefix", "/xyz/openbmc_project/DOT/IRoT_CPU_"}}));
-    EXPECT_TRUE(cfg.cak_bypass);
 }
 
 TEST_F(IstServiceTest, StartUpdateBeforeInitializeThrows)

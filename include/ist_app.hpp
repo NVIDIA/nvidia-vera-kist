@@ -101,8 +101,7 @@ struct IstPlatformConfig
         "/usr/share/ist/kist_itm_verify_key.pem"};
     HookPaths hooks;
     StoragePaths storage;
-    // The IST record has DotObjectPrefix: run ist_cak_bypass.sh before the
-    // test.
+    // Run ist_cak_bypass.sh before the test.
     bool cak_bypass{false};
     std::chrono::seconds transfer_inactivity_timeout{60};
     std::chrono::seconds transfer_progress_interval{120};
@@ -327,12 +326,10 @@ inline constexpr std::string_view trusted_hook_root = "/usr/share/ist/hooks";
 bool parse_platform_config(IstPlatformConfig& out, const std::string& path,
                            std::string_view hook_root = trusted_hook_root);
 
-// Properties of the entity-manager xyz.openbmc_project.Configuration.IST
-// record, which carries softwareInventoryId and the CAK bypass decision.
-using IstRecord =
-    std::map<std::string,
-             std::variant<std::string, uint64_t, int64_t, double, bool>>;
-bool apply_ist_record(IstPlatformConfig& out, const IstRecord& record);
+// Takes the platform's name prefix from the name of a CPU NvDevice record
+// (HGX_CPU_0 on the HMC, CPU_0 on a BMC): the software inventory id is
+// <prefix>IST_Vectors and the CAK bypass is sent.
+bool apply_cpu_name(IstPlatformConfig& out, std::string_view cpu_name);
 void resolve_itm_paths(IstPlatformConfig& cfg);
 
 struct PldmComponentInfo;

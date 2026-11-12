@@ -226,7 +226,9 @@ TEST_F(HookRunnerTest, SIGKILLEscalationWhenSIGTERMIgnored)
 class IstEmTest : public HookRunnerTest
 {
   protected:
-    bool load(const std::string& records, const std::string& expect)
+    bool load(const std::string& records, const std::string& expect,
+              const std::string& value = "$IST_CPU0_EID $IST_CPU1_EID|"
+                                         "$IST_D0_CPUS")
     {
         std::ofstream(tmp_dir_ / "records") << board << records;
         std::ofstream(tmp_dir_ / "busctl") << R"(#!/bin/bash
@@ -250,17 +252,15 @@ fi
             "/bin/bash", "test-ist-em", [&](bool ok) { result = ok; },
             {"-c", "PATH=" + tmp_dir_.string() +
                        ":$PATH; . " IST_HOOKS_DIR
-                       "/ist_em.sh && ist_em_load && test \"$IST_CPU0_EID "
-                       "$IST_CPU1_EID|$IST_D0_CPUS\" = \"" +
-                       expect + "\""},
+                       "/ist_em.sh && ist_em_load && test \"" +
+                       value + "\" = \"" + expect + "\""},
             10s);
         io_.restart();
         io_.run();
         return result;
     }
 
-    static constexpr auto board = "IST /b/IST Name s \"IST\"\n"
-                                  "ISTDomain /b/D0 Index t 0\n"
+    static constexpr auto board = "ISTDomain /b/D0 Index t 0\n"
                                   "ISTDomain /b/D0 Cpus at 2 0 1\n";
 
     static std::string nv_device(const std::string& name,
@@ -298,26 +298,31 @@ TEST_F(IstEmTest, CpusFromUSBRCMRecoveryWithoutCpuNvDevice)
 
 TEST_F(IstEmTest, NvDeviceTakesPrecedenceOverUSBRCMRecovery)
 {
-    EXPECT_TRUE(
-        load(nv_device("HGX_CPU_0", "cpu", 14) + usbrcm("HGX_FW_CPU_1", 24),
-             "14 |0"));
+    EXPECT_TRUE(load(nv_device("HGX_CPU_0", "cpu", 14) +
+                         nv_device("HGX_CPU_1", "cpu", 15) +
+                         usbrcm("HGX_FW_CPU_1", 24),
+                     "14 15|0 1"));
 }
 
-// The domain declares two CPUs but the board fits one.
-TEST_F(IstEmTest, RequiredCpusAboveFittedFails)
+// The domain lists two CPUs and the board fits one (MGX C1): CPU 1 is left
+// out and the CAK bypass needs only CPU 0.
+TEST_F(IstEmTest, UnfittedDomainCpuLeftOut)
 {
-    const std::string req = "IST /b/IST RequiredCpus t ";
-    EXPECT_TRUE(load(req + "1\n" + nv_device("CPU_0", "cpu", 16), "16 |0"));
-    EXPECT_FALSE(load(req + "2\n" + nv_device("CPU_0", "cpu", 16), "16 |0"));
-    EXPECT_TRUE(
-        load(req + "2\n" + usbrcm("FW_CPU_0", 16) + usbrcm("FW_CPU_1", 17),
-             "16 17|0 1"));
+    const std::string value = "$IST_CPU0_EID|$IST_D0_CPUS|$IST_REQUIRE_CPUS";
+    EXPECT_TRUE(load(nv_device("CPU_0", "cpu", 16), "16|0|1", value));
+    EXPECT_TRUE(load(usbrcm("FW_CPU_0", 16), "16|0|1", value));
 }
 
-// An absent RequiredCpus is no floor; one that cannot be read is an error.
-TEST_F(IstEmTest, UnreadableRequiredCpusFails)
+// The CAK bypass DOT objects share the CPU records' platform prefix.
+TEST_F(IstEmTest, DotPrefixFromCpuNames)
 {
-    EXPECT_FALSE(
-        load("IST /b/IST RequiredCpus FAIL\n" + nv_device("CPU_0", "cpu", 16),
-             "16 |0"));
+    const std::string value = "$IST_DOT_PREFIX $IST_REQUIRE_CPUS";
+    EXPECT_TRUE(load(nv_device("HGX_CPU_0", "cpu", 14) +
+                         nv_device("HGX_CPU_1", "cpu", 15),
+                     "/xyz/openbmc_project/DOT/HGX_IRoT_CPU_ 2", value));
+    EXPECT_TRUE(
+        load(nv_device("CPU_0", "cpu", 16) + nv_device("CPU_1", "cpu", 17),
+             "/xyz/openbmc_project/DOT/IRoT_CPU_ 2", value));
+    EXPECT_TRUE(load(usbrcm("HGX_FW_CPU_0", 16) + usbrcm("HGX_FW_CPU_1", 17),
+                     "/xyz/openbmc_project/DOT/HGX_IRoT_CPU_ 2", value));
 }

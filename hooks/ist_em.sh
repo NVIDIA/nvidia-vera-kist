@@ -2,11 +2,13 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES.
 # All rights reserved. SPDX-License-Identifier: Apache-2.0
 
-# Board facts for the IST hooks, from the entity-manager IST and ISTDomain
-# records and the CPU NvDevice records, or USBRCMRecovery records where
-# there are none. ist_em_load sets IST_DOMAINS, IST_D<n>_* and
-# IST_CPU<i>_EID plus the reset, CAK and timing variables. A domain CPU
-# with no such record is not fitted and is left out.
+# Board facts for the IST hooks, from the entity-manager ISTDomain records
+# and the CPU NvDevice records, or USBRCMRecovery records where there are
+# none. ist_em_load sets IST_DOMAINS, IST_D<n>_* and IST_CPU<i>_EID plus
+# the reset, CAK and timing variables. A domain CPU with no such record is
+# not fitted and is left out (MGX C1 drops CPU 1); the fitted CPUs must all
+# be present for the CAK bypass. The CPU record names carry the platform
+# prefix (HGX_CPU_0, CPU_0), which the CAK bypass DOT objects share.
 
 EM_SERVICE="xyz.openbmc_project.EntityManager"
 EM_CFG="xyz.openbmc_project.Configuration"
@@ -44,26 +46,17 @@ function em_set() {
     [ "$rc" -ne 2 ]
 }
 
+# shellcheck disable=SC2034 # the hooks that source this file read them
 function ist_em_load() {
-    local p d c v t e paths cpus fitted=0
+    local p d c v t e paths cpus prefix="" fitted=0
 
     [ -n "$IST_EM_LOADED" ] && return 0
-    p=$(em_paths IST | head -n 1)
-    if [ -z "$p" ]; then
-        echo "No IST configuration in entity-manager" >&2
-        return 1
-    fi
-    em_set IST_RESET_METHOD "$p" IST ResetMethod gpio
-    em_set IST_RESET_COMMAND "$p" IST ResetCommand
-    em_set IST_DOT_PREFIX "$p" IST DotObjectPrefix
-    if ! em_set IST_REQUIRE_CPUS "$p" IST RequiredCpus; then
-        echo "Cannot read IST RequiredCpus" >&2
-        return 1
-    fi
-    em_set IST_SHDN_TIMEOUT_S "$p" IST ShutdownOkTimeoutS 10
-    em_set IST_SHDN_POLL_S "$p" IST ShutdownOkPollS 0.2
-    em_set IST_SYS_RST_HOLD_S "$p" IST SysResetHoldS 5
-    em_set IST_EID_TIMEOUT_S "$p" IST EidTimeoutS 45
+    IST_RESET_METHOD=gpio
+    IST_RESET_COMMAND=""
+    IST_SHDN_TIMEOUT_S=10
+    IST_SHDN_POLL_S=0.2
+    IST_SYS_RST_HOLD_S=5
+    IST_EID_TIMEOUT_S=45
 
     # CPU_<i> / HGX_CPU_<i> NvDevice of Kind cpu; without one, the
     # FW_CPU_<i> / HGX_FW_CPU_<i> USBRCMRecovery records.
@@ -79,8 +72,11 @@ function ist_em_load() {
         v=$(em_get "$p" "$t" Name) || continue
         c=${v##*_}
         [[ "$c" =~ ^[0-9]+$ ]] || continue
+        prefix=${v%CPU_*}
+        prefix=${prefix%FW_}
         em_set "IST_CPU${c}_EID" "$p" "$t" "$e"
     done
+    IST_DOT_PREFIX="/xyz/openbmc_project/DOT/${prefix}IRoT_CPU_"
 
     IST_DOMAINS=""
     for p in $(em_paths ISTDomain); do
@@ -104,10 +100,6 @@ function ist_em_load() {
     done
     # shellcheck disable=SC2086 # one index per word
     IST_DOMAINS=$(printf '%s\n' $IST_DOMAINS | sort -n | tr '\n' ' ')
-    if [ -n "$IST_REQUIRE_CPUS" ] && [ "$IST_REQUIRE_CPUS" -gt "$fitted" ]; then
-        echo "IST RequiredCpus $IST_REQUIRE_CPUS exceeds the $fitted CPUs" \
-            "fitted on this board" >&2
-        return 1
-    fi
+    IST_REQUIRE_CPUS=$fitted
     IST_EM_LOADED=1
 }

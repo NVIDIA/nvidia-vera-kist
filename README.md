@@ -71,24 +71,24 @@ reads its storage paths. The board's facts come from entity-manager records
 (schema `nvidia_ist.json` in entity-manager), which the daemon and the hooks
 read over D-Bus:
 
-| `IST` record (one per board) | Meaning                                                                                                                                                                                    |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `SoftwareInventoryId`        | Name of the vector inventory object, `/xyz/openbmc_project/inventory_software/<id>`                                                                                                        |
-| `ResetMethod`                | `gpio` (default): drive the reset lines. `command`: run `ResetCommand`. `hostWarmReboot`: request `ForceWarmReboot` from x86-power-control and wait for `CpuResetIndicator` to go 0 then 1 |
-| `ResetCommand`               | Command for `ResetMethod` `command`                                                                                                                                                        |
-| `DotObjectPrefix`            | Present: CAK bypass on (the daemon runs `ist_cak_bypass.sh` after the power cycle and fails the run if it is missing); the CPU index is appended                                           |
-| `RequiredCpus`               | Fewer CPUs present means a partial machine: skip the bypass                                                                                                                                |
-| Timings                      | `ShutdownOkTimeoutS` (10), `ShutdownOkPollS` (0.2), `SysResetHoldS` (5), `EidTimeoutS` (45)                                                                                                |
+The platform name prefix (`HGX_` on the HMC, none on a BMC) comes from the name
+of the CPU `NvDevice` records (`HGX_CPU_<i>`, `CPU_<i>`). The vector inventory
+object is `/xyz/openbmc_project/inventory_software/<prefix>IST_Vectors`, and the
+CAK bypass (`ist_cak_bypass.sh`, run after the power cycle; the run fails if it
+is missing) goes to `/xyz/openbmc_project/DOT/<prefix>IRoT_CPU_<i>`. The bypass
+is skipped when fewer than the fitted CPUs are present. CPUs are reset through
+the domain GPIOs, with fixed timings: 10 s for ShutdownOk (polled every 0.2 s),
+a 5 s system-reset hold and 45 s for the EIDs.
 
-| `ISTDomain` record (one per set of IST lines)    | Meaning                                                                       |
-| ------------------------------------------------ | ----------------------------------------------------------------------------- |
-| `Name`, `Index`                                  | Name used in hook messages; domains run in `Index` order                      |
-| `BootGpio`                                       | Driven 1 by `ist_boot_enable.sh` and 0 by `ist_boot_disable.sh`               |
-| `PreResetGpio`, `ShutdownOkGpio`, `SysResetGpio` | CPU reset lines for `ResetMethod` `gpio`                                      |
-| `Detect`                                         | Present only if its GPIO lines are found (vr-nvl single-CPU SKU); `gpio` only |
-| `Cpus`                                           | CPU indices reset with this domain                                            |
+| `ISTDomain` record (one per set of IST lines)    | Meaning                                                          |
+| ------------------------------------------------ | ---------------------------------------------------------------- |
+| `Name`, `Index`                                  | Name used in hook messages; domains run in `Index` order         |
+| `BootGpio`                                       | Driven 1 by `ist_boot_enable.sh` and 0 by `ist_boot_disable.sh`  |
+| `PreResetGpio`, `ShutdownOkGpio`, `SysResetGpio` | CPU reset lines                                                  |
+| `Detect`                                         | Present only if its GPIO lines are found (vr-nvl single-CPU SKU) |
+| `Cpus`                                           | CPU indices reset with this domain                               |
 
-A CPU's MCTP EID comes from its `USBRCMRecovery` record (`FW_CPU_<i>` or
-`HGX_FW_CPU_<i>`, `MctpEID`); a CPU with no such record is not fitted, which is
-how the MGX C1 drops CPU 1. The hooks exit 1 when there is no `IST` record, and
-the daemon waits for one before it starts.
+A CPU's MCTP EID comes from its `NvDevice` record (Kind `cpu`, `EID`), or from
+its `USBRCMRecovery` record (`FW_CPU_<i>` or `HGX_FW_CPU_<i>`, `MctpEID`) where
+there is none; a CPU with no record is not fitted, which is how the MGX C1 drops
+CPU 1. The daemon waits for a CPU `NvDevice` record before it starts.
